@@ -85,6 +85,24 @@ class UpgradeProgram:
     num_students: int
 
 # ----------------------
+# Tiny Test Syllabi
+# ----------------------
+TEST_MQT_SYLLABUS = [
+    SyllabusEvent("OBFM", EventType.SORTIE, Qual.WG, num_student=1),
+    SyllabusEvent("ACM", EventType.SORTIE, Qual.WG, num_blue_wg=1)
+]
+
+TEST_FLUG_SYLLABUS = [
+    SyllabusEvent("OBFM", EventType.SORTIE, Qual.WG, num_student=1),
+    SyllabusEvent("ACM", EventType.SORTIE, Qual.WG, num_blue_wg=1)
+]
+
+TEST_IPUG_SYLLABUS = [
+    SyllabusEvent("OBFM", EventType.SORTIE, Qual.FL, num_student=1),
+    SyllabusEvent("ACM", EventType.SORTIE, Qual.FL, num_blue_fl=1)
+]
+
+# ----------------------
 # MQT Syllabus
 # ----------------------
 MQT_SYLLABUS = [
@@ -437,9 +455,12 @@ def run_phase(cfg: SquadronConfig, allocation_noise: float = 0.0):
 
     allocate_all_sorties(
         pilots=pilots,
-        mqt_syllabus=MQT_SYLLABUS,
-        flug_syllabus=FLUG_SYLLABUS,
-        ipug_syllabus=IPUG_SYLLABUS,
+        # mqt_syllabus=MQT_SYLLABUS,
+        # flug_syllabus=FLUG_SYLLABUS,
+        # ipug_syllabus=IPUG_SYLLABUS,
+        mqt_syllabus=TEST_MQT_SYLLABUS,
+        flug_syllabus=TEST_FLUG_SYLLABUS,
+        ipug_syllabus=TEST_IPUG_SYLLABUS,
         mqt_students=cfg.mqt_students,
         flug_students=cfg.flug_students,
         ipug_students=cfg.ipug_students,
@@ -456,23 +477,26 @@ def run_phase(cfg: SquadronConfig, allocation_noise: float = 0.0):
 # ----------------------
 # Print Phase Summary
 # ----------------------
+# ----------------------
+# Print Phase Summary
+# ----------------------
 def print_phase_summary(pilots: List[Pilot], cfg: SquadronConfig):
     # Define the groups you want
     wingmen_groups = [
-        ("MQT WG", Qual.WG, Upgrade.MQT),
-        ("WG", Qual.WG, Upgrade.NONE),
-        ("FLUG WG", Qual.WG, Upgrade.FLUG)
+        ("MQT WG", Qual.WG, Upgrade.MQT, 9),
+        ("WG", Qual.WG, Upgrade.NONE, 9),
+        ("FLUG WG", Qual.WG, Upgrade.FLUG, 9)
     ]
     flight_leads_groups = [
-        ("FL", Qual.FL, Upgrade.NONE),
-        ("IPUG FL", Qual.FL, Upgrade.IPUG)
+        ("FL", Qual.FL, Upgrade.NONE, 8),
+        ("IPUG FL", Qual.FL, Upgrade.IPUG, 8)
     ]
     instructor_pilots_group = [
-        ("IP", Qual.IP, None)  # All IPs regardless of upgrade
+        ("IP", Qual.IP, None, 8)  # All IPs regardless of upgrade
     ]
 
     # ----------------------
-    # Helper to calculate average monthly sorties & RAP
+    # Helper to calculate average monthly sorties
     # ----------------------
     def avg_monthly_sortie(p_list):
         if not p_list:
@@ -480,56 +504,41 @@ def print_phase_summary(pilots: List[Pilot], cfg: SquadronConfig):
         return sum(p.sortie_monthly for p in p_list)/len(p_list)
 
     # ----------------------
-    # Calculate RAP shortfall internally for all six sub-groups
-    # ----------------------
-    rap_data = {}
-    for name, qual, upgrade in wingmen_groups + flight_leads_groups + instructor_pilots_group:
-        subgroup = [p for p in pilots if p.qual == qual and (upgrade is None or p.upgrade == upgrade)]
-        avg_monthly = avg_monthly_sortie(subgroup)
-        if qual == Qual.WG:
-            rap_data[name] = max(0, 9 - avg_monthly)
-        elif qual == Qual.FL:
-            rap_data[name] = max(0, 8 - avg_monthly)
-        elif qual == Qual.IP:
-            rap_data[name] = max(0, 8 - avg_monthly)
-
-    # ----------------------
-    # Print only the monthly RAP summary
+    # Print summary
     # ----------------------
     print("=== Monthly RAP Summary ===")
-    for name in rap_data:
-        print(f"{name}: {rap_data[name]:.2f}")
+    for name, qual, upgrade, target in wingmen_groups + flight_leads_groups + instructor_pilots_group:
+        subgroup = [p for p in pilots if p.qual == qual and (upgrade is None or p.upgrade == upgrade)]
+        avg_monthly = avg_monthly_sortie(subgroup)
+        shortfall = max(0, target - avg_monthly)
+        print(f"{name}: {avg_monthly:.1f} ({shortfall:.1f})")
+
 
 # ----------------------
 # Example Run
 # ----------------------
 if __name__ == "__main__":
     cfg = SquadronConfig(
-        ute=10,
-        paa=21,
-        mqt_students=4,
-        flug_students=4,
-        ipug_students=2,
-        total_pilots=30,
-        experience_ratio=0.6,
-        ip_qty=5
+        ute=2,
+        paa=1,
+        mqt_students=1,
+        flug_students=1,
+        ipug_students=1,
+        total_pilots=6,
+        experience_ratio=0.5,
+        ip_qty=1,
+        phase_length_days=30
     )
 
     # ----------------------
     # Run Phase
     # ----------------------
-    pilots = run_phase(cfg)
+    pilots = run_phase(cfg, allocation_noise=0.0)
 
     # ----------------------
     # Print Monthly RAP Summary for key sub-groups
     # ----------------------
     print_phase_summary(pilots, cfg)
 
-
-    # ----------------------
-    # Run Phase
-    # ----------------------
-    pilots = run_phase(cfg, allocation_noise=0.0)
-    print_phase_summary(pilots, cfg)
 
 
