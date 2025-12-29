@@ -98,7 +98,7 @@ TEST_FLUG_SYLLABUS = [
 ]
 
 TEST_IPUG_SYLLABUS = [
-    SyllabusEvent("OBFM", EventType.SORTIE, Qual.FL, num_student=1, num_blue_fl=1),
+    SyllabusEvent("OBFM", EventType.SORTIE, Qual.FL, num_student=1, num_instructor=1),
     # SyllabusEvent("ACM", EventType.SORTIE, Qual.FL, num_blue_fl=1)
 ]
 
@@ -304,49 +304,37 @@ def allocate_all_sorties(
     sim_per_month: float = 3,
     allocation_noise: float = 0.0
 ):
-    """
-    Allocate all sorties for a phase:
-    1. Upgrade sorties for MQT, FLUG, and IPUG students
-    2. Remaining capacity allocated to continuation training proportionally
-    3. Add simulator sorties
-    """
+    import random
 
     # ----------------------
     # Step 1: Select upgrade students
     # ----------------------
-    def select_upgrade_students(upgrade_type: Upgrade, count: int, pilots: List[Pilot]) -> List[Pilot]:
-        """
-        Selects 'count' pilots eligible for the given upgrade and assigns the upgrade to them.
-        Modifies the actual pilot objects in 'pilots'.
-        """
+    def select_upgrade_students(upgrade_type: Upgrade, count: int) -> List[Pilot]:
         if upgrade_type in [Upgrade.MQT, Upgrade.FLUG]:
             candidates = [p for p in pilots if p.upgrade == Upgrade.NONE and p.qual == Qual.WG]
         elif upgrade_type == Upgrade.IPUG:
             candidates = [p for p in pilots if p.upgrade == Upgrade.NONE and p.qual == Qual.FL]
         else:
             candidates = []
-
         selected = candidates[:count]
         for p in selected:
-            p.upgrade = upgrade_type  # Assign the upgrade to the pilot object
-
-        # Debug print to verify selection
-        print(f"{upgrade_type.value} selected students:", [(p.qual.value, p.upgrade.value) for p in selected])
-
+            p.upgrade = upgrade_type
+            
+            # Debug print to verify selection
+            print(f"{upgrade_type.value} selected students:", [(p.qual.value, p.upgrade.value) for p in selected])
         return selected
 
-    mqt_students_list = select_upgrade_students(Upgrade.MQT, mqt_students, pilots)
-    flug_students_list = select_upgrade_students(Upgrade.FLUG, flug_students, pilots)
-    ipug_students_list = select_upgrade_students(Upgrade.IPUG, ipug_students, pilots)
+    mqt_students_list = select_upgrade_students(Upgrade.MQT, mqt_students)
+    flug_students_list = select_upgrade_students(Upgrade.FLUG, flug_students)
+    ipug_students_list = select_upgrade_students(Upgrade.IPUG, ipug_students)
+
 
     # ----------------------
-    # Step 2: Allocate upgrade syllabus
+    # Step 2: Allocate upgrade syllabus sorties
     # ----------------------
-
     def allocate_syllabus(
         syllabus: List[SyllabusEvent],
         upgrade_students: List[Pilot],
-        syllabus_type: Upgrade,
         pilots: List[Pilot],
         allocation_noise: float = 0.0
     ):
@@ -354,107 +342,57 @@ def allocate_all_sorties(
         Allocate sorties for a syllabus with STRICT seat rules:
         - num_student → ONLY the assigned upgrade student
         - num_instructor → ONLY IPs
-        - blue/red seats → equitable across eligible pilots
+        - blue slots → equitable across eligible pilots
+        - red slots → allocated later in CT
         """
+        import random
 
-        for student in upgrade_students:
-            for event in syllabus:
-
-                # ----------------------
-                # STUDENT SORTIES (HARD-BOUND)
-                # ----------------------
+        for event in syllabus:
+            # ----------------------
+            # STUDENT SORTIES (Upgrade Students Only)
+            # ----------------------
+            for student in upgrade_students:
                 for _ in range(event.num_student):
                     student.sortie_monthly += 1
                     student.sortie_blue_monthly += 1
 
-                # ----------------------
-                # INSTRUCTOR SORTIES (IP ONLY)
-                # ----------------------
-                for _ in range(event.num_instructor):
-                    eligible_ips = [p for p in pilots if p.qual == Qual.IP]
-                    if not eligible_ips:
-                        continue
+            # ----------------------
+            # INSTRUCTOR SORTIES (IP Only)
+            # ----------------------
+            for _ in range(event.num_instructor):
+                eligible_ips = [p for p in pilots if p.qual == Qual.IP]
+                if not eligible_ips:
+                    continue
+                # Pick the IP with fewest sorties (add random noise for tie-break)
+                eligible_ips.sort(
+                    key=lambda p: p.sortie_monthly + random.uniform(0, allocation_noise)
+                )
+                ip = eligible_ips[0]
+                ip.sortie_monthly += 1
+                ip.sortie_blue_monthly += 1
 
-                    eligible_ips.sort(
-                        key=lambda p: p.sortie_monthly + random.uniform(0, allocation_noise)
-                    )
-                    ip = eligible_ips[0]
-                    ip.sortie_monthly += 1
-                    ip.sortie_blue_monthly += 1
-
-                # ----------------------
-                # BLUE WG
-                # ----------------------
-                for _ in range(event.num_blue_wg):
-                    eligible = [p for p in pilots if p.qual == Qual.WG]
-                    if not eligible:
-                        continue
-
-                    eligible.sort(
-                        key=lambda p: p.sortie_monthly + random.uniform(0, allocation_noise)
-                    )
-                    selected = eligible[0]
-                    selected.sortie_monthly += 1
-                    selected.sortie_blue_monthly += 1
-
-                # ----------------------
-                # BLUE FL
-                # ----------------------
-                for _ in range(event.num_blue_fl):
-                    eligible = [p for p in pilots if p.qual == Qual.FL]
-                    if not eligible:
-                        continue
-
-                    eligible.sort(
-                        key=lambda p: p.sortie_monthly + random.uniform(0, allocation_noise)
-                    )
-                    selected = eligible[0]
-                    selected.sortie_monthly += 1
-                    selected.sortie_blue_monthly += 1
-
-                # ----------------------
-                # RED WG
-                # ----------------------
-                for _ in range(event.num_red_wg):
-                    eligible = [p for p in pilots if p.qual == Qual.WG]
-                    if not eligible:
-                        continue
-
-                    eligible.sort(
-                        key=lambda p: p.sortie_monthly + random.uniform(0, allocation_noise)
-                    )
-                    selected = eligible[0]
-                    selected.sortie_monthly += 1
-                    selected.sortie_red_monthly += 1
-
-                # ----------------------
-                # RED FL
-                # ----------------------
-                for _ in range(event.num_red_fl):
-                    eligible = [p for p in pilots if p.qual == Qual.FL]
-                    if not eligible:
-                        continue
-
-                    eligible.sort(
-                        key=lambda p: p.sortie_monthly + random.uniform(0, allocation_noise)
-                    )
-                    selected = eligible[0]
-                    selected.sortie_monthly += 1
-                    selected.sortie_red_monthly += 1
-
-
-    # Allocate for each upgrade type
-    allocate_syllabus(mqt_syllabus, mqt_students_list, Upgrade.MQT, pilots, allocation_noise==allocation_noise)
-    allocate_syllabus(flug_syllabus, flug_students_list, Upgrade.FLUG, pilots, allocation_noise==allocation_noise)
-    allocate_syllabus(ipug_syllabus, ipug_students_list, Upgrade.IPUG, pilots, allocation_noise==allocation_noise)
+        # ----------------------
+        # BLUE SEATS (equitable across upgrade students)
+        # ----------------------
+        for _ in range(event.num_blue_wg + event.num_blue_fl):
+            if upgrade_students:
+                upgrade_students.sort(
+                    key=lambda p: p.sortie_monthly + random.uniform(0, allocation_noise)
+                )
+                selected = upgrade_students[0]
+                selected.sortie_monthly += 1
+                selected.sortie_blue_monthly += 1
 
     # ----------------------
-    # Step 3: Allocate continuation sorties
+    # Step 3: Allocate CT sorties
     # ----------------------
     used_sorties = sum(p.sortie_monthly for p in pilots)
     remaining_capacity = max(0, total_capacity - used_sorties)
 
-    # Compute allocation per bucket
+    # Only CT-eligible pilots (exclude MQT students)
+    ct_candidates = [p for p in pilots if p.upgrade != Upgrade.MQT]
+
+    # Allocate continuation sorties according to profile fractions
     raw_qty = [(b, remaining_capacity * b.fraction) for b in continuation_profile.buckets]
     base_qty = {b: int(x) for b, x in raw_qty}
     leftover = remaining_capacity - sum(base_qty.values())
@@ -463,24 +401,18 @@ def allocate_all_sorties(
     for b, val in sorted(raw_qty, key=lambda x: x[1]-int(x[1]), reverse=True)[:leftover]:
         base_qty[b] += 1
 
-    # Allocate continuation sorties and track blue/red
     for bucket, qty in base_qty.items():
-        eligible = [p for p in pilots if p.qual.value >= bucket.min_qual.value]
+        # Filter CT-eligible pilots meeting the min_qual
+        eligible = [p for p in ct_candidates if p.qual.value >= bucket.min_qual.value]
         if not eligible:
-            print('No eligible pilots for this sortie')
-            continue  # skip this bucket if no eligible pilots
-
-        # shuffle to randomize allocation
-        random.shuffle(eligible)
-        
+            continue
         for i in range(qty):
             selected = eligible[i % len(eligible)]
             selected.sortie_monthly += 1
             if bucket.side == "Blue":
                 selected.sortie_blue_monthly += 1
-            elif bucket.side == "Red":
+            else:
                 selected.sortie_red_monthly += 1
-
 
     # ----------------------
     # Step 4: Add simulator sorties and total
@@ -488,6 +420,10 @@ def allocate_all_sorties(
     for p in pilots:
         p.sim_monthly += sim_per_month
         p.total_monthly = p.sortie_monthly + p.sim_monthly
+
+    allocate_syllabus(mqt_syllabus, mqt_students_list, pilots, allocation_noise=0.0)
+    allocate_syllabus(flug_syllabus, flug_students_list, pilots, allocation_noise=0.0)
+    allocate_syllabus(ipug_syllabus, ipug_students_list, pilots, allocation_noise=0.0)
 
 # ----------------------
 # RAP Shortfall / State
@@ -513,18 +449,18 @@ def rap_state_label(pilots: List[Pilot]):
 # ----------------------
 def run_phase(cfg: SquadronConfig, allocation_noise: float = 0.0):
     pilots = create_pilots(cfg)
-    for pilot in pilots:
-        print(f'Qual:{pilot.qual} Upgrade:{pilot.upgrade}')
+    # for pilot in pilots:
+        # print(f'Qual:{pilot.qual} Upgrade:{pilot.upgrade}')
     total_capacity = int(total_monthly_capacity(cfg) * (cfg.phase_length_days / 30))  # scale to phase
 
     allocate_all_sorties(
         pilots=pilots,
-        mqt_syllabus=MQT_SYLLABUS,
-        flug_syllabus=FLUG_SYLLABUS,
-        ipug_syllabus=IPUG_SYLLABUS,
-        # mqt_syllabus=TEST_MQT_SYLLABUS,
-        # flug_syllabus=TEST_FLUG_SYLLABUS,
-        # ipug_syllabus=TEST_IPUG_SYLLABUS,
+        # mqt_syllabus=MQT_SYLLABUS,
+        # flug_syllabus=FLUG_SYLLABUS,
+        # ipug_syllabus=IPUG_SYLLABUS,
+        mqt_syllabus=TEST_MQT_SYLLABUS,
+        flug_syllabus=TEST_FLUG_SYLLABUS,
+        ipug_syllabus=TEST_IPUG_SYLLABUS,
         mqt_students=cfg.mqt_students,
         flug_students=cfg.flug_students,
         ipug_students=cfg.ipug_students,
@@ -535,6 +471,7 @@ def run_phase(cfg: SquadronConfig, allocation_noise: float = 0.0):
 
     for p in pilots:
         p.update_total()
+        print(f'{p.qual}/{p.upgrade} Monthly Sorties: {p.sortie_monthly}, Blue Monthly: {p.sortie_blue_monthly}, Red Monthly: {p.sortie_red_monthly}')
 
     return pilots
 
@@ -580,15 +517,15 @@ def print_phase_summary(pilots: List[Pilot], cfg: SquadronConfig):
 # ----------------------
 if __name__ == "__main__":
     cfg = SquadronConfig(
-        ute=10,
-        paa=2,
+        ute=5,
+        paa=4,
         mqt_students=2,
-        flug_students=2,
-        ipug_students=2,
-        total_pilots=30,
+        flug_students=1,
+        ipug_students=1,
+        total_pilots=10,
         experience_ratio=0.5,
-        ip_qty=3,
-        phase_length_days=120
+        ip_qty=2,
+        phase_length_days=30
     )
 
     # ----------------------
