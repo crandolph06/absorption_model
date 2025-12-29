@@ -343,9 +343,8 @@ def allocate_all_sorties(
         - num_student → ONLY the assigned upgrade student
         - num_instructor → ONLY IPs
         - blue slots → equitable across eligible pilots
-        - red slots → allocated later in CT
+        - red slots → equitable across eligible pilots
         """
-        import random
 
         for event in syllabus:
             # ----------------------
@@ -355,6 +354,8 @@ def allocate_all_sorties(
                 for _ in range(event.num_student):
                     student.sortie_monthly += 1
                     student.sortie_blue_monthly += 1
+                    print(f"Student {student.qual}/{student.upgrade} flies student slot → "
+                      f"Total: {student.sortie_monthly}, Blue: {student.sortie_blue_monthly}")
 
             # ----------------------
             # INSTRUCTOR SORTIES (IP Only)
@@ -369,19 +370,60 @@ def allocate_all_sorties(
                 )
                 ip = eligible_ips[0]
                 ip.sortie_monthly += 1
+                # TODO check if/when IPs are equal and then move along
                 ip.sortie_blue_monthly += 1
+                print(f"{ip.qual}/{ip.upgrade} flies instructor slot → "
+                  f"Total: {ip.sortie_monthly}, Blue: {ip.sortie_blue_monthly}")
 
         # ----------------------
-        # BLUE SEATS (equitable across upgrade students)
+        # BLUE SEATS (equitable across eligible pilots)
         # ----------------------
-        for _ in range(event.num_blue_wg + event.num_blue_fl):
-            if upgrade_students:
-                upgrade_students.sort(
-                    key=lambda p: p.sortie_monthly + random.uniform(0, allocation_noise)
-                )
-                selected = upgrade_students[0]
-                selected.sortie_monthly += 1
-                selected.sortie_blue_monthly += 1
+        for _ in range(event.num_blue_wg):
+            eligible_wg = [p for p in pilots if p.upgrade != Upgrade.MQT]
+            if not eligible_wg:
+                continue
+            eligible_wg.sort(key=lambda p: p.sortie_monthly + random.uniform(0, allocation_noise))
+            selected = eligible_wg[0]
+            selected.sortie_monthly += 1
+            selected.sortie_blue_monthly += 1
+            print(f"{selected.qual}/{selected.upgrade} flies blue WG → "
+                  f"Total: {selected.sortie_monthly}, Blue: {selected.sortie_blue_monthly}")
+        
+        for _ in range(event.num_blue_fl):
+            eligible_fl = [p for p in pilots if p.qual == Qual.FL]
+            if not eligible_fl:
+                continue
+            eligible_fl.sort(key=lambda p: p.sortie_monthly + random.uniform(0, allocation_noise))
+            #TODO way too many sorties are being allocated here.
+            selected = eligible_fl[0]
+            selected.sortie_monthly += 1
+            selected.sortie_blue_monthly += 1
+            print(f"{selected.qual}/{selected.upgrade} flies blue FL → "
+                  f"Total: {selected.sortie_monthly}, Blue: {selected.sortie_blue_monthly}")
+
+        # ----------------------
+        # RED SEATS (equitable across eligible pilots)
+        # ----------------------
+        for _ in range(event.num_red_wg):
+            eligible_wg = [p for p in pilots if p.upgrade != Upgrade.MQT]
+            if not eligible_wg:
+                continue
+            eligible_wg.sort(key=lambda p: p.sortie_monthly + random.uniform(0, allocation_noise))
+            selected = eligible_wg[0]
+            selected.sortie_red_monthly += 1
+            print(f"{selected.qual}/{selected.upgrade} flies red WG → "
+                  f"Total: {selected.sortie_monthly}, Red: {selected.sortie_red_monthly}")
+        
+        for _ in range(event.num_red_fl):
+            eligible_fl = [p for p in pilots if p.qual == Qual.FL]
+            if not eligible_fl:
+                continue
+            eligible_fl.sort(key=lambda p: p.sortie_monthly + random.uniform(0, allocation_noise))
+            selected = eligible_fl[0]
+            selected.sortie_monthly += 1
+            selected.sortie_red_monthly += 1
+            print(f"{selected.qual}/{selected.upgrade} flies red FL → "
+                  f"Total: {selected.sortie_monthly}, Red: {selected.sortie_red_monthly}")
 
     # ----------------------
     # Step 3: Allocate CT sorties
