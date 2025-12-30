@@ -3,9 +3,11 @@ __pycache__/
 .env
 venv/
 .vscode/
+.DS_Store
 
 # Ignore all model results
 outputs/
 *.csv
 *.png
-*.jpg.DS_Store
+*.jpg
+
