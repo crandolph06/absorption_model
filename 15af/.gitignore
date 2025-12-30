@@ -3,3 +3,9 @@ __pycache__/
 .env
 venv/
 .vscode/
+
+# Ignore all model results
+outputs/
+*.csv
+*.png
+*.jpg
