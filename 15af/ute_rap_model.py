@@ -2,196 +2,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import List
 import random
-
-# ----------------------
-# Config / Enums
-# ----------------------
-@dataclass
-class SquadronConfig:
-    ute: float
-    paa: int
-    mqt_students: int
-    flug_students: int
-    ipug_students: int
-    total_pilots: int
-    experience_ratio: float
-    ip_qty: int
-    phase_length_days: int = 120  # ~1/3 year or 4 months
-
-class Qual(Enum):
-    WG = 'WG'
-    FL = 'FL'
-    IP = 'IP'
-
-class Upgrade(Enum):
-    NONE = 'None'
-    MQT = 'MQT'
-    FLUG = 'FLUG'
-    IPUG = 'IPUG'
-
-class EventType(Enum):
-    SORTIE = "sortie"
-    SIM = "sim"
-
-# ----------------------
-# Pilot Entity
-# ----------------------
-@dataclass
-class Pilot:
-    qual: Qual
-    upgrade: Upgrade = Upgrade.NONE
-    sortie_monthly: float = 0
-    sim_monthly: float = 0
-    total_monthly: float = 0
-    sortie_blue_monthly: float = 0
-    sortie_red_monthly: float = 0
-
-    wg_rap: float = 0
-    mqt_rap: float = 0
-    fl_rap: float = 0
-    flug_rap: float = 0
-    ip_rap: float = 0
-    ipug_rap: float = 0
-
-    target_sorties: float = 0
-    rap_shortfall: float = 0
-    
-    def update_total(self):
-        self.total_monthly = self.sortie_monthly + self.sim_monthly
-        self.rap_shortfall = max(0, self.target_sorties - self.total_monthly)
-# ----------------------
-# Syllabus Bucket
-# ----------------------
-@dataclass(frozen=True)
-class SyllabusEvent: 
-    name: str
-    event_type: EventType
-    seat_type: Qual
-    num_student: int = 1
-    num_instructor: int = 1
-    num_blue_wg: int = 0
-    num_blue_fl: int = 0
-    num_red_wg: int = 0
-    num_red_fl: int = 0
-
-    def total_slots(self):
-        return self.num_student + self.num_instructor + self.num_blue_wg + self.num_blue_fl + self.num_red_wg + self.num_red_fl
-
-@dataclass
-class UpgradeProgram:
-    name: str # "MQT", "FLUG", "IPUG"
-    syllabus: List[SyllabusEvent]
-    student_qual: Qual
-    num_students: int
-
-# ----------------------
-# Tiny Test Syllabi
-# ----------------------
-TEST_MQT_SYLLABUS = [
-    SyllabusEvent("OBFM", EventType.SORTIE, Qual.WG, num_student=1, num_instructor=1),
-    # SyllabusEvent("ACM", EventType.SORTIE, Qual.WG, num_blue_wg=1,)
-]
-
-TEST_FLUG_SYLLABUS = [
-    SyllabusEvent("OBFM", EventType.SORTIE, Qual.WG, num_student=1, num_instructor=1),
-    # SyllabusEvent("ACM", EventType.SORTIE, Qual.WG, num_blue_wg=1)
-]
-
-TEST_IPUG_SYLLABUS = [
-    SyllabusEvent("OBFM", EventType.SORTIE, Qual.FL, num_student=1, num_instructor=1),
-    # SyllabusEvent("ACM", EventType.SORTIE, Qual.FL, num_blue_fl=1)
-]
-
-# ----------------------
-# MQT Syllabus
-# ----------------------
-MQT_SYLLABUS = [
-    SyllabusEvent("OBFM", EventType.SORTIE, Qual.WG, 1,1,0,0,0,0),
-    SyllabusEvent("DBFM", EventType.SORTIE, Qual.WG, 1,1,0,0,0,0),
-    SyllabusEvent("HABFM", EventType.SORTIE, Qual.WG, 1,1,0,0,0,0),
-    SyllabusEvent("2vX TI", EventType.SIM, Qual.WG, 1,1,0,0,0,0),
-    SyllabusEvent("ACM", EventType.SORTIE, Qual.WG, 1,1,0,0,1,1),
-    SyllabusEvent("4vX TI", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
-    SyllabusEvent("DCA", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
-    SyllabusEvent("DCA", EventType.SORTIE, Qual.WG, 1,1,1,1,2,2),
-    SyllabusEvent("U-SEAD", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
-    SyllabusEvent("D-SEAD", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
-    SyllabusEvent("U-SEAD", EventType.SORTIE, Qual.WG, 1,1,2,2,0,0),
-    SyllabusEvent("O-SEAD", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
-    SyllabusEvent("O-SEAD", EventType.SORTIE, Qual.WG, 1,1,2,2,2,2),
-    SyllabusEvent("O-AI", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
-    SyllabusEvent("CAS", EventType.SORTIE, Qual.WG, 1,1,0,0,0,0),
-    SyllabusEvent("BSA", EventType.SORTIE, Qual.WG, 1,1,1,1,0,0),
-]
-
-# ----------------------
-# FLUG Syllabus (same as MQT)
-# ----------------------
-FLUG_SYLLABUS = [
-    SyllabusEvent("OBFM", EventType.SORTIE, Qual.WG, 1,1,0,0,0,0),
-    SyllabusEvent("DBFM", EventType.SORTIE, Qual.WG, 1,1,0,0,0,0),
-    SyllabusEvent("HABFM", EventType.SORTIE, Qual.WG, 1,1,0,0,0,0),
-    SyllabusEvent("2vX TI", EventType.SIM, Qual.WG, 1,1,0,0,0,0),
-    SyllabusEvent("ACM", EventType.SORTIE, Qual.WG, 1,1,0,0,1,1),
-    SyllabusEvent("4vX TI", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
-    SyllabusEvent("DCA", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
-    SyllabusEvent("DCA", EventType.SORTIE, Qual.WG, 1,1,1,1,2,2),
-    SyllabusEvent("U-SEAD", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
-    SyllabusEvent("D-SEAD", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
-    SyllabusEvent("U-SEAD", EventType.SORTIE, Qual.WG, 1,1,2,2,0,0),
-    SyllabusEvent("O-SEAD", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
-    SyllabusEvent("O-SEAD", EventType.SORTIE, Qual.WG, 1,1,2,2,2,2),
-    SyllabusEvent("O-AI", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
-    SyllabusEvent("CAS", EventType.SORTIE, Qual.WG, 1,1,0,0,0,0),
-    SyllabusEvent("BSA", EventType.SORTIE, Qual.WG, 1,1,1,1,0,0),
-]
-
-# ----------------------
-# IPUG Syllabus
-# ----------------------
-IPUG_SYLLABUS = [
-    SyllabusEvent("OBFM", EventType.SORTIE, Qual.FL, 1,1,0,0,0,0),
-    SyllabusEvent("DBFM", EventType.SORTIE, Qual.FL, 1,1,0,0,0,0),
-    SyllabusEvent("HABFM", EventType.SORTIE, Qual.FL, 1,1,0,0,0,0),
-    SyllabusEvent("2vX TI", EventType.SIM, Qual.FL, 1,1,0,0,0,0),
-    SyllabusEvent("ACM", EventType.SORTIE, Qual.FL, 1,1,0,0,1,1),
-    SyllabusEvent("4vX TI", EventType.SIM, Qual.FL, 1,1,1,1,0,0),
-    SyllabusEvent("DCA", EventType.SIM, Qual.FL, 1,1,1,1,0,0),
-    SyllabusEvent("DCA", EventType.SORTIE, Qual.FL, 1,1,1,1,2,2),
-    SyllabusEvent("U-SEAD", EventType.SIM, Qual.FL, 1,1,1,1,0,0),
-    SyllabusEvent("D-SEAD", EventType.SIM, Qual.FL, 1,1,1,1,0,0),
-    SyllabusEvent("U-SEAD", EventType.SORTIE, Qual.FL, 1,1,2,2,0,0),
-    SyllabusEvent("O-SEAD", EventType.SIM, Qual.FL, 1,1,1,1,0,0),
-    SyllabusEvent("O-SEAD", EventType.SORTIE, Qual.FL, 1,1,2,2,2,2),
-    SyllabusEvent("O-AI", EventType.SIM, Qual.FL, 1,1,1,1,0,0),
-    SyllabusEvent("CAS", EventType.SORTIE, Qual.FL, 1,1,0,0,0,0),
-    SyllabusEvent("BSA", EventType.SORTIE, Qual.FL, 1,1,1,1,0,0),
-]
-
-# ----------------------
-# Continuation Profile
-# ----------------------
-@dataclass(frozen=True)
-class ContinuationBucket:
-    name: str
-    min_qual: Qual
-    side: str
-    fraction: float
-
-@dataclass
-class ContinuationProfile:
-    name: str
-    buckets: List[ContinuationBucket]
-
-CONTINUATION_PROFILE = ContinuationProfile(
-    name="Continuation Training",
-    buckets=[
-        ContinuationBucket("Blue FL", Qual.FL, "Blue", 0.425),
-        ContinuationBucket("Blue WG", Qual.WG, "Blue", 0.425),
-        ContinuationBucket("Red FL", Qual.FL, "Red", 0.075),
-        ContinuationBucket("Red WG", Qual.WG, "Red", 0.075),
-    ]
-)
+from models import SquadronConfig, Pilot, Qual, Upgrade
+from syllabi import SyllabusEvent, UpgradeProgram, ContinuationProfile
 
 # ----------------------
 # Pilot Creation
@@ -320,8 +132,6 @@ def allocate_all_sorties(
         for p in selected:
             p.upgrade = upgrade_type
             
-            # Debug print to verify selection
-            print(f"{upgrade_type.value} selected students:", [(p.qual.value, p.upgrade.value) for p in selected])
         return selected
 
     mqt_students_list = select_upgrade_students(Upgrade.MQT, mqt_students)
@@ -345,23 +155,35 @@ def allocate_all_sorties(
         - blue slots → equitable across eligible pilots
         - red slots → equitable across eligible pilots
         """
-
+        for pilot in pilots:
+            print(f'Pilot: {pilot.qual}/{pilot.upgrade}, Sortie monthly: {pilot.sortie_monthly}')
+            
         for event in syllabus:
+            print(f'Event name: {event.name}')
             # ----------------------
             # STUDENT SORTIES (Upgrade Students Only)
             # ----------------------
             for student in upgrade_students:
+                print(f'Student: {student.qual}/{student.upgrade}')
                 for _ in range(event.num_student):
                     student.sortie_monthly += 1
                     student.sortie_blue_monthly += 1
                     print(f"Student {student.qual}/{student.upgrade} flies student slot → "
                       f"Total: {student.sortie_monthly}, Blue: {student.sortie_blue_monthly}")
+                    
+            print(f'Student Sorties Allocated!')
+            for pilot in pilots:
+                print(f'Pilot: {pilot.qual}/{pilot.upgrade}, Sortie monthly: {pilot.sortie_monthly}')
 
             # ----------------------
             # INSTRUCTOR SORTIES (IP Only)
             # ----------------------
             for _ in range(event.num_instructor):
                 eligible_ips = [p for p in pilots if p.qual == Qual.IP]
+                count = 1
+                for ip in eligible_ips:
+                    print(f'IP # {count} Sortie Monthly: {ip.sortie_monthly}')
+                    count += 1
                 if not eligible_ips:
                     continue
                 # Pick the IP with fewest sorties (add random noise for tie-break)
@@ -369,8 +191,8 @@ def allocate_all_sorties(
                     key=lambda p: p.sortie_monthly + random.uniform(0, allocation_noise)
                 )
                 ip = eligible_ips[0]
+                print(f'IP Sortie Monthly: {eligible_ips[0].sortie_monthly}')
                 ip.sortie_monthly += 1
-                # TODO check if/when IPs are equal and then move along
                 ip.sortie_blue_monthly += 1
                 print(f"{ip.qual}/{ip.upgrade} flies instructor slot → "
                   f"Total: {ip.sortie_monthly}, Blue: {ip.sortie_blue_monthly}")
@@ -463,9 +285,17 @@ def allocate_all_sorties(
         p.sim_monthly += sim_per_month
         p.total_monthly = p.sortie_monthly + p.sim_monthly
 
+    for pilot in pilots:
+        print(f'Starting value! Pilot: {pilot.qual}/{pilot.upgrade}, Sortie monthly: {pilot.sortie_monthly}')
     allocate_syllabus(mqt_syllabus, mqt_students_list, pilots, allocation_noise=0.0)
+    for pilot in pilots:
+        print(f'MQT allocated! Pilot: {pilot.qual}/{pilot.upgrade}, Sortie monthly: {pilot.sortie_monthly}')
     allocate_syllabus(flug_syllabus, flug_students_list, pilots, allocation_noise=0.0)
+    for pilot in pilots:
+        print(f'FLUG allocated! Pilot: {pilot.qual}/{pilot.upgrade}, Sortie monthly: {pilot.sortie_monthly}')
     allocate_syllabus(ipug_syllabus, ipug_students_list, pilots, allocation_noise=0.0)
+    for pilot in pilots:
+        print(f'IPUG allocated! Pilot: {pilot.qual}/{pilot.upgrade}, Sortie monthly: {pilot.sortie_monthly}')
 
 # ----------------------
 # RAP Shortfall / State
@@ -491,8 +321,8 @@ def rap_state_label(pilots: List[Pilot]):
 # ----------------------
 def run_phase(cfg: SquadronConfig, allocation_noise: float = 0.0):
     pilots = create_pilots(cfg)
-    # for pilot in pilots:
-        # print(f'Qual:{pilot.qual} Upgrade:{pilot.upgrade}')
+    for pilot in pilots:
+        print(f'Qual:{pilot.qual} Upgrade:{pilot.upgrade} Starting sortie monthly: {pilot.sortie_monthly}')
     total_capacity = int(total_monthly_capacity(cfg) * (cfg.phase_length_days / 30))  # scale to phase
 
     allocate_all_sorties(
