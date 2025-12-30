@@ -42,11 +42,13 @@ class EventType(Enum):
 class Pilot:
     qual: Qual
     upgrade: Upgrade = Upgrade.NONE
-    sortie_monthly: float = 0
-    sim_monthly: float = 0
-    total_monthly: float = 0
-    sortie_blue_monthly: float = 0
-    sortie_red_monthly: float = 0
+    sortie_monthly: float = 0 # TODO CHANGE TO PHASE
+    sim_monthly: float = 0 # TODO CHANGE TO PHASE
+    total_monthly: float = 0 # TODO CHANGE TO PHASE
+    sortie_blue_monthly: float = 0 # TODO CHANGE TO PHASE
+    sortie_red_monthly: float = 0 # TODO CHANGE TO PHASE
+
+    # TODO ADD MONTHLY COUNTERS AND FUNCTION TO CALCULATE
 
     wg_rap: float = 0
     mqt_rap: float = 0

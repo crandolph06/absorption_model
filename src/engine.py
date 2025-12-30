@@ -22,6 +22,9 @@ def create_pilots(cfg: SquadronConfig) -> List[Pilot]:
     
     fl_count = experienced - ip_count
     wg_count = cfg.total_pilots - experienced
+
+    if cfg.mqt_students + cfg.flug_students > wg_count:
+        raise ValueError ("WG upgrade quantity cannot exceed WG quantity")
     
     return ([Pilot(Qual.WG) for _ in range(wg_count)] +
             [Pilot(Qual.FL) for _ in range(fl_count)] +
@@ -159,7 +162,7 @@ def allocate_continuation_training(
         return
 
     # Identify CT candidates (anyone NOT in an active upgrade)
-    ct_candidates = [p for p in pilots if p.upgrade == Upgrade.NONE]
+    ct_candidates = [p for p in pilots if p.upgrade != Upgrade.MQT]
 
     if not ct_candidates:
         return
@@ -215,6 +218,13 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
     run_upgrade_program(TEST_FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise)
     run_upgrade_program(TEST_IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise)
 
+    # from syllabi import MQT_SYLLABUS, FLUG_SYLLABUS, IPUG_SYLLABUS, CONTINUATION_PROFILE
+
+    # run_upgrade_program(MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise)
+    # run_upgrade_program(FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise)
+    # run_upgrade_program(IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise)
+
+
     # 4. Continuation Training
     # Scale capacity to phase length (e.g. 1 month vs 4 months)
     phase_months = cfg.phase_length_days / 30.0
@@ -233,7 +243,7 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
 # ----------------------
 # Reporting
 # ----------------------
-def print_phase_summary(pilots: List[Pilot], cfg: SquadronConfig):
+def print_phase_summary(pilots: List[Pilot], cfg: SquadronConfig, verbose: bool = True):
     print("\n=== Phase Summary ===")
     
     groups = {
@@ -251,4 +261,11 @@ def print_phase_summary(pilots: List[Pilot], cfg: SquadronConfig):
             continue
             
         avg_sorties = sum(p.sortie_monthly for p in group) / len(group)
-        print(f"{name} ({len(group)}): Avg Sorties {avg_sorties:.1f}")
+        avg_blue_sorties = sum(p.sortie_blue_monthly for p in group) / len(group)
+        avg_red_sorties = sum(p.sortie_red_monthly for p in group) / len(group)
+        print(f"{name} ({len(group)}): Avg Sorties {avg_sorties:.1f}, Avg Blue Sorties {avg_blue_sorties:.1f}, Avg Red Sorties {avg_red_sorties:.1f}")
+
+    if verbose:
+        for name, group in groups.items():
+            for p in group:
+                print(f'{p.qual}/{p.upgrade}: Monthly {p.sortie_monthly}, Blue {p.sortie_blue_monthly}, Red {p.sortie_red_monthly}')
