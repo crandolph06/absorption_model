@@ -3,7 +3,7 @@ from enum import Enum
 from typing import List
 
 # ----------------------
-# Config / Enums
+# Config 
 # ----------------------
 @dataclass
 class SquadronConfig:
@@ -16,6 +16,10 @@ class SquadronConfig:
     experience_ratio: float
     ip_qty: int
     phase_length_days: int = 120  # ~1/3 year or 4 months
+
+# ----------------------
+# Enums 
+# ----------------------
 
 class Qual(Enum):
     WG = 'WG'
@@ -58,4 +62,18 @@ class Pilot:
     def update_total(self):
         self.total_monthly = self.sortie_monthly + self.sim_monthly
         self.rap_shortfall = max(0, self.target_sorties - self.total_monthly)
+
+    def reset_monthly_counters(pilots):
+        for p in pilots:
+            p.sortie_monthly = 0
+            p.sortie_blue_monthly = 0
+            p.sortie_red_monthly = 0
+            p.sim_monthly = 0
+
+    def add_sortie(self, side: str = "Blue"):
+        self.sortie_monthly += 1
+        if side == "Blue":
+            self.sortie_blue_monthly += 1
+        elif side == "Red":
+            self.sortie_red_monthly += 1
 
