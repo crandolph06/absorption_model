@@ -26,7 +26,7 @@ def run_research_sweep():
     PHASE_DAYS = 120
     ITERATIONS_PER_CONFIG = 3 
 
-    total_combos = len(ute_values) * len(ip_qty_values) * len(exp_ratios) * len(paa_values) * len(mqt_students) * len(flug_students) * len(ipug_students)
+    total_combos = len(ute_values) * len(ip_qty_values) * len(exp_ratios) * len(paa_values) * len(mqt_students) * len(flug_students) * len(ipug_students) * len(total_pilots)
     print(f"Starting sweep of {total_combos} configurations...")
 
     count = 0
