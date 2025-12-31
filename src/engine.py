@@ -1,8 +1,10 @@
 import random
 from typing import List, Dict
-from models import SquadronConfig, Pilot, Qual, Upgrade
-from syllabi import SyllabusEvent, ContinuationProfile, UpgradeProgram
-import rules 
+from src.models import SquadronConfig, Pilot, Qual, Upgrade
+from src.syllabi import SyllabusEvent, ContinuationProfile, UpgradeProgram
+from src import rules
+# from src.syllabi import TEST_MQT_SYLLABUS, TEST_FLUG_SYLLABUS, TEST_IPUG_SYLLABUS, CONTINUATION_PROFILE
+from src.syllabi import MQT_SYLLABUS, FLUG_SYLLABUS, IPUG_SYLLABUS, CONTINUATION_PROFILE
 
 # ----------------------
 # Pilot Creation
@@ -212,13 +214,11 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
 
     # 3. Execute Syllabi
     # Import these from your syllabi file
-    # from syllabi import TEST_MQT_SYLLABUS, TEST_FLUG_SYLLABUS, TEST_IPUG_SYLLABUS, CONTINUATION_PROFILE
 
     # run_upgrade_program(TEST_MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise)
     # run_upgrade_program(TEST_FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise)
     # run_upgrade_program(TEST_IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise)
 
-    from syllabi import MQT_SYLLABUS, FLUG_SYLLABUS, IPUG_SYLLABUS, CONTINUATION_PROFILE
 
     run_upgrade_program(MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise)
     run_upgrade_program(FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise)

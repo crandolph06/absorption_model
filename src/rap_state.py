@@ -1,4 +1,4 @@
-from models import Qual, Upgrade
+from src.models import Qual, Upgrade
 
 def rap_assess(pilots):
     groups = {
@@ -29,8 +29,9 @@ def rap_assess(pilots):
             rap_req, bit_mask = 8, 2
         elif group_name == "IP":
             rap_req, bit_mask = 8, 4
-        # MQT ignored
-
+        elif group_name == "MQT":
+            rap_req, bit_mask = 0, 0
+            
         rap_dict[group_name] = [bit_mask if avg_sorties < rap_req else 0, avg_sorties] # rap_dict["WG"] = [1, 9.5]
         blue_rap_dict[group_name] = [bit_mask if avg_blue_sorties < rap_req else 0, avg_blue_sorties] # blue_rap_dict["FL"] = [2, 9.5]
         red_dict[group_name] = avg_red_sorties / avg_sorties if avg_sorties > 0 else 0 # red_dict["WG"] = 45.5

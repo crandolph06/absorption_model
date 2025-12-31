@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from typing import List
-from models import EventType, Qual
+from src.models import EventType, Qual
 
 # ----------------------
 # Syllabus Bucket

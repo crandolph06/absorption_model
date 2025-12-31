@@ -1,4 +1,4 @@
-from models import Pilot, Qual, Upgrade
+from src.models import Pilot, Qual, Upgrade
 
 # ---------------------------------------------------------
 # 1. ELIGIBILITY RULES (Used during "Selection Phase")

@@ -1,5 +1,5 @@
-from models import SquadronConfig
-from engine import run_phase_simulation, print_phase_summary # You'll need to move print_summary to engine
+from src.models import SquadronConfig
+from src.engine import run_phase_simulation, print_phase_summary # You'll need to move print_summary to engine
 
 if __name__ == "__main__":
     cfg = SquadronConfig(
