@@ -2,7 +2,7 @@ import random
 from typing import List, Dict
 from models import SquadronConfig, Pilot, Qual, Upgrade
 from syllabi import SyllabusEvent, ContinuationProfile, UpgradeProgram
-import rules  # Ensure rules.py is created as discussed
+import rules 
 
 # ----------------------
 # Pilot Creation
