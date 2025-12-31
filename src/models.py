@@ -42,13 +42,16 @@ class EventType(Enum):
 class Pilot:
     qual: Qual
     upgrade: Upgrade = Upgrade.NONE
-    sortie_monthly: float = 0 # TODO CHANGE TO PHASE
-    sim_monthly: float = 0 # TODO CHANGE TO PHASE
-    total_monthly: float = 0 # TODO CHANGE TO PHASE
-    sortie_blue_monthly: float = 0 # TODO CHANGE TO PHASE
-    sortie_red_monthly: float = 0 # TODO CHANGE TO PHASE
+    sortie_phase: float = 0 
+    sim_phase: float = 0 
+    total_phase: float = 0 
+    sortie_blue_phase: float = 0 
+    sortie_red_phase: float = 0 
 
-    # TODO ADD MONTHLY COUNTERS AND FUNCTION TO CALCULATE
+    sortie_monthly: float = 0
+    sim_monthly: float = 0
+    sortie_blue_monthly: float = 0
+    sortie_red_monthly: float = 0
 
     wg_rap: float = 0
     mqt_rap: float = 0
@@ -61,20 +64,28 @@ class Pilot:
     rap_shortfall: float = 0
     
     def update_total(self):
-        self.total_monthly = self.sortie_monthly + self.sim_monthly
-        self.rap_shortfall = max(0, self.target_sorties - self.total_monthly)
+        self.total_phase = self.sortie_phase + self.sim_phase
+        self.rap_shortfall = max(0, self.target_sorties - self.total_phase)
 
-    def reset_monthly_counters(pilots):
+    def update_monthly(self, phase_length_days: int):
+        months = phase_length_days / 30
+        if months > 0:
+            self.sortie_monthly = self.sortie_phase / months
+            self.sim_monthly = self.sim_phase / months
+            self.sortie_blue_monthly = self.sortie_blue_phase / months
+            self.sortie_red_monthly = self.sortie_red_phase / months
+
+    def reset_phase_counters(pilots):
         for p in pilots:
-            p.sortie_monthly = 0
-            p.sortie_blue_monthly = 0
-            p.sortie_red_monthly = 0
-            p.sim_monthly = 0
+            p.sortie_phase = 0
+            p.sortie_blue_phase = 0
+            p.sortie_red_phase = 0
+            p.sim_phase = 0
 
     def add_sortie(self, side: str = "Blue"):
-        self.sortie_monthly += 1
+        self.sortie_phase += 1
         if side == "Blue":
-            self.sortie_blue_monthly += 1
+            self.sortie_blue_phase += 1
         elif side == "Red":
-            self.sortie_red_monthly += 1
+            self.sortie_red_phase += 1
 

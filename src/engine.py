@@ -30,7 +30,7 @@ def create_pilots(cfg: SquadronConfig) -> List[Pilot]:
             [Pilot(Qual.FL) for _ in range(fl_count)] +
             [Pilot(Qual.IP) for _ in range(ip_count)])
 
-def total_monthly_capacity(cfg: SquadronConfig) -> float:
+def total_phase_capacity(cfg: SquadronConfig) -> float:
     return cfg.ute * cfg.paa
 
 # ----------------------
@@ -63,7 +63,7 @@ def assign_sortie(candidates: List[Pilot], side: str = "Blue", noise: float = 0.
         return False
     
     # Sort by current monthly sorties + random noise for distribution
-    candidates.sort(key=lambda p: p.sortie_monthly + random.uniform(0, noise))
+    candidates.sort(key=lambda p: p.sortie_phase + random.uniform(0, noise))
     
     winner = candidates[0]
     
@@ -71,11 +71,11 @@ def assign_sortie(candidates: List[Pilot], side: str = "Blue", noise: float = 0.
     if hasattr(winner, 'add_sortie'):
         winner.add_sortie(side)
     else:
-        winner.sortie_monthly += 1
+        winner.sortie_phase += 1
         if side == "Blue":
-            winner.sortie_blue_monthly += 1
+            winner.sortie_blue_phase += 1
         elif side == "Red":
-            winner.sortie_red_monthly += 1
+            winner.sortie_red_phase += 1
         
     return True
 
@@ -101,8 +101,8 @@ def process_syllabus_event(
             if hasattr(student, 'add_sortie'):
                 student.add_sortie("Blue")
             else:
-                student.sortie_monthly += 1
-                student.sortie_blue_monthly += 1
+                student.sortie_phase += 1
+                student.sortie_blue_phase += 1
             
             # -- Instructor flies (Per student sortie) --
             for _ in range(event.num_instructor):
@@ -155,7 +155,7 @@ def allocate_continuation_training(
     noise: float
 ):
     # Calculate how much capacity is left
-    used_sorties = sum(p.sortie_monthly for p in pilots)
+    used_sorties = sum(p.sortie_phase for p in pilots)
     remaining_capacity = max(0, total_capacity - used_sorties)
 
     if remaining_capacity <= 0:
@@ -198,10 +198,10 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
         if hasattr(p, 'reset_counters'):
             p.reset_counters()
         else:
-            p.sortie_monthly = 0 
-            p.sortie_blue_monthly = 0
-            p.sortie_red_monthly = 0
-            p.sim_monthly = 0
+            p.sortie_phase = 0 
+            p.sortie_blue_phase = 0
+            p.sortie_red_phase = 0
+            p.sim_phase = 0
 
     # 2. Select Students
     # Note: If pilots were already assigned upgrades in a previous phase, 
@@ -212,31 +212,33 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
 
     # 3. Execute Syllabi
     # Import these from your syllabi file
-    from syllabi import TEST_MQT_SYLLABUS, TEST_FLUG_SYLLABUS, TEST_IPUG_SYLLABUS, CONTINUATION_PROFILE
+    # from syllabi import TEST_MQT_SYLLABUS, TEST_FLUG_SYLLABUS, TEST_IPUG_SYLLABUS, CONTINUATION_PROFILE
 
-    run_upgrade_program(TEST_MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise)
-    run_upgrade_program(TEST_FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise)
-    run_upgrade_program(TEST_IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise)
+    # run_upgrade_program(TEST_MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise)
+    # run_upgrade_program(TEST_FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise)
+    # run_upgrade_program(TEST_IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise)
 
-    # from syllabi import MQT_SYLLABUS, FLUG_SYLLABUS, IPUG_SYLLABUS, CONTINUATION_PROFILE
+    from syllabi import MQT_SYLLABUS, FLUG_SYLLABUS, IPUG_SYLLABUS, CONTINUATION_PROFILE
 
-    # run_upgrade_program(MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise)
-    # run_upgrade_program(FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise)
-    # run_upgrade_program(IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise)
+    run_upgrade_program(MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise)
+    run_upgrade_program(FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise)
+    run_upgrade_program(IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise)
 
 
     # 4. Continuation Training
     # Scale capacity to phase length (e.g. 1 month vs 4 months)
     phase_months = cfg.phase_length_days / 30.0
-    total_capacity = int(total_monthly_capacity(cfg) * phase_months)
+    total_capacity = int(total_phase_capacity(cfg) * phase_months)
     
     allocate_continuation_training(pilots, CONTINUATION_PROFILE, total_capacity, allocation_noise)
 
     # 5. Finalize Stats
     for p in pilots:
-        # Assuming sim is flat per month
-        p.sim_monthly += (3 * phase_months) 
+        # Assuming sim is flat per month, scaled to phase
+        months = cfg.phase_length_days / 30.0
+        p.sim_phase = 3 * phase_months
         p.update_total()
+        p.update_monthly(cfg.phase_length_days)
 
     return pilots
 
@@ -263,7 +265,7 @@ def print_phase_summary(pilots: List[Pilot], cfg: SquadronConfig, verbose: bool 
         avg_sorties = sum(p.sortie_monthly for p in group) / len(group)
         avg_blue_sorties = sum(p.sortie_blue_monthly for p in group) / len(group)
         avg_red_sorties = sum(p.sortie_red_monthly for p in group) / len(group)
-        print(f"{name} ({len(group)}): Avg Sorties {avg_sorties:.1f}, Avg Blue Sorties {avg_blue_sorties:.1f}, Avg Red Sorties {avg_red_sorties:.1f}")
+        print(f"{name} ({len(group)}): Avg Mo. Sorties {avg_sorties:.1f}, Avg Mo. Blue Sorties {avg_blue_sorties:.1f}, Avg Mo. Red Sorties {avg_red_sorties:.1f}")
 
     if verbose:
         for name, group in groups.items():
