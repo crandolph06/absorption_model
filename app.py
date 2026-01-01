@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from textwrap import dedent
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Pilot Supply Chain Analytics", layout="wide")
@@ -46,6 +47,13 @@ st.caption("Interactive Dashboard for RAP Equity and Sortie Composition")
 uploaded_file = st.sidebar.file_uploader("Upload research_data.csv", type="csv")
 df = load_data(uploaded_file)
 
+if 'exp_ratio' in df.columns:
+    df['exp_ratio'] = df['exp_ratio'].round(2)
+    
+if 'ute' in df.columns:
+    # Optional: Round ute if it also has decimals (e.g. 12.5)
+    df['ute'] = df['ute'].round(1)
+
 # --- SIDEBAR FILTERS ---
 st.sidebar.header("Scenario Filters")
 inputs = {}
@@ -60,6 +68,7 @@ for col in filter_cols:
 def get_filtered_data(target_x):
     mask = pd.Series([True] * len(df))
     for col, val in inputs.items():
+        print(col)
         if col != target_x:
             mask &= (df[col] == val)
     
@@ -85,7 +94,9 @@ with col_main:
     # CHART 1: EQUITY
     st.subheader("📊 Sortie Equity (Total Monthly)")
     x_options = [c for c in ['ute', 'paa', 'total_pilots', 'exp_ratio'] if c in df.columns]
-    x_var_equity = st.selectbox("X-Axis Variable", x_options, key="equity_x")
+    # Find the index of 'ute' in the list options. Defaults to 0 if not found.
+    ix_equity = x_options.index('ute') if 'ute' in x_options else 0
+    x_var_equity = st.selectbox("X-Axis Variable", x_options, index=ix_equity, key="equity_x")
     equity_data = get_filtered_data(x_var_equity)
 
     if not equity_data.empty:
@@ -115,7 +126,9 @@ with col_main:
     
     col_comp_1, col_comp_2 = st.columns([2, 1])
     with col_comp_1:
-        x_var_comp = st.selectbox("X-Axis Variable", x_options, key="comp_x")
+        # Find the index of 'exp_ratio'
+        ix_comp = x_options.index('exp_ratio') if 'exp_ratio' in x_options else 0
+        x_var_comp = st.selectbox("X-Axis Variable", x_options, index=ix_comp, key="comp_x")
     with col_comp_2:
         st.write("") # Spacer
         show_trends = st.toggle("Show Total Trendlines", value=False)
@@ -169,6 +182,67 @@ with col_main:
         )
         st.plotly_chart(fig_comp, use_container_width=True)
 
+    # --- HEATMAP SECTION ---
+    st.write("---")
+    st.subheader("🗺️ RAP State Heatmap")
+
+    col_heat_1, col_heat_2 = st.columns([2, 1])
+    with col_heat_2:
+        # Toggle for Blue vs All
+        is_blue = st.toggle("Show Only Blue RAP Counters", value=False)
+        toggle_label = "Show Only Blue RAP Counters" if is_blue else "Show All Sorties as RAP Counters"
+
+    # Determine which columns to use based on toggle
+    code_col = "blue_rap_state_code" if is_blue else "rap_state_code"
+    label_col = "blue_rap_state_label" if is_blue else "rap_state_label"
+
+    # Create pivot table for heatmap
+    # We use max() or mean() since there should only be one state per UTE/Exp combination
+    heat_df = df.pivot_table(
+        index='ute', 
+        columns='exp_ratio', 
+        values=code_col, 
+        aggfunc='first'
+    ).sort_index(ascending=False)
+
+    # Define the Custom Color Mapping
+    # 0: Green | 1,2,4: Yellows | 3,5,6: Oranges | 9: Red
+    # Colors mapping: 0->Green, 1,2->LightYellow, 4->DarkYellow, 3,5->LightOrange, 6->DarkOrange, 9->Red
+    color_scale = [
+        [0.0, "#22c55e"],   # 0 - Green
+        [0.11, "#22c55e"],
+        [0.11, "#fef08a"],  # 1 - Light Yellow
+        [0.22, "#fde047"],  # 2 - Med Yellow
+        [0.33, "#facc15"],  # 3 - Light Orange (mapped for value 3)
+        [0.44, "#eab308"],  # 4 - Dark Yellow
+        [0.55, "#f97316"],  # 5 - Med Orange
+        [0.66, "#ea580c"],  # 6 - Dark Orange
+        [1.0, "#ef4444"]    # 9 - Red
+    ]
+
+    fig_heat = go.Figure(data=go.Heatmap(
+        z=heat_df.values,
+        x=heat_df.columns,
+        y=heat_df.index,
+        colorscale=color_scale,
+        showscale=True,
+        colorbar=dict(
+            title="State Code",
+            tickvals=[0, 1, 2, 3, 4, 5, 6, 9],
+            ticktext=["0 (Healthy)", "1", "2", "3", "4", "5", "6", "9 (Critical)"]
+        ),
+        hovertemplate="Exp Ratio: %{x}<br>UTE: %{y}<br>Code: %{z}<extra></extra>"
+    ))
+
+    fig_heat.update_layout(
+        xaxis_title="Experience Ratio",
+        yaxis_title="UTE",
+        height=500,
+        margin=dict(l=20, r=20, t=20, b=20)
+    )
+
+    st.plotly_chart(fig_heat, use_container_width=True)
+
 # --- SUMMARY SIDEBAR ---
 with col_summary:
     st.subheader("Status Overview")
@@ -182,42 +256,43 @@ with col_summary:
         row = current_match.mean(numeric_only=True)
         label = current_match.iloc[0]['rap_state_label']
         
+        # Pre-formatting variables makes the HTML string cleaner/easier to debug
+        wg_t, fl_t, ip_t = f"{row['wg_monthly']:.1f}", f"{row['fl_monthly']:.1f}", f"{row['ip_monthly']:.1f}"
+        wg_b, fl_b, ip_b = f"{row['wg_blue_monthly']:.1f}", f"{row['fl_blue_monthly']:.1f}", f"{row['ip_blue_monthly']:.1f}"
+        wg_r, fl_r, ip_r = f"{row['wg_red_monthly']:.1f}", f"{row['fl_red_monthly']:.1f}", f"{row['ip_red_monthly']:.1f}"
+
+        # NOTE: Indentation removed inside the string to prevent Markdown Code Block triggering
         st.markdown(f"""
-            <div style="background-color:#0f172a; padding:20px; border-radius:15px; color:white; margin-bottom:20px;">
-                <p style="font-size:0.7rem; color:#94a3b8; margin-bottom:2px; letter-spacing: 0.05em;">OVERALL STATUS</p>
-                <h2 style="margin:0; font-size:1.3rem; color: #f8fafc;">{label}</h2>
-                
-                <hr style="border-color:#1e293b; margin:15px 0;">
-                
-                <div style="display:flex; justify-content:space-between; text-align:center; margin-bottom:10px;">
-                    <div style="flex:1;"></div>
-                    <div style="flex:1;"><small style="color:#94a3b8; font-weight:bold;">WG</small></div>
-                    <div style="flex:1;"><small style="color:#94a3b8; font-weight:bold;">FL</small></div>
-                    <div style="flex:1;"><small style="color:#94a3b8; font-weight:bold;">IP</small></div>
-                </div>
-                
-                <div style="display:flex; justify-content:space-between; text-align:center; margin-bottom:12px;">
-                    <div style="flex:1; text-align:left;"><small style="color:#94a3b8;">Total</small></div>
-                    <div style="flex:1;"><b style="font-size:1.1rem;">{row['wg_monthly']:.1f}</b></div>
-                    <div style="flex:1;"><b style="font-size:1.1rem;">{row['fl_monthly']:.1f}</b></div>
-                    <div style="flex:1;"><b style="font-size:1.1rem;">{row['ip_monthly']:.1f}</b></div>
-                </div>
-                
-                <div style="display:flex; justify-content:space-between; text-align:center; margin-bottom:8px; background: rgba(59, 130, 246, 0.1); border-radius: 4px; padding: 4px 0;">
-                    <div style="flex:1; text-align:left; padding-left:5px;"><small style="color:#60a5fa;">Blue</small></div>
-                    <div style="flex:1; color:#60a5fa;">{row['wg_blue_monthly']:.1f}</div>
-                    <div style="flex:1; color:#60a5fa;">{row['fl_blue_monthly']:.1f}</div>
-                    <div style="flex:1; color:#60a5fa;">{row['ip_blue_monthly']:.1f}</div>
-                </div>
-                
-                <div style="display:flex; justify-content:space-between; text-align:center; background: rgba(244, 63, 94, 0.1); border-radius: 4px; padding: 4px 0;">
-                    <div style="flex:1; text-align:left; padding-left:5px;"><small style="color:#fb7185;">Red</small></div>
-                    <div style="flex:1; color:#fb7185;">{row['wg_red_monthly']:.1f}</div>
-                    <div style="flex:1; color:#fb7185;">{row['fl_red_monthly']:.1f}</div>
-                    <div style="flex:1; color:#fb7185;">{row['ip_red_monthly']:.1f}</div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+<div style="background-color:#0f172a; padding:20px; border-radius:15px; color:white; margin-bottom:20px;">
+<p style="font-size:0.7rem; color:#94a3b8; margin-bottom:2px; letter-spacing: 0.05em;">OVERALL STATUS</p>
+<h2 style="margin:0; font-size:1.3rem; color: #f8fafc;">{label}</h2>
+<hr style="border-color:#1e293b; margin:15px 0;">
+<div style="display:flex; justify-content:space-between; text-align:center; margin-bottom:10px;">
+<div style="flex:1;"></div>
+<div style="flex:1;"><small style="color:#94a3b8; font-weight:bold;">WG</small></div>
+<div style="flex:1;"><small style="color:#94a3b8; font-weight:bold;">FL</small></div>
+<div style="flex:1;"><small style="color:#94a3b8; font-weight:bold;">IP</small></div>
+</div>
+<div style="display:flex; justify-content:space-between; text-align:center; margin-bottom:12px;">
+<div style="flex:1; text-align:left;"><small style="color:#94a3b8;">Total</small></div>
+<div style="flex:1;"><b style="font-size:1.1rem;">{wg_t}</b></div>
+<div style="flex:1;"><b style="font-size:1.1rem;">{fl_t}</b></div>
+<div style="flex:1;"><b style="font-size:1.1rem;">{ip_t}</b></div>
+</div>
+<div style="display:flex; justify-content:space-between; text-align:center; margin-bottom:8px; background: rgba(59, 130, 246, 0.1); border-radius: 4px; padding: 4px 0;">
+<div style="flex:1; text-align:left; padding-left:5px;"><small style="color:#60a5fa;">Blue</small></div>
+<div style="flex:1; color:#60a5fa;">{wg_b}</div>
+<div style="flex:1; color:#60a5fa;">{fl_b}</div>
+<div style="flex:1; color:#60a5fa;">{ip_b}</div>
+</div>
+<div style="display:flex; justify-content:space-between; text-align:center; background: rgba(244, 63, 94, 0.1); border-radius: 4px; padding: 4px 0;">
+<div style="flex:1; text-align:left; padding-left:5px;"><small style="color:#fb7185;">Red</small></div>
+<div style="flex:1; color:#fb7185;">{wg_r}</div>
+<div style="flex:1; color:#fb7185;">{fl_r}</div>
+<div style="flex:1; color:#fb7185;">{ip_r}</div>
+</div>
+</div>
+""", unsafe_allow_html=True)
 
         st.write("---")
         st.subheader("Red Air Exposure")
