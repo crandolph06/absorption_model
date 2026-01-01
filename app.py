@@ -188,16 +188,11 @@ with col_main:
 
     col_heat_1, col_heat_2 = st.columns([2, 1])
     with col_heat_2:
-        # Toggle for Blue vs All
         is_blue = st.toggle("Show Only Blue RAP Counters", value=False)
-        toggle_label = "Show Only Blue RAP Counters" if is_blue else "Show All Sorties as RAP Counters"
+        code_col = "blue_rap_state_code" if is_blue else "rap_state_code"
+        label_col = "blue_rap_state_label" if is_blue else "rap_state_label"
 
-    # Determine which columns to use based on toggle
-    code_col = "blue_rap_state_code" if is_blue else "rap_state_code"
-    label_col = "blue_rap_state_label" if is_blue else "rap_state_label"
-
-    # Create pivot table for heatmap
-    # We use max() or mean() since there should only be one state per UTE/Exp combination
+    # Create pivot table
     heat_df = df.pivot_table(
         index='ute', 
         columns='exp_ratio', 
@@ -205,40 +200,98 @@ with col_main:
         aggfunc='first'
     ).sort_index(ascending=False)
 
-    # Define the Custom Color Mapping
-    # 0: Green | 1,2,4: Yellows | 3,5,6: Oranges | 9: Red
-    # Colors mapping: 0->Green, 1,2->LightYellow, 4->DarkYellow, 3,5->LightOrange, 6->DarkOrange, 9->Red
-    color_scale = [
-        [0.0, "#22c55e"],   # 0 - Green
-        [0.11, "#22c55e"],
-        [0.11, "#fef08a"],  # 1 - Light Yellow
-        [0.22, "#fde047"],  # 2 - Med Yellow
-        [0.33, "#facc15"],  # 3 - Light Orange (mapped for value 3)
-        [0.44, "#eab308"],  # 4 - Dark Yellow
-        [0.55, "#f97316"],  # 5 - Med Orange
-        [0.66, "#ea580c"],  # 6 - Dark Orange
-        [1.0, "#ef4444"]    # 9 - Red
-    ]
+    label_df = df.pivot_table(
+       index='ute', 
+        columns='exp_ratio', 
+        values=label_col, 
+        aggfunc='first'
+    ).sort_index(ascending=False)
 
-    fig_heat = go.Figure(data=go.Heatmap(
+    state_labels = {
+        0: "All Make RAP",
+        1: "WG Shortfall",
+        2: "FL Shortfall",
+        3: "WG + FL Shortfall",
+        4: "IP Shortfall",
+        5: "WG + IP Shortfall",
+        6: "FL + IP Shortfall",
+        7: "WG + FL + IP Shortfall"
+    }
+
+    # Define the Discrete Color Mapping
+    color_map = {
+        0: "#22c55e",  # Green
+        1: "#fef08a",  # Yellow 1
+        2: "#fde047",  # Yellow 2
+        4: "#eab308",  # Yellow 3 (Darker)
+        3: "#fdba74",  # Orange 1
+        5: "#f97316",  # Orange 2
+        6: "#ea580c",  # Orange 3 (Darker)
+        7: "#ef4444"   # Red
+    }
+
+    # Create the custom discrete colorscale for the heatmap
+    # We normalize the keys to a 0-1 scale for Plotly
+    max_val = 9
+    discrete_colorscale = []
+    for val, hex_color in sorted(color_map.items()):
+        loc = val / max_val
+        discrete_colorscale.append([loc, hex_color])
+        # Add a second point just before the next one to create solid blocks instead of gradients
+        next_val_list = [v for v in color_map.keys() if v > val]
+        if next_val_list:
+            next_loc = (min(next_val_list) - 0.01) / max_val
+            discrete_colorscale.append([next_loc, hex_color])
+        else:
+            discrete_colorscale.append([1.0, hex_color])
+
+    fig_heat = go.Figure()
+
+    # 1. Add the Heatmap (Hide the default colorbar)
+    fig_heat.add_trace(go.Heatmap(
         z=heat_df.values,
         x=heat_df.columns,
         y=heat_df.index,
-        colorscale=color_scale,
-        showscale=True,
-        colorbar=dict(
-            title="State Code",
-            tickvals=[0, 1, 2, 3, 4, 5, 6, 9],
-            ticktext=["0 (Healthy)", "1", "2", "3", "4", "5", "6", "9 (Critical)"]
-        ),
-        hovertemplate="Exp Ratio: %{x}<br>UTE: %{y}<br>Code: %{z}<extra></extra>"
+        # This sends the 2D array of text labels to the chart
+        customdata=label_df.values, 
+        colorscale=discrete_colorscale,
+        showscale=False,
+        zmin=0,
+        zmax=7, 
+        xgap=1,
+        ygap=1,
+        # %{customdata} pulls the text string from our label_df
+        hovertemplate=(
+            "<b>Status: %{customdata}</b><br>" + 
+            "Exp Ratio: %{x:.0%}<br>" +
+            "UTE: %{y}<br>" +
+            "<extra></extra>"
+        )
     ))
+
+    for code, color in color_map.items():
+        fig_heat.add_trace(go.Scatter(
+            x=[None], y=[None],
+            mode='markers',
+            marker=dict(size=15, symbol='square', color=color),
+            showlegend=True,
+            name=state_labels.get(code, f"State {code}")
+        ))
 
     fig_heat.update_layout(
         xaxis_title="Experience Ratio",
         yaxis_title="UTE",
         height=500,
-        margin=dict(l=20, r=20, t=20, b=20)
+        margin=dict(l=20, r=20, t=20, b=20),
+        legend=dict(
+            title="RAP State Legend",
+            bordercolor="Gray",
+            borderwidth=1,
+            yanchor="top",
+            y=1,
+            xanchor="left",
+            x=1.02
+        )
     )
 
     st.plotly_chart(fig_heat, use_container_width=True)
