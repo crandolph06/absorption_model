@@ -64,7 +64,7 @@ with st.sidebar:
 
 # --- UI HEADER ---
 st.title("✈️ Pilot Supply Chain Analytics")
-st.caption("Interactive Dashboard for RAP Equity and Sortie Composition")
+st.caption("Interactive Dashboard for RAP Equity and Sortie Composition -- 120 Day Training Phase Snapshot")
 
 # --- DATA PROCESSING LOGIC ---
 def get_filtered_data(target_x):
