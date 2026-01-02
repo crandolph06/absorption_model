@@ -103,7 +103,7 @@ with col_main:
                                           line=dict(color=colors_total[col], width=3), mode='lines+markers'))
         fig_equity.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
         fig_equity.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
-        fig_equity.update_layout(hovermode="x unified", margin=dict(l=20, r=20, t=30, b=20), height=350)
+        fig_equity.update_layout(xaxis_title='UTE', yaxis_title='Monthly Sorties', hovermode="x unified", margin=dict(l=20, r=20, t=30, b=20), height=350)
         st.plotly_chart(fig_equity, use_container_width=True)
 
     # CHART 2: COMPOSITION
