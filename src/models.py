@@ -17,6 +17,7 @@ class SquadronConfig:
     ip_qty: int
     phase_length_days: int = 120  # ~1/3 year or 4 months
     avg_sortie_dur: float = 1.3
+    id: int = 99
 
 # ----------------------
 # Enums 
@@ -46,7 +47,7 @@ class Assignment(Enum):
 # ----------------------
 @dataclass
 class Pilot:
-    qual: Qual = Qual.WG
+    qual: Qual = Qual.WG 
     upgrade: Upgrade = Upgrade.NONE
     sortie_phase: float = 0 
     hours_phase: float = 0
@@ -71,6 +72,7 @@ class Pilot:
     rap_shortfall: float = 0
 
     year_group: int = 9999
+    squadron_id: int = 99
     sorties_flown: int = 0
     hours_flown: int = 0
     adsc_remaining: int = 120 # Measured in months
@@ -89,13 +91,12 @@ class Pilot:
             self.sortie_blue_monthly = self.sortie_blue_phase / months
             self.sortie_red_monthly = self.sortie_red_phase / months
 
-    def reset_phase_counters(pilots):
-        for p in pilots:
-            p.sortie_phase = 0
-            p.hours_phase = 0
-            p.sortie_blue_phase = 0
-            p.sortie_red_phase = 0
-            p.sim_phase = 0
+    def reset_phase_counters(self):
+        self.sortie_phase = 0
+        self.hours_phase = 0
+        self.sortie_blue_phase = 0
+        self.sortie_red_phase = 0
+        self.sim_phase = 0
 
     def add_sortie(self, avg_sortie_dur: float, side: str = "Blue"):
         self.sortie_phase += 1
@@ -114,22 +115,11 @@ class Pilot:
         self.sorties_flown += phase_sorties
         self.hours_flown += phase_hours
         
-        # Decrement commitment
         if self.adsc_remaining > 0:
             self.adsc_remaining -= 4
-            
-        # Check for upgrades
-        self.best_case_flight_lead_upgrade()
-        self.best_case_instructor_upgrade()
 
-    def best_case_flight_lead_upgrade(self):
-        # Updated to handle '>= 250' so they don't miss the window
-        if self.qual == Qual.WG and self.sorties_flown >= 250:
-            self.qual = Qual.FL
-
-    def best_case_instructor_upgrade(self):
-        if self.qual == Qual.FL and self.hours_flown >= 400:
-            self.qual = Qual.IP
+        if self.upgrade == Upgrade.MQT:
+            self.upgrade = Upgrade.NONE
     
     def check_retention(self, retention_pct: float):
         """
@@ -143,15 +133,6 @@ class Pilot:
 
             else: 
                 self.adsc_remaining += 2 # Assumes additional 2-year ADSC
-
-@dataclass
-class YearGroup:
-    year: int
-    pilots: list[Pilot] = field(default_factory=list)
-
-    @property
-    def num_active_pilots(self):
-        return len([p for p in self.pilots if p.active])
     
 @dataclass 
 class AgingRate:
