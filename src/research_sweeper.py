@@ -7,13 +7,13 @@ from src.rap_state import rap_assess, rap_state_code, rap_state_label
 
 def run_research_sweep(average_iterations=True):
     # --- RANGES ---
-    ute_values = list(range(10, 21))
+    ute_values = list(range(6, 21))
     ip_qty_values = list(range(3, 8))
-    exp_ratios = [0.3, 0.4, 0.5, 0.6, 0.7]
+    exp_ratios = [0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
     paa_values = [18, 21, 24]
-    mqt_students = [2, 4, 6, 8, 10]
-    flug_students = [2, 4, 6, 8, 10]
-    ipug_students = [2, 4, 6, 8, 10]
+    mqt_students = [0, 2, 4, 6, 8, 10]
+    flug_students = [0, 2, 4, 6, 8, 10]
+    ipug_students = [0, 2, 4, 6, 8, 10]
     total_pilots = [25, 30, 35, 40]
 
     PHASE_DAYS = 120
