@@ -87,9 +87,9 @@ def get_filtered_data(target_x):
 col_main, col_summary = st.columns([3, 1])
 
 with col_main:
-    # CHART 1: EQUITY
+    # CHART 1: EQUITY # TODO update X axis title based on selectbox
     st.subheader("📊 Sortie Equity (Total Monthly)")
-    x_options = [c for c in ['ute', 'paa', 'total_pilots', 'exp_ratio'] if c in df.columns]
+    x_options = [c for c in ['ute', 'paa', 'total_pilots'] if c in df.columns]
     ix_equity = x_options.index('ute') if 'ute' in x_options else 0
     x_var_equity = st.selectbox("X-Axis Variable", x_options, index=ix_equity, key="equity_x")
     equity_data = get_filtered_data(x_var_equity)
@@ -106,7 +106,7 @@ with col_main:
         fig_equity.update_layout(xaxis_title='UTE', yaxis_title='Monthly Sorties', hovermode="x unified", margin=dict(l=20, r=20, t=30, b=20), height=350)
         st.plotly_chart(fig_equity, use_container_width=True)
 
-    # CHART 2: COMPOSITION
+    # CHART 2: COMPOSITION # TODO update X axis title based on selectbox
     st.write("---")
     st.subheader("🧱 Sortie Composition")
     col_comp_1, col_comp_2 = st.columns([2, 1])
