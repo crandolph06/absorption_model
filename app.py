@@ -131,6 +131,8 @@ with col_main:
             fig_comp.add_trace(go.Bar(x=comp_data[x_var_comp], y=comp_data[f'{role}_red_monthly'], name=f"{role.upper()} Red", marker_color=colors[role][1], offsetgroup=role, base=comp_data[f'{role}_blue_monthly']))
             if show_trends:
                 fig_comp.add_trace(go.Scatter(x=comp_data[x_var_comp], y=comp_data[f'{role}_monthly'], name=f"{role.upper()} Total Trend", line=dict(color=colors[role][0], width=2), mode='lines+markers'))
+        fig_comp.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
+        fig_comp.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
         fig_comp.update_layout(xaxis_title='Experience Ratio', yaxis_title='Monthly Sorties', barmode='group', height=450, margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
         st.plotly_chart(fig_comp, use_container_width=True)
 
