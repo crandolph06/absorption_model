@@ -16,20 +16,25 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # 3. SINGLE DATA LOADING FUNCTION
-DEFAULT_DATA_PATH = "outputs/research_data.csv"
+# DEFAULT_DATA_PATH = "outputs/research_data.csv"
+DEFAULT_DATA_PATH = "outputs/simulation_results.parquet"
 
 @st.cache_data
 def load_data(uploaded_file):
     # Priority 1: User Upload
     if uploaded_file is not None:
+        if uploaded_file.name.endswith('.parquet'):
+            return pd.read_parquet(uploaded_file)
         return pd.read_csv(uploaded_file)
     
     # Priority 2: Automated Path in Repo
     if os.path.exists(DEFAULT_DATA_PATH):
+        if uploaded_file.name.endswith('.parquet'):
+            return pd.read_parquet(DEFAULT_DATA_PATH)
         return pd.read_csv(DEFAULT_DATA_PATH)
     
     # Priority 3: Mock Data Fallback (Only if file is missing)
-    st.warning("Default CSV not found. Loading mock data.")
+    st.warning("Default file not found. Loading mock data.")
     data = [[18, 10, 180, 0.3, 3, 30, 2, 2, 2, 1, "WG Shortfall", 1, "WG Shortfall", 4.0, 4.62, 14.0, 14.0, 3.78, 11.31, 13.08, 0.84, 2.69, 0.92, 0.18, 0.19, 0.06]]
     cols = ["paa", "ute", "total_capacity", "exp_ratio", "ip_qty", "total_pilots", "mqt_qty", "flug_qty", "ipug_qty", "rap_state_code", "rap_state_label", "blue_rap_state_code", "blue_rap_state_label", "mqt_monthly", "wg_monthly", "fl_monthly", "ip_monthly", "wg_blue_monthly", "fl_blue_monthly", "ip_blue_monthly", "wg_red_monthly", "fl_red_monthly", "ip_red_monthly", "wg_red_pct", "fl_red_pct", "ip_red_pct"]
     return pd.DataFrame(data, columns=cols)
@@ -37,7 +42,7 @@ def load_data(uploaded_file):
 # 4. SIDEBAR - ONLY ONE FILE UPLOADER
 with st.sidebar:
     st.header("📊 Data Settings")
-    uploaded_file = st.file_uploader("Upload an override CSV", type="csv")
+    uploaded_file = st.file_uploader("Upload data", type=["csv", "parquet"])
     
     # Load the data once
     with st.spinner('Loading data...'):
@@ -89,7 +94,7 @@ col_main, col_summary = st.columns([3, 1])
 with col_main:
     # CHART 1: EQUITY # TODO update X axis title based on selectbox
     st.subheader("📊 Sortie Equity (Total Monthly)")
-    x_options = [c for c in ['ute', 'paa', 'total_pilots'] if c in df.columns]
+    x_options = [c for c in ['ute', 'paa', 'total_pilots', 'exp_ratio'] if c in df.columns]
     ix_equity = x_options.index('ute') if 'ute' in x_options else 0
     x_var_equity = st.selectbox("X-Axis Variable", x_options, index=ix_equity, key="equity_x")
     equity_data = get_filtered_data(x_var_equity)
@@ -136,8 +141,24 @@ with col_main:
     code_col = "blue_rap_state_code" if is_blue else "rap_state_code"
     label_col = "blue_rap_state_label" if is_blue else "rap_state_label"
 
-    heat_df = df.pivot_table(index='ute', columns='exp_ratio', values=code_col, aggfunc='first').sort_index(ascending=False)
-    label_df = df.pivot_table(index='ute', columns='exp_ratio', values=label_col, aggfunc='first').sort_index(ascending=False)
+    
+    heat_mask = pd.Series([True] * len(df))
+    for col, val in inputs.items():
+        # We do NOT filter by UTE or EXP_RATIO here because they are the X and Y axes of the map
+        if col not in ['ute', 'exp_ratio']:
+            heat_mask &= (df[col] == val)
+
+    df_heat_filtered = df[heat_mask].copy()
+
+    if not df_heat_filtered.empty:
+        # 3. Pivot using the FILTERED data
+        heat_df = df_heat_filtered.pivot_table(index='ute', columns='exp_ratio', values=code_col, aggfunc='first').sort_index(ascending=False)
+        label_df = df_heat_filtered.pivot_table(index='ute', columns='exp_ratio', values=label_col, aggfunc='first').sort_index(ascending=False)
+
+    else:
+        heat_df = df.pivot_table(index='ute', columns='exp_ratio', values=code_col, aggfunc='first').sort_index(ascending=False)
+        label_df = df.pivot_table(index='ute', columns='exp_ratio', values=label_col, aggfunc='first').sort_index(ascending=False)
+
     
     color_map = {0: "#22c55e", 1: "#fef08a", 2: "#fde047", 3: "#fdba74", 4: "#eab308", 5: "#f97316", 6: "#ea580c", 7: "#ef4444"}
     max_val = 7
@@ -162,7 +183,8 @@ with col_main:
     for code, color in color_map.items():
         fig_heat.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=12, symbol='square', color=color), showlegend=True, name=state_labels_dict.get(code)))
 
-    fig_heat.update_layout(xaxis_title="Experience Ratio", yaxis_title="UTE", height=500, xaxis=dict(tickformat=".0%"))
+    fig_heat.update_layout(xaxis_title="Experience Ratio", yaxis_title="UTE", height=500)
+    # fig_heat.update_layout(xaxis_title="Experience Ratio", yaxis_title="UTE", height=500, xaxis=dict(tickformat=".0%"))
     st.plotly_chart(fig_heat, use_container_width=True)
 
 # --- SUMMARY SIDEBAR ---
