@@ -23,13 +23,13 @@ DEFAULT_DATA_PATH = "outputs/simulation_results.parquet"
 def load_data(uploaded_file):
     # Priority 1: User Upload
     if uploaded_file is not None:
-        if uploaded_file.name.endswith('.parquet'):
+        if uploaded_file.endswith('.parquet'):
             return pd.read_parquet(uploaded_file)
         return pd.read_csv(uploaded_file)
     
     # Priority 2: Automated Path in Repo
     if os.path.exists(DEFAULT_DATA_PATH):
-        if uploaded_file.name.endswith('.parquet'):
+        if DEFAULT_DATA_PATH.endswith('.parquet'):
             return pd.read_parquet(DEFAULT_DATA_PATH)
         return pd.read_csv(DEFAULT_DATA_PATH)
     
