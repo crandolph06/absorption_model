@@ -1,6 +1,6 @@
 import pandas as pd
 from typing import List
-from models import Pilot, Qual, SquadronConfig, Upgrade, AgingRate
+from models import Pilot, Qual, SquadronConfig, Upgrade
 
 
 class CAFSimulation:
@@ -48,9 +48,7 @@ class CAFSimulation:
         squadron_configs: list -> [Config(id=1, paa=12...), Config(id=2, paa=24...)]
         """
         self.squadrons = squadron_configs
-        end_year = self.current_year + years_to_run
-
-        for year in range(self.current_year, end_year):
+        for year in range(self.current_year, self.current_year + years_to_run):
             phase_intake = annual_intake // 3
             remainder = annual_intake % 3
 
@@ -58,42 +56,41 @@ class CAFSimulation:
                 current_batch = phase_intake + (remainder if phase_num == 3 else 0)
                 self.add_new_bcourse_graduates(year, current_batch)
 
-                for config in squadron_configs:
-                    self.run_phase(config)
+                for sq in self.squadrons:
+                    rates = sq.calculate_aging_rates()
+                    sq.apply_phase_aging()
             
-            self.process_end_of_phase(year, phase_num, retention_rate, sim_upgrades=False)
+            self.process_end_of_phase(year, phase_num, retention_rate)
             
         return pd.DataFrame(self.history)
 
-    def process_end_of_phase(self, year: int, phase_num: int, retention_rate: float, sim_upgrades: bool = False):
+    def process_end_of_phase(self, year: int, phase_num: int, retention_rate: float):
         pilots_retained = 0
         pilots_separated = 0
+        active_roster = self.active_pilots
         
-        for p in self.pilots:
-            if not p.active:
-                continue
+        for sq in self.squadrons:
+            for p in sq.pilots:
+                if p.active:
+                    p.check_retention(retention_rate)
+                    if p.active: 
+                        pilots_retained += 1
+                    else:
+                        pilots_separated += 1
 
-            if p.adsc_remaining <= 0:
-                p.check_retention(retention_rate)
 
-                if not p.active:
-                    pilots_separated += 1
-                    continue
+            sq.graduate_current_upgrades()
 
-                else:
-                    pilots_retained += 1
-            
-            self.check_for_upgrades(p, sim_upgrades)
-        
-        active_pilots = [p for p in self.pilots if p.active]
+            for p in sq.pilots:
+                p.reset_phase_counters()
 
         current_stats = {
             'year': year,
             'phase': phase_num,
-            'wg_count': sum(1 for p in active_pilots if p.qual == Qual.WG),
-            'fl_count': sum(1 for p in active_pilots if p.qual == Qual.FL),
-            'ip_count': sum (1 for p in active_pilots if p.qual == Qual.IP),
-            'total_pilots': sum(1 for p in active_pilots),
+            'wg_count': sum(1 for p in active_roster if p.qual == Qual.WG),
+            'fl_count': sum(1 for p in active_roster if p.qual == Qual.FL),
+            'ip_count': sum (1 for p in active_roster if p.qual == Qual.IP),
+            'total_pilots': sum(1 for p in active_roster),
             'retained': pilots_retained,
             'separated': pilots_separated
         }
@@ -105,7 +102,3 @@ class CAFSimulation:
             current_stats['exp_rat'] = 0
 
         self.history.append(current_stats)
-
-        for p in active_pilots:
-            p.graduate()
-            p.reset_phase_counters()

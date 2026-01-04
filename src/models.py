@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 import random
 from typing import List
@@ -116,7 +116,7 @@ class Pilot:
         elif self.upgrade == Upgrade.IPUG:
             self.qual = Qual.IP
             
-        self.upgrade == None
+        self.upgrade = None
 
     def age_one_phase_with_rates(self, phase_sorties: float, phase_hours: float): # TODO Update as model develops
         """Updates pilot experience based on the calculated environment."""
@@ -165,12 +165,9 @@ class SquadronConfig:
     pilots: List[Pilot]
 
     def graduate_current_upgrades(self):
-        graduated_count = 0
-
         for pilot in self.pilots:
             if pilot.upgrade != Upgrade.NONE:
                 pilot.graduate()
-                graduated_count += 1
 
     def new_phase_upgrades(self, sim_upgrades: bool = False):
         mqt_count = sum(1 for p in self.pilots if p.upgrade == Upgrade.MQT)
