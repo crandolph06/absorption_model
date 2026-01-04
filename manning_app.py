@@ -16,7 +16,7 @@ This dashboard simulates pilot career progression over 10-20 years. This is a si
 st.sidebar.header("Simulation Parameters")
 years = st.sidebar.slider("Years to Run", 5, 20, 10)
 intake = st.sidebar.slider("Annual B-Course Intake", 10, 350, 150)
-retention = st.sidebar.slider("Retention Rate (0.0 - 1.0)", 0.2, 0.6, 0.4)
+retention = st.sidebar.slider("Retention Rate (0.0 - 1.0)", 0.0, 1.0, 0.4)
 
 # --- Run Simulation ---
 if st.sidebar.button("Run Simulation"):
@@ -53,6 +53,9 @@ if st.sidebar.button("Run Simulation"):
         # Add a "Red Line" for critical health (e.g., 25%)
         fig_exp.add_hline(y=0.45, line_dash="dash", line_color="yellow", annotation_text="Runaway Sortie Inequity Line")
         st.plotly_chart(fig_exp, use_container_width=True)
+
+
+
 
     # --- Retention vs Separation Chart ---
     st.subheader("Retention vs Separations")
