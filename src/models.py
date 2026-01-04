@@ -116,7 +116,7 @@ class Pilot:
         elif self.upgrade == Upgrade.IPUG:
             self.qual = Qual.IP
             
-        self.upgrade = None
+        self.upgrade = Upgrade.NONE
 
     def age_one_phase_with_rates(self, phase_sorties: float, phase_hours: float): # TODO Update as model develops
         """Updates pilot experience based on the calculated environment."""
@@ -239,7 +239,7 @@ class SquadronConfig:
         
     def calculate_aging_rates(self): 
         mqt, flug, ipug = self.new_phase_upgrades()
-        sum_students = mqt + flug + ipug
+        sum_students = max(mqt + flug + ipug, 0.01)
 
         total_pilots = self.total_pilots
         exp_ratio = self.experience_ratio
