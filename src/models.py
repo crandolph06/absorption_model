@@ -237,7 +237,7 @@ class SquadronConfig:
 
             p.adsc_remaining -= phase_months
         
-    def calculate_aging_rates(self): 
+    def calculate_aging_rates(self):  # TODO Broken -- need to fix. Lookup table?
         mqt, flug, ipug = self.new_phase_upgrades()
         sum_students = max(mqt + flug + ipug, 0.01)
 
@@ -262,7 +262,7 @@ class SquadronConfig:
         phase_months = self.phase_length_days / 30
 
         total_capacity = self.ute * self.paa
-        ip_sorties = self.ip_qty * ip_rate * phase_months
+        ip_sorties = self.ip_qty * ip_rate
         fl_sorties = num_fls * fl_rate 
         mqt_sorties = mqt * mqt_rate
         remaining_for_wg = total_capacity - ip_sorties - fl_sorties - mqt_sorties
