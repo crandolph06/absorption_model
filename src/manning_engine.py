@@ -69,9 +69,19 @@ class CAFSimulation:
         pilots_retained = 0
         pilots_separated = 0
         active_roster = self.active_pilots
+
+        wg_rates, fl_rates, ip_rates = [], [], []
         
         for sq in self.squadrons:
+            current_rates = sq.calculate_aging_rates()
+            months = sq.phase_length_days / 30
+
+            wg_rates.append(current_rates.wg_phase / months)
+            fl_rates.append(current_rates.fl_phase / months)
+            ip_rates.append(current_rates.ip_phase / months)
+
             for p in sq.pilots:
+
                 if p.active:
                     p.check_retention(retention_rate)
                     if p.active: 
@@ -79,22 +89,30 @@ class CAFSimulation:
                     else:
                         pilots_separated += 1
 
-
             sq.graduate_current_upgrades()
 
             for p in sq.pilots:
                 p.reset_phase_counters()
 
-        current_stats = {
-            'year': year,
-            'phase': phase_num,
-            'wg_count': sum(1 for p in active_roster if p.qual == Qual.WG),
-            'fl_count': sum(1 for p in active_roster if p.qual == Qual.FL),
-            'ip_count': sum (1 for p in active_roster if p.qual == Qual.IP),
-            'total_pilots': sum(1 for p in active_roster),
-            'retained': pilots_retained,
-            'separated': pilots_separated
-        }
+            num_sqs = len(self.squadrons)
+            avg_wg_rate = sum(wg_rates) / num_sqs if num_sqs > 0 else 0
+            avg_fl_rate = sum(fl_rates) / num_sqs if num_sqs > 0 else 0
+            avg_ip_rate = sum(ip_rates) / num_sqs if num_sqs > 0 else 0
+
+            current_stats = {
+                'year': year,
+                'phase': phase_num,
+                'squadron_id': sq.id,
+                'wg_count': sum(1 for p in active_roster if p.qual == Qual.WG),
+                'fl_count': sum(1 for p in active_roster if p.qual == Qual.FL),
+                'ip_count': sum (1 for p in active_roster if p.qual == Qual.IP),
+                'total_pilots': sum(1 for p in active_roster),
+                'retained': pilots_retained,
+                'separated': pilots_separated,
+                'wg_rate_mo': avg_wg_rate,
+                'fl_rate_mo': avg_fl_rate,
+                'ip_rate_mo': avg_ip_rate
+            }
 
         if current_stats['total_pilots'] > 0:
             exp_pilots = current_stats['fl_count'] + current_stats['ip_count']
