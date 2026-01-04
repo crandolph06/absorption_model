@@ -1,26 +1,25 @@
 from dataclasses import dataclass, field
 from enum import Enum
 import random
+from typing import List
+from math import sqrt
 
 # ----------------------
-# Config 
+# Simple Upgrade Logic 
 # ----------------------
-@dataclass
-class SquadronConfig:
-    ute: float
-    paa: int
-    mqt_students: int
-    flug_students: int
-    ipug_students: int
-    total_pilots: int
-    experience_ratio: float
-    ip_qty: int
-    phase_length_days: int = 120  # ~1/3 year or 4 months
-    avg_sortie_dur: float = 1.3
-    id: int = 99
+FLUG_WINDOW_START = 250 # Sorties
+FLUG_WINDOW_END = 265 # Sorties
+IPUG_WINDOW_START = 400 # Hours
+IPUG_WINDOW_END = 430 # Hours
 
 # ----------------------
-# Enums 
+# Math 
+# ----------------------
+def inv(x): return 1/x if x != 0 else 0
+def square(x): return x**2
+
+# ----------------------
+# Enums & Simple Classes
 # ----------------------
 
 class Qual(Enum):
@@ -42,6 +41,18 @@ class Assignment(Enum):
     LINE = 'LINE'
     STAFF = 'STAFF'
     TRAINING = 'TRAINING'
+
+@dataclass 
+class AgingRate:
+    mqt_phase: float = 0.0
+    wg_phase: float = 0.0
+    fl_phase: float = 0.0
+    ip_phase: float = 0.0
+
+    mqt_blue_phase: float = 0.0
+    wg_blue_phase: float = 0.0
+    fl_blue_phase: float = 0.0
+    ip_blue_phase: float = 0.0
 # ----------------------
 # Pilot Entity
 # ----------------------
@@ -60,16 +71,6 @@ class Pilot:
     sim_monthly: float = 0
     sortie_blue_monthly: float = 0
     sortie_red_monthly: float = 0
-
-    wg_rap: float = 0
-    mqt_rap: float = 0
-    fl_rap: float = 0
-    flug_rap: float = 0
-    ip_rap: float = 0
-    ipug_rap: float = 0
-
-    target_sorties: float = 0
-    rap_shortfall: float = 0
 
     year_group: int = 9999
     squadron_id: int = 99
@@ -107,6 +108,16 @@ class Pilot:
 
         self.hours_phase += avg_sortie_dur
 
+    def graduate(self):
+        if self.upgrade == Upgrade.MQT:
+            self.qual = Qual.WG
+        elif self.upgrade == Upgrade.FLUG:
+            self.qual = Qual.FL
+        elif self.upgrade == Upgrade.IPUG:
+            self.qual = Qual.IP
+            
+        self.upgrade == None
+
     def age_one_phase_with_rates(self, phase_sorties: float, phase_hours: float): # TODO Update as model develops
         """Updates pilot experience based on the calculated environment."""
         if not self.active:
@@ -134,13 +145,104 @@ class Pilot:
             else: 
                 self.adsc_remaining += 2 # Assumes additional 2-year ADSC
     
-@dataclass 
-class AgingRate:
-    wg_phase: float = 0.0
-    fl_phase: float = 0.0
-    ip_phase: float = 0.0
 
-    wg_blue_phase: float = 0.0
-    fl_blue_phase: float = 0.0
-    ip_blue_phase: float = 0.0
+# ----------------------
+# Squadron Config 
+# ----------------------
+@dataclass
+class SquadronConfig:
+    ute: float
+    paa: int
+    mqt_students: int
+    flug_students: int
+    ipug_students: int
+    total_pilots: int
+    experience_ratio: float
+    ip_qty: int
+    phase_length_days: int = 120  # ~1/3 year or 4 months
+    avg_sortie_dur: float = 1.3
+    id: int = 99
+    pilots: List[Pilot]
+
+    def graduate_current_upgrades(self):
+        graduated_count = 0
+
+        for pilot in self.pilots:
+            if pilot.upgrade != Upgrade.NONE:
+                pilot.graduate()
+                graduated_count += 1
+
+    def new_phase_upgrades(self, sim_upgrades: bool = False):
+        mqt_count = sum(1 for p in self.pilots if p.upgrade == Upgrade.MQT)
+
+        if not sim_upgrades:
+            flug_eligible = [
+                p for p in self.pilots if p.qual == Qual.WG and p.upgrade == Upgrade.NONE 
+                and FLUG_WINDOW_START <= p.sorties_flown # <= FLUG_WINDOW_END
+            ]
+            for p in flug_eligible:
+                p.upgrade = Upgrade.FLUG
+
+            ipug_eligible = [
+                p for p in self.pilots if p.qual == Qual.FL and p.upgrade == Upgrade.NONE 
+                and IPUG_WINDOW_START <= p.hours_flown # <= IPUG_WINDOW_END
+            ]
+            for p in ipug_eligible:
+                p.upgrade = Upgrade.IPUG
+
+            return mqt_count, len(flug_eligible), len(ipug_eligible)
+        
+        else:
+            # Sim more complex upgrade logic and IP Availability
+            return
+        
+    def apply_phase_aging(self, rates: AgingRate):
+        for p in self.pilots:
+            if p.qual == Qual.IP:
+                p_rate = rates.ip_phase
+            elif p.qual == Qual.FL:
+                p_rate = rates.fl_phase
+            elif p.upgrade == Upgrade.MQT:
+                p_rate = rates.mqt_phase
+            else:
+                p_rate = rates.wg_phase
+
+            p.sorties_flown += p_rate
+            p.hours_flown += p_rate * self.avg_sortie_dur
+        
+    def calculate_aging_rates(self): 
+        mqt, flug, ipug = self.new_phase_upgrades()
+        sum_students = mqt + flug + ipug
+
+        total_pilots = self.total_pilots
+        exp_ratio = self.experience_ratio
+        ip_ratio = self.ip_qty/total_pilots
+        upg_pct = (sum_students)/total_pilots
+        ute_per_pilot = self.ute/total_pilots
+        ac_per_pilot = self.paa/total_pilots
+        ip_to_stud_ratio = self.ip_qty/sum_students
+        ip_load = sum_students/self.ip_qty
+
+        ip_rate = sqrt(inv(exp_ratio) + (square(ac_per_pilot + (ute_per_pilot * (0.8983698 + sqrt(ip_to_stud_ratio)))) + (ip_load / 0.80686635)))
+        fl_rate = sqrt((((sqrt(total_pilots) + 3.5092452) + (0.16958028 / (ip_ratio - exp_ratio + 1e-6))) * (upg_pct + ute_per_pilot)) / ((exp_ratio / ac_per_pilot) + upg_pct))
+        mqt_rate = 4.0
+
+        num_fls = int(exp_ratio * total_pilots)
+        num_wg = total_pilots - num_fls - mqt
+
+        phase_months = self.phase_length_days / 30
+
+        total_capacity = self.ute * self.paa
+        ip_sorties = self.ip_qty * ip_rate * phase_months
+        fl_sorties = num_fls * fl_rate 
+        mqt_sorties = mqt * mqt_rate
+        remaining_for_wg = total_capacity - ip_sorties - fl_sorties - mqt_sorties
+        wg_rate = max(0, (remaining_for_wg / num_wg))
+
+        return AgingRate(
+            mqt_phase = mqt_rate * phase_months,
+            wg_phase=wg_rate * phase_months,
+            fl_phase=fl_rate * phase_months,
+            ip_phase=ip_rate * phase_months,
+        )
 
