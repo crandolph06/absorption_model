@@ -1,7 +1,7 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import random
-from typing import List
+from typing import List, Optional
 from math import sqrt
 
 # ----------------------
@@ -156,14 +156,40 @@ class SquadronConfig:
     mqt_students: int
     flug_students: int
     ipug_students: int
-    total_pilots: int
-    experience_ratio: float
     ip_qty: int
     phase_length_days: int = 120  # ~1/3 year or 4 months
     avg_sortie_dur: float = 1.3
     id: int = 99
-    pilots: List[Pilot]
 
+    _total_pilots: Optional[int] = None
+    _experience_ratio: Optional[float] = None
+
+    pilots: List[Pilot] = field(default_factory=list)
+
+    @property
+    def total_pilots(self) -> int:
+        if self._total_pilots is not None:
+            return self._total_pilots
+        return sum(1 for p in self.pilots if p.active)
+    
+    @total_pilots.setter
+    def total_pilots(self, value: int):
+        self._total_pilots = value
+
+    @property
+    def experience_ratio(self) -> float:
+        if self._experience_ratio is not None:
+            return self._experience_ratio
+        
+        tp = self.total_pilots
+        if tp == 0: return 0.0
+        exp_count = sum(1 for p in self.pilots if p.active and p.qual in [Qual.FL, Qual, IP])
+        return exp_count/tp
+    
+    @experience_ratio.setter
+    def experience_ratio(self, value:float):
+        self._experience_ratio = value
+        
     def graduate_current_upgrades(self):
         for pilot in self.pilots:
             if pilot.upgrade != Upgrade.NONE:
@@ -194,6 +220,8 @@ class SquadronConfig:
             return
         
     def apply_phase_aging(self, rates: AgingRate):
+        phase_months = self.phase_length_days / 30
+
         for p in self.pilots:
             if p.qual == Qual.IP:
                 p_rate = rates.ip_phase
@@ -206,6 +234,8 @@ class SquadronConfig:
 
             p.sorties_flown += p_rate
             p.hours_flown += p_rate * self.avg_sortie_dur
+
+            p.adsc_remaining -= phase_months
         
     def calculate_aging_rates(self): 
         mqt, flug, ipug = self.new_phase_upgrades()
@@ -234,7 +264,7 @@ class SquadronConfig:
         fl_sorties = num_fls * fl_rate 
         mqt_sorties = mqt * mqt_rate
         remaining_for_wg = total_capacity - ip_sorties - fl_sorties - mqt_sorties
-        wg_rate = max(0, (remaining_for_wg / num_wg))
+        wg_rate = remaining_for_wg / num_wg if num_wg > 0 else 0
 
         return AgingRate(
             mqt_phase = mqt_rate * phase_months,
