@@ -183,13 +183,13 @@ class SquadronConfig:
         
         tp = self.total_pilots
         if tp == 0: return 0.0
-        exp_count = sum(1 for p in self.pilots if p.active and p.qual in [Qual.FL, Qual, IP])
+        exp_count = sum(1 for p in self.pilots if p.active and p.qual in [Qual.FL, Qual.IP])
         return exp_count/tp
     
     @experience_ratio.setter
     def experience_ratio(self, value:float):
         self._experience_ratio = value
-        
+
     def graduate_current_upgrades(self):
         for pilot in self.pilots:
             if pilot.upgrade != Upgrade.NONE:

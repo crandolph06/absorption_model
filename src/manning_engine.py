@@ -6,7 +6,7 @@ from models import Pilot, Qual, SquadronConfig, Upgrade
 class CAFSimulation:
     def __init__(self):
         self.history = []
-        self.current_year = 2024
+        self.current_year = 2025
         self.squadrons: List[SquadronConfig] = []
 
     @property
@@ -58,7 +58,7 @@ class CAFSimulation:
 
                 for sq in self.squadrons:
                     rates = sq.calculate_aging_rates()
-                    sq.apply_phase_aging()
+                    sq.apply_phase_aging(rates)
             
             self.process_end_of_phase(year, phase_num, retention_rate)
             
