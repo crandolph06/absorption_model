@@ -50,10 +50,47 @@ if st.sidebar.button("Run Simulation"):
 
     with col1:
         st.subheader("Pilot Population by Qualification")
+
+        squadron_ids = [sq.id for sq in sim.squadrons]
+        filter_options = ["All Squadrons"] + squadron_ids
+
+        # 2. Add the Dropdown
+        selected_sq = st.selectbox("Filter by Squadron ID", options=filter_options)
+
+        # 3. Filter the Data
+        if selected_sq == "All Squadrons":
+            # Use all active pilots (current behavior)
+            filtered_pilots = sim.active_pilots
+        else:
+            # Filter for only the selected squadron ID
+            filtered_pilots = [p for p in sim.active_pilots if p.squadron_id == selected_sq]
+
+        # 4. Generate Dataframe for the Chart
+        pop_data = []
+        for p in filtered_pilots:
+            pop_data.append({
+                'Qual': p.qual.value,
+                'Count': 1
+            })
+
+        df_pop = pd.DataFrame(pop_data)
+        if not df_pop.empty:
+            df_pop = df_pop.groupby('Qual').sum().reset_index()
+            fig_pop = px.pie(df_pop, values='Count', names='Qual', title=f"Population for {selected_sq}")
+            st.plotly_chart(fig_pop, use_container_width=True)
+        else:
+            st.warning(f"No active pilots found for {selected_sq}.")
+
         fig_pop = px.area(df, x='timeline', y=['wg_count', 'fl_count', 'ip_count'],
                           title="Roster Composition Over Time",
-                          labels={'value': 'Count', 'timeline': 'Year/Phase'},
-                          color_discrete_sequence=['#636EFA', '#EF553B', '#00CC96'])
+                          labels={'value': 'Count', 'timeline': 'Year/Phase',
+                                  'wg_rate_mo': 'WG Monthly Rate',
+                                  'fl_rate_mo': 'FL Monthly Rate',
+                                  'ip_rate_mo': 'IP Monthly Rate'},
+                          color_discrete_sequence=['#636EFA', '#EF553B', '#00CC96'],
+                          hover_data={'wg_rate_mo': ':.1f',
+                                      'fl_rate_mo': ':.1f',
+                                      'ip_rate_mo': ':.1f'})
         st.plotly_chart(fig_pop, use_container_width=True)
 
     with col2:
