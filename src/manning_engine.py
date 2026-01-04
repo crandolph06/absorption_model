@@ -43,7 +43,7 @@ class CAFSimulation:
             target_sq.pilots.append(new_pilot)
 
 
-    def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig]):
+    def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0):
         """
         squadron_configs: list -> [Config(id=1, paa=12...), Config(id=2, paa=24...)]
         """
@@ -57,6 +57,7 @@ class CAFSimulation:
                 self.add_new_bcourse_graduates(year, current_batch)
 
                 for sq in self.squadrons:
+                    sq.ute = ute
                     rates = sq.calculate_aging_rates()
                     sq.apply_phase_aging(rates)
             

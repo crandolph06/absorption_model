@@ -18,12 +18,23 @@ years = st.sidebar.slider("Years to Run", 5, 20, 10)
 intake = st.sidebar.slider("Annual B-Course Intake", 10, 350, 150)
 retention = st.sidebar.slider("Retention Rate (0.0 - 1.0)", 0.0, 1.0, 0.4)
 
+st.sidebar.header("Sortie Generation")
+use_custom_ute = st.sidebar.checkbox("Override Baseline UTE (10.0)?", value=False)
+if use_custom_ute:
+    ute_val = st.sidebar.slider("Custom UTE Rate", 6.0, 20.0, 10.0)
+else:
+    ute_val = 10.0
+
+st.sidebar.markdown("---")
+st.sidebar.header("Advanced Analysis")
+run_sensitivity = st.sidebar.checkbox("Run Stability Frontier Analysis")
+
 # --- Run Simulation ---
 if st.sidebar.button("Run Simulation"):
     sim, squadrons = setup_debug_simulation()
     
     # Run the engine
-    df = sim.run_simulation(years, intake, retention, squadrons)
+    df = sim.run_simulation(years, intake, retention, squadrons, ute_val)
     
     # Create a Date column for better X-axis plotting
     df['timeline'] = df['year'].astype(str) + " P" + df['phase'].astype(str)
@@ -46,17 +57,112 @@ if st.sidebar.button("Run Simulation"):
         st.plotly_chart(fig_pop, use_container_width=True)
 
     with col2:
-        st.subheader("The 'Bathtub' (Experience Ratio)")
+        st.subheader("'Bathtub or Cliff?' (Experience Ratio)")
         fig_exp = px.line(df, x='timeline', y='exp_rat', 
                           title="Experience Ratio (%)",
                           labels={'exp_rat': 'Exp Ratio', 'timeline': 'Year/Phase'})
         # Add a "Red Line" for critical health (e.g., 25%)
         fig_exp.add_hline(y=0.45, line_dash="dash", line_color="yellow", annotation_text="Runaway Sortie Inequity Line")
+        fig_exp.add_hline(
+            y=0.60, 
+            line_dash="dot", 
+            line_color="green", 
+            annotation_text="Healthy (> 60% Exp)",
+            annotation_position="bottom right"
+        )
+
+        fig_exp.add_hline(
+            y=0.40, 
+            line_dash="dot", 
+            line_color="red", 
+            annotation_text="Broken (< 40% Exp)",
+            annotation_position="bottom right"
+        )
         st.plotly_chart(fig_exp, use_container_width=True)
 
+    # --- NEW: Stability Frontier Section ---
+    if run_sensitivity:
+        st.divider()
+        st.header("📉 System Stability Frontier")
+        st.write("This chart calculates the final 'health' of the fleet across different intake levels to identify the point of system collapse.")
 
+        with st.spinner("Calculating stability across intake range..."):
+            # 1. Define range to test (e.g., 100 to 350)
+            test_range = list(range(100, 351, 10))
+            stability_data = []
 
+            for val in test_range:
+                # We must re-initialize the sim/squadrons for every loop to prevent data carry-over
+                test_sim, test_sqs = setup_debug_simulation()
+                test_df = test_sim.run_simulation(20, val, retention, test_sqs)
+                
+                start_year = test_df['year'].min()
+                
+                horizons = {
+                    "5-Year Mark": 4,
+                    "10-Year Mark": 9,
+                    "15-Year Mark": 14,
+                    "20-Year Mark": 19
+                }
 
+                for label, year_offset in horizons.items():
+                    target_year = start_year + year_offset
+                    # Capture the ratio from the final phase of that year
+                    snapshot = test_df[test_df['year'] == target_year]
+                    if not snapshot.empty:
+                        ratio = snapshot['exp_rat'].iloc[-1]
+                        stability_data.append({
+                            "Annual Intake": val, 
+                            "Exp Ratio": ratio, 
+                            "Horizon": label
+                        })
+
+            analysis_df = pd.DataFrame(stability_data)
+
+            # Create the Frontier Chart
+            fig_frontier = px.line(
+                analysis_df, 
+                x="Annual Intake", 
+                y="Exp Ratio",
+                color="Horizon",
+                title="System Health Decay: Multi-Decade Stability",
+                labels={"Exp Ratio": "Experience Ratio (%)", "Annual Intake": "Annual B-Course Intake"},
+                # Sequential color palette to show progression of time
+                color_discrete_sequence=px.colors.sequential.Reds_r 
+            )
+
+            fig_frontier.add_hline(
+                y=0.60, 
+                line_dash="dot", 
+                line_color="green", 
+                annotation_text="Healthy (> 60% Exp)",
+                annotation_position="bottom right"
+            )
+
+            fig_frontier.add_hline(
+                y=0.45, 
+                line_dash="dot", 
+                line_color="yellow", 
+                annotation_text="Runaway Sortie Inequity (< 45%)",
+                annotation_position="top right"
+            )
+
+            fig_frontier.add_hline(
+                y=0.40, 
+                line_dash="dot", 
+                line_color="red", 
+                annotation_text="Broken (< 40% Exp)",
+                annotation_position="bottom right"
+            )
+
+            fig_frontier.update_layout(
+                legend_title_text='Time Horizon',
+                hovermode="x unified",
+                yaxis_tickformat='.0%'
+            )
+
+            st.plotly_chart(fig_frontier, use_container_width=True)
+            
     # --- Retention vs Separation Chart ---
     st.subheader("Retention vs Separations")
     fig_sep = go.Figure()

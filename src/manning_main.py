@@ -1,6 +1,7 @@
 from src.models import SquadronConfig, Pilot, Qual, Upgrade
 from src.manning_engine import CAFSimulation
 import random
+from typing import Optional
 
 IP_YEAR_START = 2010
 IP_YEAR_END = 2014
@@ -22,7 +23,6 @@ WG_HOUR_START = 50
 WG_HOUR_END = 250
 WG_SORTIE_START = 50
 WG_SORTIE_END = 300
-
 
 def setup_debug_simulation():
     sim = CAFSimulation()
