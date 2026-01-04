@@ -250,8 +250,10 @@ class SquadronConfig:
         ip_to_stud_ratio = self.ip_qty/sum_students
         ip_load = sum_students/self.ip_qty
 
-        ip_rate = sqrt(inv(exp_ratio) + (square(ac_per_pilot + (ute_per_pilot * (0.8983698 + sqrt(ip_to_stud_ratio)))) + (ip_load / 0.80686635)))
-        fl_rate = sqrt((((sqrt(total_pilots) + 3.5092452) + (0.16958028 / (ip_ratio - exp_ratio + 1e-6))) * (upg_pct + ute_per_pilot)) / ((exp_ratio / ac_per_pilot) + upg_pct))
+        ip_rate = max(0, sqrt(inv(exp_ratio) + (square(ac_per_pilot + (ute_per_pilot * (0.8983698 + sqrt(ip_to_stud_ratio)))) + (ip_load / 0.80686635))))
+        fl_rate_inner_num = (((sqrt(total_pilots) + 3.5092452) + (0.16958028 / (ip_ratio - exp_ratio + 1e-6))) * (upg_pct + ute_per_pilot))
+        fl_rate_inner_denom = ((exp_ratio / max(ac_per_pilot, 0.01)) + upg_pct)
+        fl_rate = sqrt(max(0, fl_rate_inner_num / max(fl_rate_inner_denom, 1e-6)))
         mqt_rate = 4.0
 
         num_fls = int(exp_ratio * total_pilots)

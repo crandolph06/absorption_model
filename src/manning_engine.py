@@ -1,6 +1,6 @@
 import pandas as pd
 from typing import List
-from models import Pilot, Qual, SquadronConfig, Upgrade
+from src.models import Pilot, Qual, SquadronConfig, Upgrade
 
 
 class CAFSimulation:
@@ -60,7 +60,7 @@ class CAFSimulation:
                     rates = sq.calculate_aging_rates()
                     sq.apply_phase_aging(rates)
             
-            self.process_end_of_phase(year, phase_num, retention_rate)
+                self.process_end_of_phase(year, phase_num, retention_rate)
             
         return pd.DataFrame(self.history)
 

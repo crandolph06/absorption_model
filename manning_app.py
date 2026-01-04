@@ -2,15 +2,15 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from manning_main import setup_debug_simulation
+from src.manning_main import setup_debug_simulation
 
 st.set_page_config(page_title="CAF Absorption Simulator", layout="wide")
 
 st.title("🛩️ Fighter Pilot Long-Term Manning Visualizer")
 st.markdown("""
-This dashboard simulates pilot career progression over 10 years. 
+This dashboard simulates pilot career progression over 10-20 years. This is a simulation that wishes away all upgrade bottlenecks; pilots automatically attain the next qual at 250 sorties for FLs and 400 hours for IPs. 
+            In reality, bottlenecks are much more restrictive than indicated on this dashboard. This is intended to visualize concepts and highlight the most optimistic scenario for decision-makers.
 """)
-# Watch the **Experience Ratio** to see the 'Bathtub' effect when training intake exceeds instructor capacity.
 
 # --- Sidebar Controls ---
 st.sidebar.header("Simulation Parameters")
@@ -51,7 +51,7 @@ if st.sidebar.button("Run Simulation"):
                           title="Experience Ratio (%)",
                           labels={'exp_rat': 'Exp Ratio', 'timeline': 'Year/Phase'})
         # Add a "Red Line" for critical health (e.g., 25%)
-        fig_exp.add_hline(y=0.25, line_dash="dash", line_color="red", annotation_text="Critical Level")
+        fig_exp.add_hline(y=0.45, line_dash="dash", line_color="yellow", annotation_text="Runaway Sortie Inequity Line")
         st.plotly_chart(fig_exp, use_container_width=True)
 
     # --- Retention vs Separation Chart ---
