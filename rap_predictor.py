@@ -33,15 +33,18 @@ input_names = X.columns.tolist()
 #     'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly', 
 #     'wg_red_monthly', 'fl_red_monthly', 'ip_red_monthly'
 # ]
-outcomes = ['wg_monthly']
+# outcomes = ['wg_monthly']
+
+outcomes = [
+    'wg_monthly', 'fl_monthly', 'ip_monthly']
 
 # 2. Setup Regressor
 model = PySRRegressor(
-    niterations=1000,             
+    niterations=500,             
     maxsize=35,                  
     binary_operators=["+", "*", "-", "/"],
     unary_operators=["inv", "square", "sqrt"], 
-    constraints={'/': (-1, 1)},  
+    # constraints={'/': (-1, 1)},  
     extra_sympy_mappings={"inv": lambda x: 1/x},
     batching=True,
     batch_size=1024,
