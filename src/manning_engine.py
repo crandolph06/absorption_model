@@ -87,7 +87,8 @@ class CAFSimulation:
                 p.reset_phase_counters()
 
             line_pilots = [p for p in sq.pilots if p.active and p.current_assignment and p.current_assignment == Assignment.LINE]
-            limit = sq.manning_limit
+            size = sq.manning_limit
+            limit = size * 1.5
 
             if len(line_pilots) > limit:
                 excess_count = int(len(line_pilots) - limit)
@@ -98,14 +99,15 @@ class CAFSimulation:
 
                 ips.sort(key=lambda x: x.year_group)
 
-                surplus_ips = []
-                if len(ips) > sq.ip_qty:
-                    surplus_ips = ips[:(len(ips) - sq.ip_qty)]
+                protected_ips = ips[:3] # Sq/CC, DO, and WO
+                eligible_ips = ips[3:]
 
-                funnel_queue = surplus_ips + sorted(fls, key=lambda x: x.year_group)
+                funnel_queue = eligible_ips + sorted(fls, key=lambda x: x.year_group)
 
                 for i in range(excess_count):
-                    funnel_queue[i].move_to_staff()
+                    while funnel_queue[i]:
+                        funnel_queue[i].move_to_staff()
+                    continue
 
             line_roster = [p for p in sq.pilots if p.active and p.current_assignment == Assignment.LINE]
             total_line = sum(1 for p in self.all_pilots if p.active and p.current_assignment == Assignment.LINE)
@@ -119,6 +121,7 @@ class CAFSimulation:
                 'fl_count': sum(1 for p in line_roster if p.qual == Qual.FL),
                 'ip_count': sum(1 for p in line_roster if p.qual == Qual.IP),
                 'total_pilots': total_line,
+                'percent_manned': total_line / size,
                 'total_staff': total_staff,
                 'retained': sq_retained,
                 'separated': sq_separated,
