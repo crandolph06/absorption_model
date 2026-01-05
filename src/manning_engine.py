@@ -111,7 +111,8 @@ class CAFSimulation:
 
             line_roster = [p for p in sq.pilots if p.active and p.current_assignment == Assignment.LINE]
             total_line = sum(1 for p in self.all_pilots if p.active and p.current_assignment == Assignment.LINE)
-            total_staff = sum(1 for p in self.all_pilots if p.active and p.current_assignment == Assignment.STAFF)
+            staff_ips = sum(1 for p in self.all_pilots if p.active and p.current_assignment == Assignment.STAFF and p.qual == Qual. IP)
+            staff_fls = sum(1 for p in self.all_pilots if p.active and p.current_assignment == Assignment.STAFF and p.qual == Qual.FL)
             
             current_stats = {
                 'year': year,
@@ -122,7 +123,8 @@ class CAFSimulation:
                 'ip_count': sum(1 for p in line_roster if p.qual == Qual.IP),
                 'total_pilots': total_line,
                 'percent_manned': total_line / size,
-                'total_staff': total_staff,
+                'staff_ips': staff_ips,
+                'staff_fls': staff_fls,
                 'retained': sq_retained,
                 'separated': sq_separated,
                 'wg_rate_mo': current_rates.wg_phase / months,
