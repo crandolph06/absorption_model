@@ -66,17 +66,9 @@ class CAFSimulation:
         return pd.DataFrame(self.history)
 
     def process_end_of_phase(self, year: int, phase_num: int, retention_rate: float):
-        
         for p in self.all_pilots:
-            sq_separated = 0
-            sq_retained = 0
-
             if p.active:
                 p.check_retention(retention_rate)
-                if not p.active: 
-                    sq_separated += 1
-                else:
-                    sq_retained += 1
 
         for sq in self.squadrons:
             current_rates = sq.calculate_aging_rates()
@@ -102,14 +94,16 @@ class CAFSimulation:
 
                 funnel_queue = eligible_ips + sorted(fls, key=lambda x: x.year_group)
                 movers = min(excess_count, len(funnel_queue))
+                
 
                 for i in range(movers):
                     funnel_queue[i].move_to_staff()
 
             line_roster = [p for p in sq.pilots if p.active and p.current_assignment == Assignment.LINE]
-            total_line = sum(1 for p in self.all_pilots if p.active and p.current_assignment == Assignment.LINE)
-            staff_ips = sum(1 for p in self.all_pilots if p.active and p.current_assignment == Assignment.STAFF and p.qual == Qual. IP)
-            staff_fls = sum(1 for p in self.all_pilots if p.active and p.current_assignment == Assignment.STAFF and p.qual == Qual.FL)
+            total_line = sum(1 for p in line_roster if p.active and p.current_assignment == Assignment.LINE)
+
+            staff_ips = sum(1 for p in sq.pilots if p.active and p.current_assignment == Assignment.STAFF and p.qual == Qual.IP)
+            staff_fls = sum(1 for p in sq.pilots if p.active and p.current_assignment == Assignment.STAFF and p.qual == Qual.FL)
             
             for p in sq.pilots:
                 p.reset_phase_counters()
@@ -125,8 +119,7 @@ class CAFSimulation:
                 'total_pilots': total_line,
                 'staff_ips': staff_ips,
                 'staff_fls': staff_fls,
-                'separated': sq_separated,
-                'retained': sq_retained,
+                'separated': sum(1 for p in sq.pilots if not p.active),
                 'wg_rate_mo': current_rates.wg_phase / months,
                 'fl_rate_mo': current_rates.fl_phase / months,
                 'ip_rate_mo': current_rates.ip_phase / months,
