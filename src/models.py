@@ -144,6 +144,10 @@ class Pilot:
 
             else: 
                 self.adsc_remaining += 2 # Assumes additional 2-year ADSC
+
+    def move_to_staff(self):
+        self.current_assignment = Assignment.STAFF
+        self.squadron_id = None
     
 
 # ----------------------
@@ -189,6 +193,10 @@ class SquadronConfig:
     @experience_ratio.setter
     def experience_ratio(self, value:float):
         self._experience_ratio = value
+
+    @property
+    def manning_limit(self) -> float:
+        return 1.5 * self.paa
 
     def graduate_current_upgrades(self):
         for pilot in self.pilots:
