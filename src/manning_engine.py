@@ -67,24 +67,22 @@ class CAFSimulation:
 
     def process_end_of_phase(self, year: int, phase_num: int, retention_rate: float):
         
-        for sq in self.squadrons:
-            sq_retained = 0
+        for p in self.all_pilots:
             sq_separated = 0
-            
+            sq_retained = 0
+
+            if p.active:
+                p.check_retention(retention_rate)
+                if not p.active: 
+                    sq_separated += 1
+                else:
+                    sq_retained += 1
+
+        for sq in self.squadrons:
             current_rates = sq.calculate_aging_rates()
             months = sq.phase_length_days / 30
 
-            for p in sq.pilots:
-                if p.active:
-                    p.check_retention(retention_rate)
-                    if p.active: 
-                        sq_retained += 1
-                    else:
-                        sq_separated += 1
-
             sq.graduate_current_upgrades()
-            for p in sq.pilots:
-                p.reset_phase_counters()
 
             line_pilots = [p for p in sq.pilots if p.active and p.current_assignment and p.current_assignment == Assignment.LINE]
             size = sq.manning_limit
@@ -103,17 +101,19 @@ class CAFSimulation:
                 eligible_ips = ips[3:]
 
                 funnel_queue = eligible_ips + sorted(fls, key=lambda x: x.year_group)
+                movers = min(excess_count, len(funnel_queue))
 
-                for i in range(excess_count):
-                    while funnel_queue[i]:
-                        funnel_queue[i].move_to_staff()
-                    continue
+                for i in range(movers):
+                    funnel_queue[i].move_to_staff()
 
             line_roster = [p for p in sq.pilots if p.active and p.current_assignment == Assignment.LINE]
             total_line = sum(1 for p in self.all_pilots if p.active and p.current_assignment == Assignment.LINE)
             staff_ips = sum(1 for p in self.all_pilots if p.active and p.current_assignment == Assignment.STAFF and p.qual == Qual. IP)
             staff_fls = sum(1 for p in self.all_pilots if p.active and p.current_assignment == Assignment.STAFF and p.qual == Qual.FL)
             
+            for p in sq.pilots:
+                p.reset_phase_counters()
+                
             current_stats = {
                 'year': year,
                 'phase': phase_num,
@@ -121,12 +121,12 @@ class CAFSimulation:
                 'wg_count': sum(1 for p in line_roster if p.qual == Qual.WG),
                 'fl_count': sum(1 for p in line_roster if p.qual == Qual.FL),
                 'ip_count': sum(1 for p in line_roster if p.qual == Qual.IP),
-                'total_pilots': total_line,
                 'percent_manned': total_line / size,
+                'total_pilots': total_line,
                 'staff_ips': staff_ips,
                 'staff_fls': staff_fls,
-                'retained': sq_retained,
                 'separated': sq_separated,
+                'retained': sq_retained,
                 'wg_rate_mo': current_rates.wg_phase / months,
                 'fl_rate_mo': current_rates.fl_phase / months,
                 'ip_rate_mo': current_rates.ip_phase / months,
