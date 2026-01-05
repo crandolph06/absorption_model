@@ -25,21 +25,21 @@ if use_custom_ute:
 else:
     ute_val = 10.0
 
-st.sidebar.markdown("---")
+
 st.sidebar.header("Advanced Analysis")
 run_sensitivity = st.sidebar.checkbox("Run Stability Frontier Analysis")
 
 # --- Run Simulation ---
 if st.sidebar.button("Run Simulation"):
     sim, squadrons = setup_debug_simulation()
+    st.session_state['sim_df'] = sim.run_simulation(years, intake, retention, squadrons, ute_val)
     
-    # Run the engine
-    df = sim.run_simulation(years, intake, retention, squadrons, ute_val)
-    
-    # Create a Date column for better X-axis plotting
+if 'sim_df' in st.session_state:
+    df = st.session_state['sim_df']
     df['timeline'] = df['year'].astype(str) + " P" + df['phase'].astype(str)
 
     # --- Top Level Metrics ---
+    st.markdown(f"### Overall Stats")
     m1, m2, m3 = st.columns(3)
     m1.metric("Final Total Pilots", df['total_pilots'].iloc[-1])
     m2.metric("Final Exp Ratio", f"{df['exp_rat'].iloc[-1]*100:.1f}%")
@@ -51,43 +51,39 @@ if st.sidebar.button("Run Simulation"):
     with col1:
         st.subheader("Pilot Population by Qualification")
 
-        squadron_ids = [sq.id for sq in sim.squadrons]
-        filter_options = ["All Squadrons"] + squadron_ids
-
-        # 2. Add the Dropdown
-        selected_sq = st.selectbox("Filter by Squadron ID", options=filter_options)
+        # squadron_ids = [sq.id for sq in sim.squadrons]
+        squadron_ids = sorted(df['squadron_id'].unique().tolist())
+        selected_sq = st.selectbox("Select View", options=["All Squadrons"] + squadron_ids)
 
         # 3. Filter the Data
         if selected_sq == "All Squadrons":
-            # Use all active pilots (current behavior)
-            filtered_pilots = sim.active_pilots
+            df_display = df.groupby(['year', 'phase', 'timeline']).agg({
+                'wg_count': 'sum',
+                'fl_count': 'sum',
+                'ip_count': 'sum',
+                'total_pilots': 'sum',
+                'percent_manned': 'mean',
+                'staff_ips': 'sum',
+                'staff_fls': 'sum',
+                'retained': 'sum',
+                'separated': 'sum',
+                'wg_rate_mo': 'mean',
+                'fl_rate_mo': 'mean',
+                'ip_rate_mo': 'mean'
+            }).reset_index()
+            df_display['exp_rat'] = (df_display['fl_count'] + df_display['ip_count']) / df_display['total_pilots']
+
         else:
-            # Filter for only the selected squadron ID
-            filtered_pilots = [p for p in sim.active_pilots if p.squadron_id == selected_sq]
+            df_display = df[df['squadron_id'] == selected_sq].copy()
 
-        # 4. Generate Dataframe for the Chart
-        pop_data = []
-        for p in filtered_pilots:
-            pop_data.append({
-                'Qual': p.qual.value,
-                'Count': 1
-            })
-
-        df_pop = pd.DataFrame(pop_data)
-        if not df_pop.empty:
-            df_pop = df_pop.groupby('Qual').sum().reset_index()
-            fig_pop = px.pie(df_pop, values='Count', names='Qual', title=f"Population for {selected_sq}")
-            st.plotly_chart(fig_pop, use_container_width=True)
-        else:
-            st.warning(f"No active pilots found for {selected_sq}.")
-
-        fig_pop = px.area(df, x='timeline', y=['wg_count', 'fl_count', 'ip_count'],
-                          title="Roster Composition Over Time",
+        # --- Population Mix Chart ---
+        fig_pop = px.area(df_display, x='timeline', y=['wg_count', 'fl_count', 'ip_count', 'staff_fls', 'staff_ips'],
+                          title="Qualification Mix Over Time",
                           labels={'value': 'Count', 'timeline': 'Year/Phase',
                                   'wg_rate_mo': 'WG Monthly Rate',
                                   'fl_rate_mo': 'FL Monthly Rate',
                                   'ip_rate_mo': 'IP Monthly Rate'},
-                          color_discrete_sequence=['#636EFA', '#EF553B', '#00CC96'],
+                          color_discrete_sequence=['#636EFA', '#EF553B', '#00CC96', "#DC8F7E", "#78CAB4"],
                           hover_data={'wg_rate_mo': ':.1f',
                                       'fl_rate_mo': ':.1f',
                                       'ip_rate_mo': ':.1f'})
@@ -95,7 +91,7 @@ if st.sidebar.button("Run Simulation"):
 
     with col2:
         st.subheader("'Bathtub or Cliff?' (Experience Ratio)")
-        fig_exp = px.line(df, x='timeline', y='exp_rat', 
+        fig_exp = px.line(df_display, x='timeline', y='exp_rat', 
                           title="Experience Ratio (%)",
                           labels={'exp_rat': 'Exp Ratio', 'timeline': 'Year/Phase'})
         # Add a "Red Line" for critical health (e.g., 25%)
