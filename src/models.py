@@ -3,6 +3,8 @@ from enum import Enum
 import random
 from typing import List, Optional
 from math import sqrt
+import pandas as pd
+import numpy as np
 
 # ----------------------
 # Simple Upgrade Logic 
@@ -78,6 +80,7 @@ class Pilot:
     hours_flown: int = 0
     adsc_remaining: int = 120 # Measured in months
     active: bool = True
+    separation_date: tuple = (9999, 0)
     current_assignment: Assignment = Assignment.LINE
     
     def update_total(self):
@@ -132,7 +135,7 @@ class Pilot:
         if self.upgrade == Upgrade.MQT:
             self.upgrade = Upgrade.NONE
     
-    def check_retention(self, retention_pct: float):
+    def check_retention(self, current_year, current_phase, retention_pct: float):
         """
         If ADSC is 0 or less, roll to see if the pilot stays.
         retention_pct: float (e.g., 0.65 for 65% retention)
@@ -141,9 +144,10 @@ class Pilot:
             # random.random() returns a float between 0.0 and 1.0
             if random.random() > retention_pct:
                 self.active = False  # The pilot separates
+                self.separation_date = (current_year, current_phase)
 
             else: 
-                self.adsc_remaining += 2 # Assumes additional 2-year ADSC
+                self.adsc_remaining += 24.1 # Assumes additional 2-year ADSC
 
     def move_to_staff(self):
         self.current_assignment = Assignment.STAFF
@@ -195,7 +199,7 @@ class SquadronConfig:
         self._experience_ratio = value
 
     @property
-    def manning_limit(self) -> float:
+    def manning_limit(self) -> int:
         return 1.5 * self.paa
 
     def graduate_current_upgrades(self):
@@ -244,6 +248,45 @@ class SquadronConfig:
             p.hours_flown += p_rate * self.avg_sortie_dur
 
             p.adsc_remaining -= phase_months
+
+
+    def lookup_aging_rate(current_params: dict, lookup_df: pd.DataFrame, phase_length_days: int, sim_upgrades: bool = False) -> 'AgingRate':
+        """
+        Finds the row in lookup_df most similar to current_params and returns an AgingRate.
+        
+        current_params example: {
+            'paa': 23, 'ute': 11, 'total_pilots': 45, 
+            'ip_qty': 8, 'exp_ratio': 0.55, 'sim_upgrades': True
+        }
+        """
+        phase_months = phase_length_days / 30
+
+        features = ['paa', 'ute', 'total_pilots', 'ip_qty', 'exp_ratio']
+        if sim_upgrades:
+            features += ['mqt_count', 'flug_count', 'ipug_count']
+
+        for f in features:
+            target = current_params.get(f, 0)
+            col_data = lookup_df[f]
+
+            std = col_data.std()
+            if std == 0 or np.isnan(std): std = 1.0
+
+            distances += ((col_data - target) / std)**2
+
+        closest_idx = np.argmin(distances)
+        closest_row = lookup_df.iloc[closest_idx]
+
+        return AgingRate(
+            mqt_phase=4.0 * phase_months, # Assumes 16 sortie upgrade over 4 months.
+            wg_phase=(closest_row['wg_monthly'] * phase_months),
+            fl_phase=(closest_row['fl_monthly'] * phase_months),
+            ip_phase=(closest_row['ip_monthly'] * phase_months),
+            mqt_blue_phase=4.0,
+            wg_blue_phase=(closest_row['wg_blue_monthly'] * phase_months),
+            fl_blue_phase=(closest_row['fl_blue_monthly'] * phase_months),
+            ip_blue_phase=(closest_row['ip_blue_monthly'] * phase_months)
+        )
         
     def calculate_aging_rates(self):  # TODO Broken -- need to fix. Lookup table?
         mqt, flug, ipug = self.new_phase_upgrades()
