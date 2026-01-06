@@ -65,7 +65,6 @@ if 'sim_df' in st.session_state:
                 'percent_manned': 'mean',
                 'staff_ips': 'sum',
                 'staff_fls': 'sum',
-                'retained': 'sum',
                 'separated': 'sum',
                 'wg_rate_mo': 'mean',
                 'fl_rate_mo': 'mean',
@@ -127,7 +126,7 @@ if 'sim_df' in st.session_state:
             for val in test_range:
                 # We must re-initialize the sim/squadrons for every loop to prevent data carry-over
                 test_sim, test_sqs = setup_debug_simulation()
-                test_df = test_sim.run_simulation(20, val, retention, test_sqs)
+                test_df = test_sim.run_simulation(years_to_run=20, annual_intake=intake, ute=val, retention_rate=retention, squadron_configs=test_sqs)
                 
                 start_year = test_df['year'].min()
                 
@@ -209,3 +208,6 @@ if 'sim_df' in st.session_state:
         st.dataframe(df)
 else:
     st.info("Adjust the parameters in the sidebar and click 'Run Simulation' to see the results.")
+
+    # TODO Sensitivity analysis for UTE, Retention
+    # Chart depicting percent manning
