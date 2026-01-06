@@ -169,7 +169,7 @@ def setup_simulation(sim_upgrades: bool = False):
     return sim, squadrons
 
 if __name__ == "__main__":
-    sim, squadrons = setup_debug_simulation()
+    sim, squadrons = setup_simulation()
 
     # 4. Run for 10 years
     # 15 annual intake, 70% retention

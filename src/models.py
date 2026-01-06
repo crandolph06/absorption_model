@@ -7,14 +7,6 @@ import pandas as pd
 import numpy as np
 
 # ----------------------
-# Simple Upgrade Logic 
-# ----------------------
-FLUG_WINDOW_START = 250 # Sorties
-FLUG_WINDOW_END = 265 # Sorties
-IPUG_WINDOW_START = 400 # Hours
-IPUG_WINDOW_END = 430 # Hours
-
-# ----------------------
 # Math 
 # ----------------------
 def inv(x): return 1/x if x != 0 else 0
@@ -213,19 +205,19 @@ class SquadronConfig:
         self.ip_qty = sum(1 for p in self.pilots if p.active and p.qual == Qual.IP)
         self.total_pilots = sum(1 for p in self.pilots if p.active and p.current_assignment == Assignment.LINE)
 
-    def new_phase_upgrades(self):
+    def new_phase_upgrades(self, flug_window_start:int, ipug_window_start:int):
         mqt_count = sum(1 for p in self.pilots if p.upgrade == Upgrade.MQT)
 
         flug_eligible = [
             p for p in self.pilots if p.qual == Qual.WG and p.upgrade == Upgrade.NONE 
-            and FLUG_WINDOW_START <= p.sorties_flown 
+            and flug_window_start <= p.sorties_flown 
         ]
         for p in flug_eligible:
             p.upgrade = Upgrade.FLUG
 
         ipug_eligible = [
             p for p in self.pilots if p.qual == Qual.FL and p.upgrade == Upgrade.NONE 
-            and IPUG_WINDOW_START <= p.hours_flown 
+            and ipug_window_start <= p.hours_flown 
         ]
         for p in ipug_eligible:
             p.upgrade = Upgrade.IPUG
@@ -252,33 +244,26 @@ class SquadronConfig:
             p.adsc_remaining -= phase_months
 
 
-    def lookup_aging_rate(self, current_params: dict, lookup_df: pd.DataFrame, sim_upgrades: bool = False) -> 'AgingRate':
+    def lookup_aging_rate(self, params: dict, original_df: pd.DataFrame, 
+                                  base_matrix, base_std, base_cols, 
+                                  stud_matrix, stud_std, stud_cols, 
+                                  sim_upgrades: bool) -> 'AgingRate':
         """
         Finds the row in lookup_df most similar to current_params and returns an AgingRate.
-        
-        current_params example: {
-            'paa': 23, 'ute': 11, 'total_pilots': 45, 
-            'ip_qty': 8, 'exp_ratio': 0.55
-        }
         """
+        input_base = np.array([params.get(c, 0) for c in base_cols])
+        norm_input_base = input_base / base_std
+        dists = np.sum((base_matrix - norm_input_base)**2, axis=1)
+
+        if sim_upgrades and stud_matrix is not None:
+            input_stud = np.array([params.get(c, 0) for c in stud_cols])
+            norm_input_stud = input_stud / stud_std
+            dists += np.sum((stud_matrix - norm_input_stud)**2, axis=1)
+
+        closest_idx = np.argmin(dists)
+        closest_row = original_df.iloc[closest_idx]
+
         phase_months = self.phase_length_days / 30
-        distances = np.zeros(len(lookup_df))
-
-        features = ['paa', 'ute', 'total_pilots', 'ip_qty', 'exp_ratio']
-        if sim_upgrades:
-            features += ['mqt_count', 'flug_count', 'ipug_count']
-
-        for f in features:
-            target = current_params.get(f, 0)
-            col_data = lookup_df[f]
-
-            std = col_data.std()
-            if std == 0 or np.isnan(std): std = 1.0
-
-            distances += ((col_data - target) / std)**2
-
-        closest_idx = np.argmin(distances)
-        closest_row = lookup_df.iloc[closest_idx]
 
         return AgingRate(
             mqt_phase=4.0 * phase_months, # Assumes 16 sortie upgrade over 4 months.
@@ -291,41 +276,3 @@ class SquadronConfig:
             ip_blue_phase=(closest_row['ip_blue_monthly'] * phase_months)
         )
         
-    def calculate_aging_rates(self):  # TODO Broken -- need to fix. Lookup table?
-        mqt, flug, ipug = self.new_phase_upgrades()
-        sum_students = max(mqt + flug + ipug, 0.01)
-
-        total_pilots = self.total_pilots
-        exp_ratio = self.experience_ratio
-        ip_ratio = self.ip_qty/total_pilots
-        upg_pct = (sum_students)/total_pilots
-        ute_per_pilot = self.ute/total_pilots
-        ac_per_pilot = self.paa/total_pilots
-        ip_to_stud_ratio = self.ip_qty/sum_students
-        ip_load = sum_students/self.ip_qty
-
-        ip_rate = max(0, sqrt(inv(exp_ratio) + (square(ac_per_pilot + (ute_per_pilot * (0.8983698 + sqrt(ip_to_stud_ratio)))) + (ip_load / 0.80686635))))
-        fl_rate_inner_num = (((sqrt(total_pilots) + 3.5092452) + (0.16958028 / (ip_ratio - exp_ratio + 1e-6))) * (upg_pct + ute_per_pilot))
-        fl_rate_inner_denom = ((exp_ratio / max(ac_per_pilot, 0.01)) + upg_pct)
-        fl_rate = sqrt(max(0, fl_rate_inner_num / max(fl_rate_inner_denom, 1e-6)))
-        mqt_rate = 4.0
-
-        num_fls = int(exp_ratio * total_pilots)
-        num_wg = total_pilots - num_fls - mqt
-
-        phase_months = self.phase_length_days / 30
-
-        total_capacity = self.ute * self.paa
-        ip_sorties = self.ip_qty * ip_rate
-        fl_sorties = num_fls * fl_rate 
-        mqt_sorties = mqt * mqt_rate
-        remaining_for_wg = total_capacity - ip_sorties - fl_sorties - mqt_sorties
-        wg_rate = remaining_for_wg / num_wg if num_wg > 0 else 0
-
-        return AgingRate(
-            mqt_phase = mqt_rate * phase_months,
-            wg_phase=wg_rate * phase_months,
-            fl_phase=fl_rate * phase_months,
-            ip_phase=ip_rate * phase_months,
-        )
-

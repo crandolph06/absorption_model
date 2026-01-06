@@ -5,20 +5,40 @@ import os
 
 
 class CAFSimulation:
-    def __init__(self, path: str, sim_upgrades: bool):
+    def __init__(self, path: str, sim_upgrades: bool, flug_window_start: int = 250, ipug_window_start: int = 400):
         self.history = []
         self.current_year = 2025
         self.squadrons: List[SquadronConfig] = []
+        self.flug_window_start = flug_window_start # Sorties for FLUG auto-start
+        self.ipug_window_start = ipug_window_start # Hours for IPUG auto-start
 
         if not os.path.exists(path):
-            raise FileNotFoundError(
-            'Lookup File Not Found. Simulation Stopped. ' \
-            'Please check the file and try again.'
-            )    
+            raise FileNotFoundError(f'Lookup File Not Found at {path}.')    
         
         self.df = pd.read_parquet(path)
-
         self.sim_upgrades = sim_upgrades
+
+        self.base_cols = ['paa', 'ute', 'total_pilots', 'ip_qty', 'exp_ratio']
+        self.student_cols = ['mqt_count', 'flug_count', 'ipug_count']
+
+        self.valid_base_cols = [c for c in self.base_cols if c in self.df.columns]
+        self.valid_stud_cols = [c for c in self.student_cols if c in self.df.columns]
+
+        base_data = self.df[self.valid_base_cols].values 
+        base_std = base_data.std(axis=0)
+        base_std[base_std == 0] = 1.0 # Prevent div/0
+        self.norm_base_matrix = base_data / base_std 
+        self.base_std = base_std 
+
+        if self.sim_upgrades and self.valid_stud_cols:
+            stud_data = self.df[self.valid_stud_cols].values
+            stud_std = stud_data.std(axis=0)
+            stud_std[stud_std == 0] = 1.0
+            self.norm_stud_matrix = stud_data / stud_std
+            self.stud_std = stud_std
+        else:
+            self.norm_stud_matrix = None
+            self.stud_std = None
 
     @property
     def all_pilots(self):
@@ -98,11 +118,26 @@ class CAFSimulation:
                         'ip_qty': sq.ip_qty, 'exp_ratio': sq.experience_ratio
                     }
                     if self.sim_upgrades:
-                        sq_params['mqt_count'] = sq.mqt_students
-                        sq_params['flug_count'] = sq.flug_students
-                        sq_params['ipug_count'] = sq.ipug_students
+                        sq_params['mqt_qty'] = sq.mqt_students
+                        sq_params['flug_qty'] = sq.flug_students
+                        sq_params['ipug_qty'] = sq.ipug_students
 
-                    rates = sq.lookup_aging_rate(sq_params, self.df, self.sim_upgrades)
+                    mqt_count, flug_count, ipug_count = sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
+
+                    if sq.flug_students != 0:
+                        raise AssertionError(f'Critical Data Mismatch in Squadron Pilots')
+                    
+                    sq.mqt_students = mqt_count
+                    sq.flug_students = flug_count
+                    sq.ipug_students = ipug_count
+                    
+                    rates = sq.lookup_aging_rate(
+                        sq_params, 
+                        self.df, 
+                        self.norm_base_matrix, self.base_std, self.valid_base_cols,
+                        self.norm_stud_matrix, self.stud_std, self.valid_stud_cols,
+                        self.sim_upgrades
+                    )
                     sq.apply_phase_aging(rates)
             
                     self.process_end_of_phase(sq, year, phase_num, retention_rate, rates)
