@@ -207,29 +207,24 @@ class SquadronConfig:
             if pilot.upgrade != Upgrade.NONE:
                 pilot.graduate()
 
-    def new_phase_upgrades(self, sim_upgrades: bool = False):
+    def new_phase_upgrades(self):
         mqt_count = sum(1 for p in self.pilots if p.upgrade == Upgrade.MQT)
 
-        if not sim_upgrades:
-            flug_eligible = [
-                p for p in self.pilots if p.qual == Qual.WG and p.upgrade == Upgrade.NONE 
-                and FLUG_WINDOW_START <= p.sorties_flown # <= FLUG_WINDOW_END
-            ]
-            for p in flug_eligible:
-                p.upgrade = Upgrade.FLUG
+        flug_eligible = [
+            p for p in self.pilots if p.qual == Qual.WG and p.upgrade == Upgrade.NONE 
+            and FLUG_WINDOW_START <= p.sorties_flown 
+        ]
+        for p in flug_eligible:
+            p.upgrade = Upgrade.FLUG
 
-            ipug_eligible = [
-                p for p in self.pilots if p.qual == Qual.FL and p.upgrade == Upgrade.NONE 
-                and IPUG_WINDOW_START <= p.hours_flown # <= IPUG_WINDOW_END
-            ]
-            for p in ipug_eligible:
-                p.upgrade = Upgrade.IPUG
+        ipug_eligible = [
+            p for p in self.pilots if p.qual == Qual.FL and p.upgrade == Upgrade.NONE 
+            and IPUG_WINDOW_START <= p.hours_flown 
+        ]
+        for p in ipug_eligible:
+            p.upgrade = Upgrade.IPUG
 
-            return mqt_count, len(flug_eligible), len(ipug_eligible)
-        
-        else:
-            # Sim more complex upgrade logic and IP Availability
-            return
+        return mqt_count, len(flug_eligible), len(ipug_eligible)
         
     def apply_phase_aging(self, rates: AgingRate):
         phase_months = self.phase_length_days / 30
@@ -250,16 +245,17 @@ class SquadronConfig:
             p.adsc_remaining -= phase_months
 
 
-    def lookup_aging_rate(current_params: dict, lookup_df: pd.DataFrame, phase_length_days: int, sim_upgrades: bool = False) -> 'AgingRate':
+    def lookup_aging_rate(self, current_params: dict, lookup_df: pd.DataFrame, sim_upgrades: bool = False) -> 'AgingRate':
         """
         Finds the row in lookup_df most similar to current_params and returns an AgingRate.
         
         current_params example: {
             'paa': 23, 'ute': 11, 'total_pilots': 45, 
-            'ip_qty': 8, 'exp_ratio': 0.55, 'sim_upgrades': True
+            'ip_qty': 8, 'exp_ratio': 0.55
         }
         """
-        phase_months = phase_length_days / 30
+        phase_months = self.phase_length_days / 30
+        distances = np.zeros(len(lookup_df))
 
         features = ['paa', 'ute', 'total_pilots', 'ip_qty', 'exp_ratio']
         if sim_upgrades:

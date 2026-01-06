@@ -24,8 +24,10 @@ WG_HOUR_END = 250
 WG_SORTIE_START = 50
 WG_SORTIE_END = 300
 
+path = 'outputs/simulation_results.parquet'
+
 def setup_debug_simulation():
-    sim = CAFSimulation()
+    sim = CAFSimulation(path, sim_upgrades=False)
 
     squadron_manning_targets = [
         {"total": 27, "exp": 0.5}, # Get Exp Ratio from FR1/2

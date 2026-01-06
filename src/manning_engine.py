@@ -1,13 +1,24 @@
 import pandas as pd
 from typing import List
 from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment
+import os
 
 
 class CAFSimulation:
-    def __init__(self):
+    def __init__(self, path: str, sim_upgrades: bool = False):
         self.history = []
         self.current_year = 2025
         self.squadrons: List[SquadronConfig] = []
+
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+            'Lookup File Not Found. Simulation Stopped. ' \
+            'Please check the file and try again.'
+            )    
+        
+        self.df = pd.read_parquet(path)
+
+        self.sim_upgrades = sim_upgrades
 
     @property
     def all_pilots(self):
@@ -92,7 +103,13 @@ class CAFSimulation:
         for sq in self.squadrons:
 
             # current_rates = sq.calculate_aging_rates()
-            current_stats = sq.lookup_aging_rate()
+
+            sq_params = {
+                'paa': sq.paa, 'ute': sq.ute, 'total_pilots': len(sq.pilots), 
+                'ip_qty': sq.ip_qty, 'exp_ratio': sq.experience_ratio}
+            
+            current_rates = sq.lookup_aging_rate(sq_params, self.df, self.sim_upgrades)
+
             months = sq.phase_length_days / 30
 
             num_sep = sum(1 for p in sq.pilots if not p.active and p.separation_date == (year, phase_num))
@@ -160,5 +177,7 @@ class CAFSimulation:
                 p.reset_phase_counters()
                 
             sq.pilots = [p for p in sq.pilots if p.active]
+            num_ips = sum(1 for p in sq.pilots if p.active and p.qual == Qual.IP)
+            sq.ip_qty = num_ips
             
 
