@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from src.manning_main import setup_debug_simulation
+from src.manning_main import setup_simulation
 
 st.set_page_config(page_title="CAF Absorption Simulator", layout="wide")
 
@@ -11,39 +11,36 @@ st.markdown("""
 This dashboard simulates pilot career progression over 10-20 years. This is a simulation that wishes away all upgrade bottlenecks; pilots automatically attain the next qual at 250 sorties for FLs and 400 hours for IPs. 
             In reality, bottlenecks are much more restrictive than indicated on this dashboard. This is intended to visualize concepts and highlight the most optimistic scenario for decision-makers.
 """)
-
 # --- Sidebar Controls ---
 st.sidebar.header("Simulation Parameters")
 years = st.sidebar.slider("Years to Run", 5, 20, 10)
 intake = st.sidebar.slider("Annual B-Course Intake", 10, 350, 150)
 retention = st.sidebar.slider("Retention Rate (0.0 - 1.0)", 0.0, 1.0, 0.4)
+ute_val = st.sidebar.slider("UTE", 6, 20, 10)
 
-st.sidebar.header("Sortie Generation")
-use_custom_ute = st.sidebar.checkbox("Override Baseline UTE (10.0)?", value=False)
-if use_custom_ute:
-    ute_val = st.sidebar.slider("Custom UTE Rate", 6.0, 20.0, 10.0)
-else:
-    ute_val = 10.0
-
+simulate_upgrades = st.sidebar.checkbox(
+    "Realistic Upgrade Bottlenecks", value=False,
+    help="If checked, student counts (MQT/FLUG/IPUG) will realistically reduce CT flying rates."
+)
 
 st.sidebar.header("Advanced Analysis")
 run_sensitivity = st.sidebar.checkbox("Run Stability Frontier Analysis")
 
 # --- Run Simulation ---
 if st.sidebar.button("Run Simulation"):
-    sim, squadrons = setup_debug_simulation()
+    sim, squadrons = setup_simulation(sim_upgrades=simulate_upgrades)
     st.session_state['sim_df'] = sim.run_simulation(years, intake, retention, squadrons, ute_val)
     
 if 'sim_df' in st.session_state:
     df = st.session_state['sim_df']
     df['timeline'] = df['year'].astype(str) + " P" + df['phase'].astype(str)
 
-    # --- Top Level Metrics ---
-    st.markdown(f"### Overall Stats")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Final Total Pilots", df['total_pilots'].iloc[-1])
-    m2.metric("Final Exp Ratio", f"{df['exp_rat'].iloc[-1]*100:.1f}%")
-    m3.metric("Total Separations", df['separated'].sum())
+    # # --- Top Level Metrics ---
+    # st.markdown(f"### Overall Stats")
+    # m1, m2, m3 = st.columns(3)
+    # m1.metric("Final Total Pilots", df['total_pilots'].iloc[-1])
+    # m2.metric("Final Exp Ratio", f"{df['exp_rat'].iloc[-1]*100:.1f}%")
+    # m3.metric("Total Separations", df['separated'].sum())
 
     # --- Charts ---
     col1, col2 = st.columns(2)
@@ -89,7 +86,7 @@ if 'sim_df' in st.session_state:
         st.plotly_chart(fig_pop, use_container_width=True)
 
     with col2:
-        st.subheader("'Bathtub or Cliff?' (Experience Ratio)")
+        st.subheader("Experience Ratio Over Time")
         fig_exp = px.line(df_display, x='timeline', y='exp_rat', 
                           title="Experience Ratio (%)",
                           labels={'exp_rat': 'Exp Ratio', 'timeline': 'Year/Phase'})
@@ -116,7 +113,7 @@ if 'sim_df' in st.session_state:
     if run_sensitivity:
         st.divider()
         st.header("📉 System Stability Frontier")
-        st.write("This chart calculates the final 'health' of the fleet across different intake levels to identify the point of system collapse.")
+        st.write("This chart calculates the final 'health' of the CAF across different intake levels to identify the point of system collapse.")
 
         with st.spinner("Calculating stability across intake range..."):
             # 1. Define range to test (e.g., 100 to 350)
@@ -194,14 +191,7 @@ if 'sim_df' in st.session_state:
             )
 
             st.plotly_chart(fig_frontier, use_container_width=True)
-            
-    # --- Retention vs Separation Chart ---
-    st.subheader("Retention vs Separations")
-    fig_sep = go.Figure()
-    fig_sep.add_trace(go.Bar(x=df['timeline'], y=df['retained'], name='Retained', marker_color='green'))
-    fig_sep.add_trace(go.Bar(x=df['timeline'], y=df['separated'], name='Separated', marker_color='red'))
-    fig_sep.update_layout(barmode='stack', title="Phase-by-Phase Retention")
-    st.plotly_chart(fig_sep, use_container_width=True)
+        
 
     # Raw Data
     with st.expander("View Raw Simulation Data"):

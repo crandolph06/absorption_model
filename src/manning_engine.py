@@ -1,11 +1,11 @@
 import pandas as pd
 from typing import List
-from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment
+from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, AgingRate
 import os
 
 
 class CAFSimulation:
-    def __init__(self, path: str, sim_upgrades: bool = False):
+    def __init__(self, path: str, sim_upgrades: bool):
         self.history = []
         self.current_year = 2025
         self.squadrons: List[SquadronConfig] = []
@@ -73,6 +73,11 @@ class CAFSimulation:
 
             target_sq.pilots.append(new_pilot)
 
+        for sq in self.squadrons:
+            mqt_count = sum(1 for p in sq.pilots if p.active and p.upgrade == Upgrade.MQT)
+            sq.mqt_students = mqt_count
+            sq.total_pilots = sum(1 for p in sq.pilots if p.active and p.current_assignment == Assignment.LINE)
+
 
     def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0):
         """
@@ -88,96 +93,119 @@ class CAFSimulation:
                 self.add_new_bcourse_graduates(year, current_batch)
 
                 for sq in self.squadrons:
-                    sq.ute = ute
-                    rates = sq.calculate_aging_rates()
+                    sq_params = {
+                        'paa': sq.paa, 'ute': sq.ute, 'total_pilots': sq.total_pilots, 
+                        'ip_qty': sq.ip_qty, 'exp_ratio': sq.experience_ratio
+                    }
+                    if self.sim_upgrades:
+                        sq_params['mqt_count'] = sq.mqt_students
+                        sq_params['flug_count'] = sq.flug_students
+                        sq_params['ipug_count'] = sq.ipug_students
+
+                    rates = sq.lookup_aging_rate(sq_params, self.df, self.sim_upgrades)
                     sq.apply_phase_aging(rates)
             
-                self.process_end_of_phase(year, phase_num, retention_rate)
+                    self.process_end_of_phase(sq, year, phase_num, retention_rate, rates)
             
         return pd.DataFrame(self.history)
 
-    def process_end_of_phase(self, year: int, phase_num: int, retention_rate: float):
+    def process_end_of_phase(self, sq: SquadronConfig, year: int, phase_num: int, retention_rate: float, rates: AgingRate):
         for p in self.active_pilots:
             p.check_retention(year, phase_num, retention_rate)
 
-        for sq in self.squadrons:
+        months = sq.phase_length_days / 30
+        limit = sq.manning_limit
 
-            # current_rates = sq.calculate_aging_rates()
+        wg_count = 0
+        fl_count = 0
+        ip_count = 0
+        staff_ips = 0
+        staff_fls = 0
+        separated_count = 0
+        retained_count = 0
+        line_pilot_count = 0
 
-            sq_params = {
-                'paa': sq.paa, 'ute': sq.ute, 'total_pilots': len(sq.pilots), 
-                'ip_qty': sq.ip_qty, 'exp_ratio': sq.experience_ratio}
-            
-            current_rates = sq.lookup_aging_rate(sq_params, self.df, self.sim_upgrades)
+        for p in sq.pilots:
+            if not p.active:
+                if p.separation_date == (year, phase_num):
+                    separated_count += 1
+                continue
 
-            months = sq.phase_length_days / 30
-
-            num_sep = sum(1 for p in sq.pilots if not p.active and p.separation_date == (year, phase_num))
-            retained_list = [p for p in sq.pilots if p.adsc_remaining == 24.1]
-            num_ret = len(retained_list)
-
-            for p in retained_list:
+            if p.adsc_remaining == 24.1:
                 p.adsc_remaining = 24
-            
-            staff_ips = sum(1 for p in sq.pilots if p.active and p.current_assignment == Assignment.STAFF and p.qual == Qual.IP)
-            staff_fls = sum(1 for p in sq.pilots if p.active and p.current_assignment == Assignment.STAFF and p.qual == Qual.FL)
+                retained_count += 1
 
-            limit = sq.manning_limit
-            line_roster = [p for p in sq.pilots if p.active and p.current_assignment == Assignment.LINE]
-            total_line = sum(1 for p in line_roster if p.active and p.current_assignment == Assignment.LINE)
+            if p.current_assignment == Assignment.STAFF:
+                if p.qual == Qual.IP: staff_ips += 1
+                elif p.qual == Qual.FL: staff_fls += 1 
 
-            current_stats = {
-                'year': year,
-                'phase': phase_num,
-                'squadron_id': sq.id,
-                'wg_count': sum(1 for p in line_roster if p.qual == Qual.WG),
-                'fl_count': sum(1 for p in line_roster if p.qual == Qual.FL),
-                'ip_count': sum(1 for p in line_roster if p.qual == Qual.IP),
-                'percent_manned': total_line / limit,
-                'total_pilots': total_line,
-                'staff_ips': staff_ips,
-                'staff_fls': staff_fls,
-                'separated': num_sep,
-                'retained': num_ret,
-                'wg_rate_mo': current_rates.wg_phase / months,
-                'fl_rate_mo': current_rates.fl_phase / months,
-                'ip_rate_mo': current_rates.ip_phase / months,
-            }
+            elif p.current_assignment == Assignment.LINE:
+                line_pilot_count += 1
+                if p.qual == Qual.WG: wg_count += 1
+                elif p.qual == Qual.FL: fl_count += 1
+                elif p.qual == Qual.IP: ip_count += 1
         
-            if current_stats['total_pilots'] > 0:
-                exp_pilots = current_stats['fl_count'] + current_stats['ip_count']
-                current_stats['exp_rat'] = exp_pilots / current_stats['total_pilots']
+        exp_ratio = 0
+        if line_pilot_count > 0:
+            exp_ratio = (fl_count + ip_count) / line_pilot_count
 
-            else:
-                current_stats['exp_rat'] = 0
+        current_stats = {
+            'year': year,
+            'phase': phase_num,
+            'squadron_id': sq.id,
+            'wg_count': wg_count,
+            'fl_count': fl_count,
+            'ip_count': ip_count,
+            'percent_manned': line_pilot_count / limit,
+            'total_pilots': line_pilot_count,
+            'exp_rat': exp_ratio,
+            'staff_ips': staff_ips,
+            'staff_fls': staff_fls,
+            'separated': separated_count,
+            'retained': retained_count,
+            'wg_rate_mo': rates.wg_phase / months,
+            'fl_rate_mo': rates.fl_phase / months,
+            'ip_rate_mo': rates.ip_phase / months,
+            'wg_rate_blue': rates.wg_blue_phase / months,
+            'fl_rate_blue': rates.fl_blue_phase / months,
+            'ip_rate_blue': rates.ip_blue_phase / months
+        }
+    
+        self.history.append(current_stats)
+
+        sq.graduate_current_upgrades()
+
+        current_line_pilots = []
+        for p in sq.pilots:
+            if p.active and p.current_assignment == Assignment.LINE:
+                current_line_pilots.append(p)
+
+        if len(current_line_pilots) > limit:
+            excess_count = len(current_line_pilots) - limit
+
+            ips = []
+            fls = []
+            for p in current_line_pilots:
+                if p.qual == Qual.IP: ips.append(p)
+                elif p.qual == Qual.FL: fls.append(p)
+
+            ips.sort(key=lambda x: x.year_group)
+            fls.sort(key=lambda x: x.year_group)
+
+            eligible_ips = ips[3:] if len(ips) > 3 else [] # Protects Sq/CC, DO, and WO
+
+            funnel_queue = eligible_ips + fls
+            movers_count = min(excess_count, len(funnel_queue))
+        
+            for i in range(int(movers_count)): # Not sure why streamlit thinks this is a float
+                funnel_queue[i].move_to_staff()
+
+        active_pilots_only = []
+        for p in sq.pilots:
+            p.reset_phase_counters()
+            if p.active:
+                active_pilots_only.append(p)
             
-            self.history.append(current_stats)
-
-            sq.graduate_current_upgrades()
-
-            if total_line > limit:
-                excess_count = total_line - limit
-
-                ips = [p for p in line_roster if p.qual == Qual.IP]
-                fls = [p for p in line_roster if p.qual == Qual.FL]
-                wgs = [p for p in line_roster if p.qual == Qual.WG]
-
-                ips.sort(key=lambda x: x.year_group)
-
-                protected_ips = ips[:3] # Sq/CC, DO, and WO
-                eligible_ips = ips[3:]
-
-                funnel_queue = eligible_ips + sorted(fls, key=lambda x: x.year_group)
-                movers = min(excess_count, len(funnel_queue))
-            
-                for i in range(int(movers)): 
-                    funnel_queue[i].move_to_staff()
-
-            for p in sq.pilots:
-                p.reset_phase_counters()
-                
-            sq.pilots = [p for p in sq.pilots if p.active]
-            num_ips = sum(1 for p in sq.pilots if p.active and p.qual == Qual.IP)
-            sq.ip_qty = num_ips
+        sq.pilots = active_pilots_only
             
 

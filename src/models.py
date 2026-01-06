@@ -207,6 +207,12 @@ class SquadronConfig:
             if pilot.upgrade != Upgrade.NONE:
                 pilot.graduate()
 
+        self.mqt_students = 0
+        self.flug_students = 0
+        self.ipug_students = 0
+        self.ip_qty = sum(1 for p in self.pilots if p.active and p.qual == Qual.IP)
+        self.total_pilots = sum(1 for p in self.pilots if p.active and p.current_assignment == Assignment.LINE)
+
     def new_phase_upgrades(self):
         mqt_count = sum(1 for p in self.pilots if p.upgrade == Upgrade.MQT)
 
@@ -227,6 +233,7 @@ class SquadronConfig:
         return mqt_count, len(flug_eligible), len(ipug_eligible)
         
     def apply_phase_aging(self, rates: AgingRate):
+        "Ages pilots by adding phase aging rate in hours/sorties and subtracts phase length from ADSC remaining."
         phase_months = self.phase_length_days / 30
 
         for p in self.pilots:
