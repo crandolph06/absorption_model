@@ -103,6 +103,7 @@ class CAFSimulation:
         """
         squadron_configs: list -> [Config(id=1, paa=12...), Config(id=2, paa=24...)]
         """
+        self.history = []
         self.squadrons = squadron_configs
         for year in range(self.current_year, self.current_year + years_to_run):
             phase_intake = annual_intake // 3

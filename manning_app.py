@@ -109,14 +109,14 @@ if st.sidebar.button("Run Simulation"):
 
     # --- Left Axis: Aging Rates (Sorties/Sims per Month) ---
     # Live Flying Rates (Solid Lines)
-    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['wg_rate_mo'], name='WG Rate', line=dict(color='#636EFA')))
-    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['fl_rate_mo'], name='FL Rate', line=dict(color='#EF553B')))
-    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['ip_rate_mo'], name='IP Rate', line=dict(color='#00CC96')))
+    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['wg_rate_mo'], name='WG Rate', line=dict(color='#636EFA'), hovertemplate='%{y:.1f}'))
+    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['fl_rate_mo'], name='FL Rate', line=dict(color='#EF553B'), hovertemplate='%{y:.1f}'))
+    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['ip_rate_mo'], name='IP Rate', line=dict(color='#00CC96'), hovertemplate='%{y:.1f}'))
     
     # Blue/Sim Rates (Dotted Lines)
-    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['wg_rate_blue'], name='WG Blue Rate', line=dict(color='#636EFA', dash='dot')))
-    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['fl_rate_blue'], name='FL Blue Rate', line=dict(color='#EF553B', dash='dot')))
-    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['ip_rate_blue'], name='IP Blue Rate', line=dict(color='#00CC96', dash='dot')))
+    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['wg_rate_blue'], name='WG Blue Rate', line=dict(color='#636EFA', dash='dot'), hovertemplate='%{y:.1f}'))
+    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['fl_rate_blue'], name='FL Blue Rate', line=dict(color='#EF553B', dash='dot'), hovertemplate='%{y:.1f}'))
+    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['ip_rate_blue'], name='IP Blue Rate', line=dict(color='#00CC96', dash='dot'), hovertemplate='%{y:.1f}'))
 
     # --- Right Axis: Percentages (0-100%+) ---
     # Manning % (Thick White Dash)
@@ -147,7 +147,7 @@ if st.sidebar.button("Run Simulation"):
         yaxis=dict(
             title="Monthly Events (Sorties/Sims)",
             side='left',
-            showgrid=False # Cleaner look
+            showgrid=True 
         ),
         # Right Axis Settings
         yaxis2=dict(
@@ -170,7 +170,7 @@ if st.sidebar.button("Run Simulation"):
 
     fig_health.add_annotation(
             xref="paper", yref="paper",
-            x=1, y=-0.14,  # Bottom Right Position
+            x=1, y=-0.25,  # Bottom Right Position
             xanchor="right", yanchor="top",
             text=(
                 "<b>Right Axis Legend:</b><br>"
@@ -193,52 +193,64 @@ if st.sidebar.button("Run Simulation"):
         st.header("📉 Absorption Capacity")
         st.write("Calculates the 'health' of the CAF across different intake levels.")
 
-        with st.spinner("Calculating stability across intake range... (Approx. 30 Seconds)"):
-            # Define range to test
-            test_range = list(range(100, 351, 25)) # Larger step for speed
-            stability_data = []
+        # Create a progress bar
+        sensitivity_progress = st.progress(0, text="Initializing Analysis...")
 
-            for val in test_range:
-                t_sim, t_sqs = setup_simulation(sim_upgrades=include_upgrades)
-                t_df = t_sim.run_simulation(years_to_run=20, annual_intake=val, retention_rate=retention, squadron_configs=t_sqs, ute=ute_val)
-                
-                start_year = t_df['year'].min()
-                horizons = {
-                    "5-Year": 4,
-                    "10-Year": 9,
-                    "20-Year": 19
-                }
+        # Define range to test
+        test_range = list(range(100, 351, 25)) 
+        stability_data = []
 
-                for label, year_offset in horizons.items():
-                    target_year = start_year + year_offset
-                    # Filter for the specific year
-                    snapshot = t_df[t_df['year'] == target_year]
-                    
-                    if not snapshot.empty:
-                        # Aggregate fleet wide for that year
-                        total_pilots = snapshot['total_pilots'].sum()
-                        exp_pilots = snapshot['fl_count'].sum() + snapshot['ip_count'].sum()
-                        
-                        ratio = exp_pilots / total_pilots if total_pilots > 0 else 0
-                        
-                        stability_data.append({
-                            "Annual Intake": val, 
-                            "Exp Ratio": ratio, 
-                            "Horizon": label
-                        })
+        base_sim, base_squadrons = setup_simulation(sim_upgrades=include_upgrades)
 
-            analysis_df = pd.DataFrame(stability_data)
+        # Loop with enumeration to update the bar
+        for i, val in enumerate(test_range):
 
-            fig_frontier = px.line(
-                analysis_df, 
-                x="Annual Intake", 
-                y="Exp Ratio",
-                color="Horizon",
-                title="System Health Decay",
-                labels={"Exp Ratio": "Experience Ratio", "Annual Intake": "Annual Intake"},
-                color_discrete_sequence=px.colors.sequential.Reds_r 
+            pct_complete = (i + 1) / len(test_range)
+            sensitivity_progress.progress(pct_complete, text=f"Simulating Intake: {val} pilots/yr...")
+
+            t_sim, t_sqs = setup_simulation(sim_upgrades=include_upgrades)
+
+            t_df = t_sim.run_simulation(
+                years_to_run=20, 
+                annual_intake=val, 
+                retention_rate=retention, 
+                squadron_configs=t_sqs, 
+                ute=ute_val
             )
-            fig_frontier.add_hline(y=0.45, line_dash="dot", line_color="yellow", annotation_text="Runaway Inequity")
-            st.plotly_chart(fig_frontier, use_container_width=True)
+
+            start_year = t_df['year'].min()
+            horizons = {"5-Year": 4, "10-Year": 9, "20-Year": 19}
+
+            for label, year_offset in horizons.items():
+                target_year = start_year + year_offset
+                snapshot = t_df[t_df['year'] == target_year]
+                
+                if not snapshot.empty:
+                    total_pilots = snapshot['total_pilots'].sum()
+                    exp_pilots = snapshot['fl_count'].sum() + snapshot['ip_count'].sum()
+                    ratio = exp_pilots / total_pilots if total_pilots > 0 else 0
+                    
+                    stability_data.append({
+                        "Annual Intake": val, 
+                        "Exp Ratio": ratio, 
+                        "Horizon": label
+                    })
+
+        # Clear bar when done
+        sensitivity_progress.empty()
+
+        analysis_df = pd.DataFrame(stability_data)
+
+        fig_frontier = px.line(
+            analysis_df, 
+            x="Annual Intake", 
+            y="Exp Ratio",
+            color="Horizon",
+            title="System Health Decay",
+            labels={"Exp Ratio": "Experience Ratio", "Annual Intake": "Annual Intake"},
+            color_discrete_sequence=px.colors.sequential.Reds_r 
+        )
+        fig_frontier.add_hline(y=0.45, line_dash="dot", line_color="yellow", annotation_text="Runaway Inequity")
+        st.plotly_chart(fig_frontier, use_container_width=True)
 else:
     st.info("Set parameters and click 'Run Simulation'.")
