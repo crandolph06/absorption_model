@@ -4,6 +4,9 @@ import plotly.express as px
 from src.manning_main import setup_simulation
 import plotly.graph_objects as go
 
+PATH = 'outputs/simulation_results.parquet'
+priority_vars = ['exp_ratio', 'ip_qty', 'total_pilots']
+
 st.set_page_config(page_title="CAF Absorption Simulator", layout="wide")
 
 st.title("🛩️ Fighter Pilot Long-Term Manning Visualizer")
@@ -34,8 +37,18 @@ if st.sidebar.button("Run Simulation"):
     with st.spinner("Running Simulation..."):
         # 1. Setup & Run
         sim, squadrons = setup_simulation(sim_upgrades=include_upgrades)
-        df = sim.run_simulation(years, intake, retention, squadrons, ute_val)
-        
+        df = sim.run_simulation(years, intake, retention, squadrons, PATH, priority_vars, ute_val)
+
+        st.write("### 🔍 Debugging Tools")
+        csv = df.to_csv(index=False).encode('utf-8')
+
+        st.download_button(
+            label="Download Full Simulation History (CSV)",
+            data=csv,
+            file_name="simulation_debug_dump.csv",
+            mime="text/csv",
+        )
+
         # 2. Add Timeline Column
         df['timeline'] = df['year'].astype(str) + " P" + df['phase'].astype(str)
 
@@ -154,7 +167,7 @@ if st.sidebar.button("Run Simulation"):
             title="Percentage",
             overlaying='y',
             side='right',
-            autorange=True,
+            range=[0, 2.0],
             tickformat='.0%',
             showgrid=False
         ),
@@ -170,7 +183,7 @@ if st.sidebar.button("Run Simulation"):
 
     fig_health.add_annotation(
             xref="paper", yref="paper",
-            x=1, y=-0.25,  # Bottom Right Position
+            x=1, y=-0.15,  # Bottom Right Position
             xanchor="right", yanchor="top",
             text=(
                 "<b>Right Axis Legend:</b><br>"
@@ -215,6 +228,8 @@ if st.sidebar.button("Run Simulation"):
                 annual_intake=val, 
                 retention_rate=retention, 
                 squadron_configs=t_sqs, 
+                PATH=PATH,
+                priority_vars=priority_vars,
                 ute=ute_val
             )
 

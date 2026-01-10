@@ -177,7 +177,9 @@ if __name__ == "__main__":
         years_to_run=10, 
         annual_intake=12, 
         retention_rate=0.5, 
-        squadron_configs=squadrons
+        squadron_configs=squadrons,
+        path=path,
+        priority_vars=['exp_ratio', 'ip_qty', 'total_pilots'] # TODO Debug this and add debug variables patph, priority vars
     )
 
     # 5. Quick Debug Output

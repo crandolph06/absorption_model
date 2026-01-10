@@ -2,6 +2,7 @@ import pandas as pd
 from typing import List
 from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, AgingRate
 import os
+from debug_lookup import diagnose_lookup
 
 
 class CAFSimulation:
@@ -99,12 +100,17 @@ class CAFSimulation:
             sq.total_pilots = sum(1 for p in sq.pilots if p.active and p.current_assignment == Assignment.LINE)
 
 
-    def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0):
+    # def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0):
+    def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], PATH, priority_vars, ute: float = 10.0):    
         """
         squadron_configs: list -> [Config(id=1, paa=12...), Config(id=2, paa=24...)]
         """
         self.history = []
         self.squadrons = squadron_configs
+
+        for sq in self.squadrons:
+            sq.ute = ute # TODO UTE not behaving correctly throughout simulation in Streamlit
+
         for year in range(self.current_year, self.current_year + years_to_run):
             phase_intake = annual_intake // 3
             remainder = annual_intake % 3
@@ -139,9 +145,16 @@ class CAFSimulation:
                         self.norm_stud_matrix, self.stud_std, self.valid_stud_cols,
                         self.sim_upgrades
                     )
+
+                    # rates = sq.calc_aging_rate(sim_upgrades=False)
+
                     sq.apply_phase_aging(rates)
+
+                    # print(f'Phase {year}, {phase_num} | Sq: {sq.id}')
+
+                    # diagnose_lookup(PATH, sq_params,  priority_vars)
             
-                    self.process_end_of_phase(sq, year, phase_num, retention_rate, rates)
+                    self.process_end_of_phase(sq, year, phase_num, retention_rate, rates) # TODO aging rates and manning percentage not populating correctly in Streamlit
             
         return pd.DataFrame(self.history)
 

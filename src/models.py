@@ -113,13 +113,13 @@ class Pilot:
             
         self.upgrade = Upgrade.NONE
 
-    def age_one_phase_with_rates(self, phase_sorties: float, phase_hours: float): # TODO Update as model develops
+    def age_one_phase_with_rates(self, aging_rate: float, asd: float): 
         """Updates pilot experience based on the calculated environment."""
         if not self.active:
             return
             
-        self.sorties_flown += phase_sorties
-        self.hours_flown += phase_hours
+        self.sorties_flown += aging_rate
+        self.hours_flown += aging_rate * asd
         
         if self.adsc_remaining > 0:
             self.adsc_remaining -= 4
@@ -202,8 +202,12 @@ class SquadronConfig:
         self.mqt_students = 0
         self.flug_students = 0
         self.ipug_students = 0
-        self.ip_qty = sum(1 for p in self.pilots if p.active and p.qual == Qual.IP)
+        self.ip_qty = sum(1 for p in self.pilots if p.active and p.qual == Qual.IP and p.current_assignment == Assignment.LINE)
         self.total_pilots = sum(1 for p in self.pilots if p.active and p.current_assignment == Assignment.LINE)
+        fl_count = sum(1 for p in self.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual == Qual.FL)
+
+        self.experience_ratio = (self.ip_qty + fl_count) / self.total_pilots
+
 
     def new_phase_upgrades(self, flug_window_start:int, ipug_window_start:int):
         mqt_count = sum(1 for p in self.pilots if p.upgrade == Upgrade.MQT)
@@ -226,7 +230,6 @@ class SquadronConfig:
         
     def apply_phase_aging(self, rates: AgingRate):
         "Ages pilots by adding phase aging rate in hours/sorties and subtracts phase length from ADSC remaining."
-        phase_months = self.phase_length_days / 30
 
         for p in self.pilots:
             if p.qual == Qual.IP:
@@ -238,10 +241,34 @@ class SquadronConfig:
             else:
                 p_rate = rates.wg_phase
 
-            p.sorties_flown += p_rate
-            p.hours_flown += p_rate * self.avg_sortie_dur
+            p.age_one_phase_with_rates(p_rate, self.avg_sortie_dur)
 
-            p.adsc_remaining -= phase_months
+    def calc_aging_rate(self, sim_upgrades: bool):
+        phase_months = self.phase_length_days / 30
+        
+        ute = self.ute
+        paa = self.paa
+        wg_count = sum(1 for p in self.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual == Qual.WG)
+        fl_count = sum(1 for p in self.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual == Qual.FL)
+        ip_count = sum(1 for p in self.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual == Qual.IP)
+        exp_pilots = fl_count + ip_count # TODO Where do we re-hack experience ratio? Must just include LINE pilots
+
+        if not sim_upgrades:
+            wg_rate = (ute * paa) / wg_count
+            fl_rate = ((ute * paa)/ exp_pilots) / 2
+            ip_rate = fl_rate
+
+            return AgingRate(
+                mqt_phase=4.0 * phase_months,
+                wg_phase=wg_rate * phase_months,
+                fl_phase=fl_rate * phase_months,
+                ip_phase=ip_rate * phase_months,
+                mqt_blue_phase=4.0 * phase_months,
+                wg_blue_phase=None,
+                fl_blue_phase=None,
+                ip_blue_phase=None
+            )
+
 
 
     def lookup_aging_rate(self, params: dict, original_df: pd.DataFrame, 
@@ -249,30 +276,90 @@ class SquadronConfig:
                                   stud_matrix, stud_std, stud_cols, 
                                   sim_upgrades: bool) -> 'AgingRate':
         """
-        Finds the row in lookup_df most similar to current_params and returns an AgingRate.
+        Sequential Drill-Down Lookup:
+        1. PAA/UTE (Exact)
+        2. IP Qty (Closest)
+        3. Exp Ratio (Closest)
+        4. Total Pilots (Closest)
+        5. Student Counts (Distance Tie-Breaker)
         """
-        input_base = np.array([params.get(c, 0) for c in base_cols])
-        norm_input_base = input_base / base_std
-        dists = np.sum((base_matrix - norm_input_base)**2, axis=1)
+        # --- 0. Handle Non-Upgrade Logic ---
+        # If upgrades are OFF, we force the target student counts to 0.
+        # This makes the lookup find "healthy" rows (low student load).
+        current_stud_params = {}
+        if sim_upgrades:
+            current_stud_params = {c: params.get(c, 0) for c in stud_cols}
+        else:
+            current_stud_params = {c: 0 for c in stud_cols}
 
-        if sim_upgrades and stud_matrix is not None:
-            input_stud = np.array([params.get(c, 0) for c in stud_cols])
+        # --- 1. Environmental Lock (Exact Match) ---
+        target_paa = params.get('paa')
+        target_ute = params.get('ute')
+        
+        mask = (original_df['paa'].values == target_paa) & (original_df['ute'].values == target_ute)
+        
+        # Safety fallback
+        if not np.any(mask):
+            mask = np.ones(len(original_df), dtype=bool)
+
+        # --- 2. Sequential Soft Locks (The "Drill Down") ---
+        # We define the priority order of variables to lock down
+        priority_vars = ['exp_ratio', 'ip_qty', 'total_pilots']
+        
+        for var in priority_vars:
+            target_val = params.get(var, 0)
+            # Get values only from the currently surviving rows
+            valid_values = original_df[var].values[mask]
+            
+            if len(valid_values) > 0:
+                # Find the smallest difference available in the current subset
+                min_diff = np.min(np.abs(valid_values - target_val))
+                
+                # Update mask: Keep only rows that are this close to the target
+                # We use a small epsilon for float comparison safety on exp_ratio
+                is_closest = np.abs(original_df[var].values - target_val) <= (min_diff + 0.00001)
+                
+                # Intersect with current mask
+                mask = mask & is_closest
+
+        # --- 3. Final Distance Calculation (Student Bottleneck) ---
+        
+        # Start with zero distance (all survivors are considered "equal" on base stats now)
+        dists = np.zeros(len(original_df))
+        
+        # Add Student Distance (using the 0-forced values if sim_upgrades=False)
+        if stud_matrix is not None:
+            input_stud = np.array([current_stud_params.get(c, 0) for c in stud_cols])
             norm_input_stud = input_stud / stud_std
+            
+            # Calculate distance only on student columns
             dists += np.sum((stud_matrix - norm_input_stud)**2, axis=1)
 
+        # --- 4. Apply Mask & Pick Winner ---
+        # Set non-survivors to infinity
+        dists[~mask] = np.inf
+        
         closest_idx = np.argmin(dists)
         closest_row = original_df.iloc[closest_idx]
+
+        if params.get('exp_ratio', 1.0) < 0.30:
+            print("\n🚨 LOW RATIO LOOKUP TRIGGERED")
+            print(f"INPUTS:  Ratio={params.get('exp_ratio'):.2f} | Pilots={params.get('total_pilots')} | IPs={params.get('ip_qty')}")
+            print(f"WINNER:  Index={closest_idx} | Ratio={closest_row['exp_ratio']:.2f} | Pilots={closest_row['total_pilots']}")
+            print(f"TOTAL RATES:   WG={closest_row.get('wg_monthly'):.2f} | IP={closest_row.get('ip_monthly'):.2f}")
+            print(f"BLUE RATES:   WG={closest_row.get('wg_blue_monthly'):.2f} | IP={closest_row.get('ip_blue_monthly'):.2f}")
+            print(f"CONTEXT: PAA={closest_row['paa']} | UTE={closest_row['ute']}")
+            print("-" * 50)
 
         phase_months = self.phase_length_days / 30
 
         return AgingRate(
-            mqt_phase=4.0 * phase_months, # Assumes 16 sortie upgrade over 4 months.
-            wg_phase=(closest_row['wg_monthly'] * phase_months),
-            fl_phase=(closest_row['fl_monthly'] * phase_months),
-            ip_phase=(closest_row['ip_monthly'] * phase_months),
+            mqt_phase=4.0 * phase_months,
+            wg_phase=(closest_row.get('wg_monthly', 0) * phase_months),
+            fl_phase=(closest_row.get('fl_monthly', 0) * phase_months),
+            ip_phase=(closest_row.get('ip_monthly', 0) * phase_months),
             mqt_blue_phase=4.0,
-            wg_blue_phase=(closest_row['wg_blue_monthly'] * phase_months),
-            fl_blue_phase=(closest_row['fl_blue_monthly'] * phase_months),
-            ip_blue_phase=(closest_row['ip_blue_monthly'] * phase_months)
+            wg_blue_phase=(closest_row.get('wg_blue_monthly', 0) * phase_months),
+            fl_blue_phase=(closest_row.get('fl_blue_monthly', 0) * phase_months),
+            ip_blue_phase=(closest_row.get('ip_blue_monthly', 0) * phase_months)
         )
-        
