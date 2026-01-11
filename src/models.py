@@ -183,7 +183,7 @@ class SquadronConfig:
         
         tp = self.total_pilots
         if tp == 0: return 0.0
-        exp_count = sum(1 for p in self.pilots if p.active and p.qual in [Qual.FL, Qual.IP])
+        exp_count = sum(1 for p in self.pilots if p.active and p.qual in [Qual.FL, Qual.IP] and p.current_assignment == Assignment.LINE)
         return exp_count/tp
     
     @experience_ratio.setter
@@ -206,7 +206,7 @@ class SquadronConfig:
         self.total_pilots = sum(1 for p in self.pilots if p.active and p.current_assignment == Assignment.LINE)
         fl_count = sum(1 for p in self.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual == Qual.FL)
 
-        self.experience_ratio = (self.ip_qty + fl_count) / self.total_pilots
+        self.experience_ratio = (self.ip_qty + fl_count) / self.total_pilots # TODO is this right? or setter/getter?
 
 
     def new_phase_upgrades(self, flug_window_start:int, ipug_window_start:int):
@@ -362,4 +362,71 @@ class SquadronConfig:
             wg_blue_phase=(closest_row.get('wg_blue_monthly', 0) * phase_months),
             fl_blue_phase=(closest_row.get('fl_blue_monthly', 0) * phase_months),
             ip_blue_phase=(closest_row.get('ip_blue_monthly', 0) * phase_months)
+        )
+    
+# --------------------------------------------------------------------------
+    # AI PREDICTION ENGINE
+    # --------------------------------------------------------------------------
+    def predict_aging_rate(self, brain: dict) -> AgingRate:
+        """
+        Uses the trained Random Forest models (brain) to predict sortie rates
+        based on the current squadron state.
+        
+        Args:
+            brain: Dictionary containing the trained sklearn models 
+                   (wg_monthly, fl_monthly, ip_monthly, etc.)
+        """
+        # 1. CALCULATE INPUTS (Must match training order EXACTLY)
+        # Features: ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_count', 'flug_count', 'ipug_count', 'ip_qty']
+        
+        # Count active students
+        mqt_count = len([p for p in self.pilots if p.upgrade == Upgrade.MQT])
+        flug_count = len([p for p in self.pilots if p.upgrade == Upgrade.FLUG])
+        ipug_count = len([p for p in self.pilots if p.upgrade == Upgrade.IPUG])
+        
+        # Ensure we are using Line Pilots (Cockpit Strength)
+        line_pilots = len([p for p in self.pilots if p.current_assignment == Assignment.LINE])
+        
+        # Construct Input Vector (2D Array for sklearn)
+        input_vector = np.array([[
+            self.paa,
+            self.ute,
+            self.experience_ratio,
+            line_pilots,
+            mqt_count,
+            flug_count,
+            ipug_count,
+            self.ip_qty
+        ]])
+
+        # 2. GET PREDICTIONS (Monthly Rates)
+        try:
+            wg_mo = brain['wg_monthly'].predict(input_vector)[0]
+            fl_mo = brain['fl_monthly'].predict(input_vector)[0]
+            ip_mo = brain['ip_monthly'].predict(input_vector)[0]
+            
+            # Blue Air Predictions
+            wg_blue_mo = brain['wg_blue_monthly'].predict(input_vector)[0]
+            fl_blue_mo = brain['fl_blue_monthly'].predict(input_vector)[0]
+            ip_blue_mo = brain['ip_blue_monthly'].predict(input_vector)[0]
+        except KeyError as e:
+            print(f"🚨 Brain Missing Model: {e}")
+            return AgingRate() # Return empty/zero rate on failure
+
+        # 3. CONVERT TO PHASE OUTPUT (Sorties per Phase)
+        # The simulation executes in phases (e.g., 1 month), so we scale monthly rate to phase length.
+        # Assuming phase_length_days is usually 30, this factor is ~1.0.
+        months_per_phase = self.phase_length_days / 30.0
+
+        return AgingRate(
+            mqt_phase=4.0 * months_per_phase, # Fixed allocation for MQT
+            wg_phase=max(0, wg_mo * months_per_phase),
+            fl_phase=max(0, fl_mo * months_per_phase),
+            ip_phase=max(0, ip_mo * months_per_phase),
+            
+            # Blue Air Support Requirements
+            mqt_blue_phase=4.0 * months_per_phase, # Fixed allocation for MQT
+            wg_blue_phase=max(0, wg_blue_mo * months_per_phase),
+            fl_blue_phase=max(0, fl_blue_mo * months_per_phase),
+            ip_blue_phase=max(0, ip_blue_mo * months_per_phase)
         )
