@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import os
+import numpy as np
 
 # 1. PAGE CONFIG MUST BE FIRST
 st.set_page_config(page_title="Pilot Supply Chain Analytics", layout="wide")
@@ -251,3 +252,145 @@ with col_summary:
         st.plotly_chart(fig_burden, use_container_width=True)
     else:
         st.info("No exact match for these filters.")
+# ==============================================================================
+# 📂 DATA INSPECTOR (Parquet Lookup)
+# ==============================================================================
+st.divider()
+st.header("🔍 Data Lookup Inspector")
+st.markdown("""
+**Direct Data Visualization:** This tool queries your `simulation_results.parquet` file directly. 
+It does not use formulas. It shows you the **actual historical data** available for the selected parameters.
+*If the chart is blank, it means no matching rows exist in the lookup table for that specific combination.*
+""")
+
+# --- 1. LOAD DATA ---
+@st.cache_data
+def load_lookup_data():
+    return pd.read_parquet("outputs/simulation_results.parquet")
+
+try:
+    df_lookup = load_lookup_data()
+except Exception as e:
+    st.error(f"Could not load parquet file: {e}")
+    st.stop()
+
+# --- 2. CONFIGURATION SLIDERS ---
+with st.container():
+    col_sb1, col_sb2, col_sb3, col_sb4, col_sb5 = st.columns(5)
+    with col_sb1:
+        # Get unique PAA values from file to ensure user picks valid ones
+        valid_paas = sorted(df_lookup['paa'].unique())
+        default_paa = 18 if 18 in valid_paas else valid_paas[0]
+        sb_paa = st.selectbox("PAA", valid_paas, index=valid_paas.index(default_paa))
+        
+    with col_sb2:
+        valid_utes = sorted(df_lookup['ute'].unique())
+        default_ute = 10.0 if 10.0 in valid_utes else valid_utes[len(valid_utes)//2]
+        sb_ute = st.selectbox("UTE Rate", valid_utes, index=valid_utes.index(default_ute))
+        
+    with col_sb3:
+        # Range slider for pilots to make it easier to find matches
+        min_p, max_p = int(df_lookup['total_pilots'].min()), int(df_lookup['total_pilots'].max())
+        sb_pilots = st.slider("Line Pilots", min_p, max_p, 40)
+        
+    with col_sb4:
+        min_ip, max_ip = int(df_lookup['ip_qty'].min()), int(df_lookup['ip_qty'].max())
+        sb_ips = st.slider("Active IPs", min_ip, max_ip, 6)
+
+    with col_sb5:
+        min_rat, max_rat = float(df_lookup['exp_ratio'].min()), float(df_lookup['exp_ratio'].max())
+        sb_rats = st.slider("Experience Ratio", min_rat, max_rat, 0.40)
+
+# --- 3. QUERY ENGINE ---
+def query_lookup(paa, ute, pilots, ips, upgrade_col):
+    """
+    Filters the dataframe for the specific PAA/UTE/Pilots/IPs bucket 
+    and returns how rates vary with the upgrade_col (e.g., mqt_count).
+    """
+    # 1. Exact Match on PAA & UTE (These are usually discrete buckets)
+    mask = (df_lookup['paa'] == paa) & (df_lookup['ute'] == ute)
+    
+    # 2. Approximate Match on Pilots & IPs (Since you might not have exactly 40 pilots)
+    # We take a small window (+/- 2 pilots, +/- 1 IP) to ensure we find data
+    mask &= (df_lookup['total_pilots'].between(pilots - 2, pilots + 2))
+    mask &= (df_lookup['ip_qty'].between(ips - 1, ips + 1))
+    
+    filtered = df_lookup[mask].copy()
+    
+    if filtered.empty:
+        return pd.DataFrame()
+
+    # 3. Group by the Upgrade Count to get average rates for that load
+    # (e.g., Average WG rate when MQT=0, MQT=2, etc.)
+    grouped = filtered.groupby(upgrade_col)[['wg_monthly', 'fl_monthly', 'ip_monthly']].mean().reset_index()
+    return grouped
+
+# --- 4. CHART 1: LINE CHART ---
+st.subheader("📉 Impact of Student Load (Historical Data)")
+st.caption(f"Showing actual data for PAA={sb_paa}, UTE={sb_ute}, Pilots≈{sb_pilots}, IPs≈{sb_ips}")
+
+var_col, chart_col = st.columns([1, 3])
+
+with var_col:
+    upgrade_type = st.radio(
+        "Select Upgrade to Vary:", 
+        ["MQT Students", "FLUG Students", "IPUG Students"]
+    )
+    # Map friendly name to column name
+    col_map = {
+        "MQT Students": "mqt_qty", 
+        "FLUG Students": "flug_qty", 
+        "IPUG Students": "ipug_qty"
+    }
+    target_col = col_map[upgrade_type]
+
+# Execute Query
+df_chart = query_lookup(sb_paa, sb_ute, sb_pilots, sb_ips, target_col)
+
+with chart_col:
+    if df_chart.empty:
+        st.warning("⚠️ No data found for this combination! Try widening your Pilot/IP search or picking a standard PAA/UTE.")
+    else:
+        # Melt for plotting
+        df_melt = df_chart.melt(id_vars=[target_col], value_vars=['wg_monthly', 'fl_monthly', 'ip_monthly'], 
+                                var_name='Role', value_name='Rate')
+        
+        # Clean up names
+        df_melt['Role'] = df_melt['Role'].map({'wg_monthly': 'Wingman', 'fl_monthly': 'Flight Lead', 'ip_monthly': 'Instructor'})
+        
+        fig_line = px.line(
+            df_melt, x=target_col, y="Rate", color="Role",
+            markers=True,
+            title=f"Actual Rates vs. {upgrade_type}",
+            color_discrete_map={"Wingman": "#636EFA", "Flight Lead": "#EF553B", "Instructor": "#00CC96"}
+        )
+        fig_line.add_hline(y=9.0, line_dash="dot", line_color="red", annotation_text="Inexp.")
+        fig_line.add_hline(y=8.0, line_dash="dot", line_color="orange", annotation_text="Exp.")
+        st.plotly_chart(fig_line, use_container_width=True)
+
+# # --- 5. CHART 2: HEATMAP (Data Coverage) ---
+# st.subheader("🗺️ Data Coverage Heatmap")
+# st.caption("Which IP/MQT combinations actually exist in your file?")
+
+# # Pivot data to see where we have coverage
+# # We filter ONLY by PAA/UTE/Pilots to see the IP vs MQT plane
+# mask_coverage = (df_lookup['paa'] == sb_paa) & \
+#                 (df_lookup['ute'] == sb_ute) & \
+#                 (df_lookup['total_pilots'].between(sb_pilots - 5, sb_pilots + 5)) # Wider net
+
+# df_coverage = df_lookup[mask_coverage].groupby(['ip_qty', 'mqt_qty'])['wg_monthly'].mean().reset_index()
+
+# if not df_coverage.empty:
+#     fig_heat = px.density_heatmap(
+#         df_coverage, 
+#         x='mqt_qty', 
+#         y='ip_qty', 
+#         z='wg_monthly', 
+#         histfunc="avg",
+#         color_continuous_scale="RdYlGn",
+#         title="Average Wingman Rate (White squares = No Data)",
+#         labels={'mqt_count': 'MQT Students', 'ip_qty': 'Active IPs', 'wg_monthly': 'WG Rate'}
+#     )
+#     st.plotly_chart(fig_heat, use_container_width=True)
+# else:
+#     st.info("No coverage data found for this PAA/UTE/Pilot bucket.")
