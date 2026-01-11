@@ -318,12 +318,17 @@ def query_lookup(paa, ute, pilots, ips, upgrade_col):
     filtered = df_lookup[mask].copy()
     
     if filtered.empty:
-        return pd.DataFrame()
+            return pd.DataFrame()
 
-    # 3. Group by the Upgrade Count to get average rates for that load
-    # (e.g., Average WG rate when MQT=0, MQT=2, etc.)
-    grouped = filtered.groupby(upgrade_col)[['wg_monthly', 'fl_monthly', 'ip_monthly']].mean().reset_index()
+    cols_to_avg = [
+        'wg_monthly', 'fl_monthly', 'ip_monthly', 
+        'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
+    ]
+    
+    grouped = filtered.groupby(upgrade_col)[cols_to_avg].mean().reset_index()
     return grouped
+
+
 
 # --- 4. CHART 1: LINE CHART ---
 st.subheader("📉 Impact of Student Load (Historical Data)")
@@ -351,46 +356,61 @@ with chart_col:
     if df_chart.empty:
         st.warning("⚠️ No data found for this combination! Try widening your Pilot/IP search or picking a standard PAA/UTE.")
     else:
-        # Melt for plotting
-        df_melt = df_chart.melt(id_vars=[target_col], value_vars=['wg_monthly', 'fl_monthly', 'ip_monthly'], 
-                                var_name='Role', value_name='Rate')
+        # 1. Melt ALL columns (Total + Blue)
+        df_melt = df_chart.melt(
+            id_vars=[target_col], 
+            value_vars=[
+                'wg_monthly', 'fl_monthly', 'ip_monthly', 
+                'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
+            ], 
+            var_name='Role', 
+            value_name='Rate'
+        )
         
-        # Clean up names
-        df_melt['Role'] = df_melt['Role'].map({'wg_monthly': 'Wingman', 'fl_monthly': 'Flight Lead', 'ip_monthly': 'Instructor'})
+        # 2. Map Names for the Legend
+        name_map = {
+            'wg_monthly': 'Wingman (Total)', 
+            'fl_monthly': 'Flight Lead (Total)', 
+            'ip_monthly': 'Instructor (Total)',
+            'wg_blue_monthly': 'Wingman (Blue)', 
+            'fl_blue_monthly': 'Flight Lead (Blue)', 
+            'ip_blue_monthly': 'Instructor (Blue)'
+        }
+        df_melt['Role'] = df_melt['Role'].map(name_map)
+        
+        # 3. Define Colors
+        # Total Rates = Standard distinct colors
+        # Blue Rates = Varying shades of blue/cyan
+        color_map = {
+            "Wingman (Total)": "#636EFA",    
+            "Flight Lead (Total)": "#EF553B",
+            "Instructor (Total)": "#00CC96", 
+            "Wingman (Blue)": "#636EFA",     
+            "Flight Lead (Blue)": "#EF553B", 
+            "Instructor (Blue)": "#00CC96"   
+        }
+
+        line_dash_map = {
+            "Wingman (Total)": "solid",
+            "Flight Lead (Total)": "solid",
+            "Instructor (Total)": "solid",
+            "Wingman (Blue)": "dot",     
+            "Flight Lead (Blue)": "dot",
+            "Instructor (Blue)": "dot"
+        }
         
         fig_line = px.line(
             df_melt, x=target_col, y="Rate", color="Role",
-            markers=True,
-            title=f"Actual Rates vs. {upgrade_type}",
-            color_discrete_map={"Wingman": "#636EFA", "Flight Lead": "#EF553B", "Instructor": "#00CC96"}
+            line_dash="Role", markers=True,
+            title=f"Actual Rates (Total vs Blue) vs. {upgrade_type}",
+            color_discrete_map=color_map,
+            line_dash_map=line_dash_map
         )
+        
+        # Add Reference Lines
         fig_line.add_hline(y=9.0, line_dash="dot", line_color="red", annotation_text="Inexp.")
         fig_line.add_hline(y=8.0, line_dash="dot", line_color="orange", annotation_text="Exp.")
+        
         st.plotly_chart(fig_line, use_container_width=True)
 
-# # --- 5. CHART 2: HEATMAP (Data Coverage) ---
-# st.subheader("🗺️ Data Coverage Heatmap")
-# st.caption("Which IP/MQT combinations actually exist in your file?")
-
-# # Pivot data to see where we have coverage
-# # We filter ONLY by PAA/UTE/Pilots to see the IP vs MQT plane
-# mask_coverage = (df_lookup['paa'] == sb_paa) & \
-#                 (df_lookup['ute'] == sb_ute) & \
-#                 (df_lookup['total_pilots'].between(sb_pilots - 5, sb_pilots + 5)) # Wider net
-
-# df_coverage = df_lookup[mask_coverage].groupby(['ip_qty', 'mqt_qty'])['wg_monthly'].mean().reset_index()
-
-# if not df_coverage.empty:
-#     fig_heat = px.density_heatmap(
-#         df_coverage, 
-#         x='mqt_qty', 
-#         y='ip_qty', 
-#         z='wg_monthly', 
-#         histfunc="avg",
-#         color_continuous_scale="RdYlGn",
-#         title="Average Wingman Rate (White squares = No Data)",
-#         labels={'mqt_count': 'MQT Students', 'ip_qty': 'Active IPs', 'wg_monthly': 'WG Rate'}
-#     )
-#     st.plotly_chart(fig_heat, use_container_width=True)
-# else:
-#     st.info("No coverage data found for this PAA/UTE/Pilot bucket.")
+        
