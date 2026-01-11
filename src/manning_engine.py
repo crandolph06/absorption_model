@@ -3,6 +3,7 @@ from typing import List
 from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, AgingRate
 import os
 from debug_lookup import diagnose_lookup
+import joblib
 
 
 class CAFSimulation:
@@ -16,11 +17,18 @@ class CAFSimulation:
         if not os.path.exists(path):
             raise FileNotFoundError(f'Lookup File Not Found at {path}.')    
         
+        brain_path = "sortie_brain.pkl"
+        if os.path.exists(brain_path):
+            print(f"🧠 Loading Sortie Brain from {brain_path}...")
+            self.brain = joblib.load(brain_path)
+        else:
+            raise FileNotFoundError(f"Could not find {brain_path}. Please run train_brain.py first.")
+        
         self.df = pd.read_parquet(path)
         self.sim_upgrades = sim_upgrades
 
         self.base_cols = ['paa', 'ute', 'total_pilots', 'ip_qty', 'exp_ratio']
-        self.student_cols = ['mqt_count', 'flug_count', 'ipug_count']
+        self.student_cols = ['mqt_qty', 'flug_qty', 'ipug_qty']
 
         self.valid_base_cols = [c for c in self.base_cols if c in self.df.columns]
         self.valid_stud_cols = [c for c in self.student_cols if c in self.df.columns]
@@ -72,8 +80,12 @@ class CAFSimulation:
     @property
     def total_staff_pilot_count(self):
         return len(self.staff_pilots)
+    
+    def reset(self):
+        self.history = []
+        self.current_year = 2025
 
-    def add_new_bcourse_graduates(self, year: int, count: int):
+    def add_new_bcourse_graduates(self, year: int, count: int): # TODO Consider sorting squadrons based on experience ratio and not distributing B-Coursers equally. 
         num_sq = len(self.squadrons)
         if num_sq == 0:
             return
@@ -98,6 +110,8 @@ class CAFSimulation:
             mqt_count = sum(1 for p in sq.pilots if p.active and p.upgrade == Upgrade.MQT)
             sq.mqt_students = mqt_count
             sq.total_pilots = sum(1 for p in sq.pilots if p.active and p.current_assignment == Assignment.LINE)
+            exp_pilots = sum(1 for p in sq.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual != Qual.WG)
+            sq.experience_ratio = exp_pilots / sq.total_pilots
 
 
     # def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0):
@@ -138,22 +152,10 @@ class CAFSimulation:
                     sq.flug_students = flug_count
                     sq.ipug_students = ipug_count
                     
-                    rates = sq.lookup_aging_rate(
-                        sq_params, 
-                        self.df, 
-                        self.norm_base_matrix, self.base_std, self.valid_base_cols,
-                        self.norm_stud_matrix, self.stud_std, self.valid_stud_cols,
-                        self.sim_upgrades
-                    )
-
-                    # rates = sq.calc_aging_rate(sim_upgrades=False)
+                    rates = sq.predict_aging_rate(self.brain)
 
                     sq.apply_phase_aging(rates)
 
-                    # print(f'Phase {year}, {phase_num} | Sq: {sq.id}')
-
-                    # diagnose_lookup(PATH, sq_params,  priority_vars)
-            
                     self.process_end_of_phase(sq, year, phase_num, retention_rate, rates) # TODO aging rates and manning percentage not populating correctly in Streamlit
             
         return pd.DataFrame(self.history)
@@ -187,6 +189,8 @@ class CAFSimulation:
             if p.current_assignment == Assignment.STAFF:
                 if p.qual == Qual.IP: staff_ips += 1
                 elif p.qual == Qual.FL: staff_fls += 1 
+                if p.upgrade != Upgrade.NONE:
+                    raise AssertionError(f'Pilots are moving to staff in an upgrade status. Check pilot logic.')
 
             elif p.current_assignment == Assignment.LINE:
                 line_pilot_count += 1
