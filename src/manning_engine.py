@@ -114,8 +114,7 @@ class CAFSimulation:
             sq.experience_ratio = exp_pilots / sq.total_pilots
 
 
-    # def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0):
-    def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], PATH, priority_vars, ute: float = 10.0):    
+    def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0):
         """
         squadron_configs: list -> [Config(id=1, paa=12...), Config(id=2, paa=24...)]
         """
@@ -134,14 +133,14 @@ class CAFSimulation:
                 self.add_new_bcourse_graduates(year, current_batch)
 
                 for sq in self.squadrons:
-                    sq_params = {
-                        'paa': sq.paa, 'ute': sq.ute, 'total_pilots': sq.total_pilots, 
-                        'ip_qty': sq.ip_qty, 'exp_ratio': sq.experience_ratio
-                    }
-                    if self.sim_upgrades:
-                        sq_params['mqt_qty'] = sq.mqt_students
-                        sq_params['flug_qty'] = sq.flug_students
-                        sq_params['ipug_qty'] = sq.ipug_students
+                    # sq_params = {
+                    #     'paa': sq.paa, 'ute': sq.ute, 'total_pilots': sq.total_pilots, 
+                    #     'ip_qty': sq.ip_qty, 'exp_ratio': sq.experience_ratio
+                    # }
+                    # if self.sim_upgrades:
+                    #     sq_params['mqt_qty'] = sq.mqt_students
+                    #     sq_params['flug_qty'] = sq.flug_students
+                    #     sq_params['ipug_qty'] = sq.ipug_students
 
                     mqt_count, flug_count, ipug_count = sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
 
