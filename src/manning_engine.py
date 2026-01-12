@@ -6,7 +6,7 @@ import joblib
 
 
 class CAFSimulation:
-    def __init__(self, path: str, sim_upgrades: bool, flug_window_start: int = 250, ipug_window_start: int = 400):
+    def __init__(self, path: str, sim_upgrades: bool, round_robin: bool, flug_window_start: int = 250, ipug_window_start: int = 400):
         self.history = []
         self.current_year = 2025
         self.squadrons: List[SquadronConfig] = []
@@ -62,13 +62,16 @@ class CAFSimulation:
         self.history = []
         self.current_year = 2025
 
-    def add_new_bcourse_graduates(self, year: int, count: int): # TODO Consider sorting squadrons based on experience ratio and not distributing B-Coursers equally. 
+    def add_new_bcourse_graduates(self, year: int, count: int, round_robin: bool): 
         num_sq = len(self.squadrons)
         if num_sq == 0:
             return
-
+        
         for i in range(count):
-            target_sq = self.squadrons[i % num_sq]
+            if not round_robin:
+                target_sq = max(self.squadrons, key=lambda s: (s.experience_ratio, -s.total_pilots))
+            else:
+                target_sq = self.squadrons[i % num_sq]
             
             new_pilot = (Pilot(
                 qual=Qual.WG,
@@ -82,15 +85,9 @@ class CAFSimulation:
             ))
 
             target_sq.pilots.append(new_pilot)
+            target_sq.update_stats()
 
-        for sq in self.squadrons:
-            mqt_count = sum(1 for p in sq.pilots if p.active and p.upgrade == Upgrade.MQT)
-            sq.mqt_students = mqt_count
-            sq.total_pilots = sum(1 for p in sq.pilots if p.active and p.current_assignment == Assignment.LINE)
-            exp_pilots = sum(1 for p in sq.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual != Qual.WG)
-            sq.experience_ratio = exp_pilots / sq.total_pilots
-
-
+        
     def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0):
         """
         squadron_configs: list -> [Config(id=1, paa=12...), Config(id=2, paa=24...)]
