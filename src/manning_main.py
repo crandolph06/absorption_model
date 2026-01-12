@@ -3,31 +3,28 @@ from src.manning_engine import CAFSimulation
 import random
 from typing import Optional
 
-IP_YEAR_START = 2010
-IP_YEAR_END = 2014
-IP_HOUR_START = 400
-IP_HOUR_END = 1500
-IP_SORTIE_START = 300
-IP_SORTIE_END = 1200
+IP_YEAR_START, IP_YEAR_END = 2010, 2014
+IP_HOUR_START, IP_HOUR_END = 400, 1500
+IP_SORTIE_START, IP_SORTIE_END = 300, 1200
 
-FL_YEAR_START = 2015
-FL_YEAR_END = 2023
-FL_HOUR_START = 200
-FL_HOUR_END = 500
-FL_SORTIE_START = 180
-FL_SORTIE_END = 400
+FL_YEAR_START, FL_YEAR_END = 2015, 2023
+FL_HOUR_START, FL_HOUR_END = 200, 500
+FL_SORTIE_START, FL_SORTIE_END = 180, 400
 
-WG_YEAR_START = 2022
-WG_YEAR_END = 2025
-WG_HOUR_START = 50
-WG_HOUR_END = 250
-WG_SORTIE_START = 50
-WG_SORTIE_END = 300
+WG_YEAR_START, WG_YEAR_END = 2022, 2025
+WG_HOUR_START, WG_HOUR_END = 50, 250
+WG_SORTIE_START, WG_SORTIE_END = 50, 300
 
 path = 'outputs/simulation_results.parquet'
 
-def setup_simulation(sim_upgrades: bool = False):
-    sim = CAFSimulation(path, sim_upgrades)
+def setup_simulation(sim_upgrades: bool = False, existing_sim: Optional[CAFSimulation] = None):
+    if existing_sim:
+        sim = existing_sim
+        sim.reset()
+        sim.sim_upgrades = sim_upgrades
+    
+    else:
+        sim = CAFSimulation(path, sim_upgrades)
 
     squadron_manning_targets = [
         {"total": 27, "exp": 0.5}, # Get Exp Ratio from FR1/2
@@ -171,18 +168,13 @@ def setup_simulation(sim_upgrades: bool = False):
 if __name__ == "__main__":
     sim, squadrons = setup_simulation()
 
-    # 4. Run for 10 years
-    # 15 annual intake, 70% retention
     results_df = sim.run_simulation(
         years_to_run=10, 
-        annual_intake=12, 
+        annual_intake=150, 
         retention_rate=0.5, 
         squadron_configs=squadrons,
-        path=path,
-        priority_vars=['exp_ratio', 'ip_qty', 'total_pilots'] # TODO Debug this and add debug variables patph, priority vars
     )
 
     # 5. Quick Debug Output
     print("--- Simulation Complete ---")
     print(results_df.head(10))
-    print(results_df.tail(10))

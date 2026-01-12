@@ -1,43 +1,74 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from src.manning_main import setup_simulation
 import plotly.graph_objects as go
+import numpy as np
+import joblib
+import os
 
-PATH = 'outputs/simulation_results.parquet'
-priority_vars = ['exp_ratio', 'ip_qty', 'total_pilots']
+from src.manning_main import setup_simulation
+from src.manning_engine import CAFSimulation
+
+# PATH = 'outputs/simulation_results.parquet'
+# priority_vars = ['exp_ratio', 'ip_qty', 'total_pilots']
 
 st.set_page_config(page_title="CAF Absorption Simulator", layout="wide")
 
 st.title("🛩️ Fighter Pilot Long-Term Manning Visualizer")
 st.markdown("""
-This dashboard simulates pilot career progression over 10-20 years. 
-It visualizes the "Absorption Death Spiral" where adding too many students collapses the instructional capacity of the force.
-
+This dashboard simulates the **"Absorption Death Spiral"**. It models how adding too many students 
+overwhelms the instructional capacity of a fighter squadron, causing training rates to collapse.
 """)
+
+@st.cache_resource
+def load_base_engine():
+    """
+    Initializes the CAFSimulation object and loads the AI Brain ONCE.
+    This object will be passed to setup_simulation() to be reused.
+    """
+    path = 'outputs/simulation_results.parquet' # TODO Why do we need this?
+    
+    # Check for brain
+    if not os.path.exists("sortie_brain.pkl"):
+        st.error("🚨 'sortie_brain.pkl' not found! Please run 'train_brain_lite.py'.")
+        st.stop()
+        
+    return CAFSimulation(path, sim_upgrades=True)
+
+@st.cache_resource
+def load_sandbox_models():
+    """Loads the brain directly for the Sandbox tool at the bottom."""
+    return joblib.load("sortie_brain.pkl")
+
+cached_sim = load_base_engine()
 
 # --- Sidebar Controls ---
 st.sidebar.header("Simulation Parameters")
-years = st.sidebar.slider("Years to Run", 5, 20, 10)
-intake = st.sidebar.slider("Annual B-Course Intake", 10, 350, 150)
-retention = st.sidebar.slider("Retention Rate (0.0 - 1.0)", 0.0, 1.0, 0.4)
-ute_val = st.sidebar.slider("UTE", 6, 20, 10)
+with st.sidebar.form("sim_params"):
+    years = st.sidebar.slider("Years to Run", 5, 20, 10)
+    intake = st.sidebar.slider("Annual B-Course Intake", 10, 350, 150)
+    retention = st.sidebar.slider("Retention Rate (0.0 - 1.0)", 0.0, 1.0, 0.4)
+    ute_val = st.sidebar.slider("UTE", 6, 20, 10)
 
-include_upgrades = st.sidebar.checkbox(
-    "Realistic Upgrade Bottlenecks", 
-    value=False,
-    help="If checked, student counts (MQT/FLUG/IPUG) will drastically reduce flying rates."
-)
-
-st.sidebar.header("Advanced Analysis")
-run_sensitivity = st.sidebar.checkbox("Run Detailed Intake Analysis")
+    include_upgrades = st.sidebar.checkbox(
+        "Realistic Upgrade Bottlenecks", 
+        value=False,
+        help="If checked, student counts (MQT/FLUG/IPUG) will drastically reduce flying rates."
+    )
+    run_sensitivity = st.sidebar.checkbox(
+        "Run Detailed Intake Analysis", value=False,
+        help="If checked, runs sensitivity analysis over all intake rates.")
+    
+    submitted = st.form_submit_button("🚀 Run Simulation")
 
 # --- Run Simulation ---
-if st.sidebar.button("Run Simulation"):
+if submitted:
     with st.spinner("Running Simulation..."):
         # 1. Setup & Run
-        sim, squadrons = setup_simulation(sim_upgrades=include_upgrades)
-        df = sim.run_simulation(years, intake, retention, squadrons, PATH, priority_vars, ute_val)
+        sim, squadrons = setup_simulation(sim_upgrades=include_upgrades, existing_sim=cached_sim)
+        df = sim.run_simulation(
+            years_to_run=years, annual_intake=intake, 
+            retention_rate=retention, squadron_configs=squadrons, ute=ute_val) # Took out multiple run_simulation requirements
 
         st.write("### 🔍 Debugging Tools")
         csv = df.to_csv(index=False).encode('utf-8')
@@ -49,7 +80,7 @@ if st.sidebar.button("Run Simulation"):
             mime="text/csv",
         )
 
-        # 2. Add Timeline Column
+    if df is not None and not df.empty:
         df['timeline'] = df['year'].astype(str) + " P" + df['phase'].astype(str)
 
         # 3. IMMEDIATE AGGREGATION (CAF Wide)
@@ -60,19 +91,20 @@ if st.sidebar.button("Run Simulation"):
             'staff_ips': 'sum',
             'staff_fls': 'sum',
             'total_pilots': 'sum',
+            'exp_rat': 'mean',
             'percent_manned': 'mean',
             'separated': 'sum',
             'retained': 'sum',
             'wg_rate_mo': 'mean',
             'fl_rate_mo': 'mean',
             'ip_rate_mo': 'mean',
-            'wg_rate_blue': 'mean',
-            'fl_rate_blue': 'mean',
-            'ip_rate_blue': 'mean'
+            'wg_rate_blue': 'mean' if 'wg_rate_blue' in df.columns else lambda x: 0,
+            'fl_rate_blue': 'mean' if 'fl_rate_blue' in df.columns else lambda x: 0,
+            'ip_rate_blue': 'mean' if 'ip_rate_blue' in df.columns else lambda x: 0
         }).reset_index()
 
         # Recalculate Exp Ratio based on the summed counts
-        df_display['exp_rat'] = (df_display['fl_count'] + df_display['ip_count']) / df_display['total_pilots']
+        # df_display['exp_rat'] = (df_display['fl_count'] + df_display['ip_count']) / df_display['total_pilots']
 
         # --- Top Level Metrics (Optional) ---
         st.markdown(f"### CAF Status at Year {years}")
@@ -228,13 +260,11 @@ if st.sidebar.button("Run Simulation"):
                 annual_intake=val, 
                 retention_rate=retention, 
                 squadron_configs=t_sqs, 
-                PATH=PATH,
-                priority_vars=priority_vars,
-                ute=ute_val
+                ute=ute_val # TODO fix UTE issue 
             )
 
             start_year = t_df['year'].min()
-            horizons = {"5-Year": 4, "10-Year": 9, "20-Year": 19}
+            horizons = {"5-Year": 4, "10-Year": 9, "15-Year": 14, "20-Year": 19}
 
             for label, year_offset in horizons.items():
                 target_year = start_year + year_offset
@@ -269,3 +299,68 @@ if st.sidebar.button("Run Simulation"):
         st.plotly_chart(fig_frontier, use_container_width=True)
 else:
     st.info("Set parameters and click 'Run Simulation'.")
+
+# ==============================================================================
+# 5. AI SANDBOX (Restored)
+# ==============================================================================
+st.divider()
+st.header("🧠 AI Sortie Predictor (Sandbox)")
+st.markdown("Adjust sliders to test specific constraints without running the full simulation.")
+
+try:
+    brain_models = load_sandbox_models()
+    
+    with st.container():
+        c1, c2, c3, c4, c5 = st.columns(5)
+        sb_paa = c1.slider("PAA", 12, 24, 18)
+        sb_ute = c2.slider("UTE", 6.0, 20.0, 10.0, step=0.1)
+        sb_pilots = c3.slider("Line Pilots", 15, 80, 40)
+        sb_ips = c4.slider("Active IPs", 2, 25, 6)
+        sb_ratio = c5.slider("Experience Ratio", 0.1, 0.8, 0.45, step=0.01)
+        
+    col_v, col_m, col_c = st.columns([1, 1, 3])
+    upgrade_type = col_v.radio("Vary:", ["MQT", "FLUG", "IPUG"])
+    view_mode = col_m.radio("View:", ["Total Rates", "Blue Air"])
+    
+    plot_data = []
+    for x in range(16):
+        m = x if upgrade_type == "MQT" else 0
+        f = x if upgrade_type == "FLUG" else 0
+        i = x if upgrade_type == "IPUG" else 0
+        
+        # Predict
+        input_vec = np.array([[sb_paa, sb_ute, sb_ratio, sb_pilots, m, f, i, sb_ips]])
+        
+        wg = brain_models['wg_monthly'].predict(input_vec)[0]
+        fl = brain_models['fl_monthly'].predict(input_vec)[0]
+        ip = brain_models['ip_monthly'].predict(input_vec)[0]
+        wg_b = brain_models['wg_blue_monthly'].predict(input_vec)[0]
+        fl_b = brain_models['fl_blue_monthly'].predict(input_vec)[0]
+        ip_b = brain_models['ip_blue_monthly'].predict(input_vec)[0]
+        
+        if view_mode == "Total Rates":
+            plot_data.append({"Count": x, "Rate": wg, "Role": "WG"})
+            plot_data.append({"Count": x, "Rate": fl, "Role": "FL"})
+            plot_data.append({"Count": x, "Rate": ip, "Role": "IP"})
+        else:
+            plot_data.append({"Count": x, "Rate": wg_b, "Role": "WG (Blue)"})
+            plot_data.append({"Count": x, "Rate": fl_b, "Role": "FL (Blue)"})
+            plot_data.append({"Count": x, "Rate": ip_b, "Role": "IP (Blue)"})
+            
+    df_plot = pd.DataFrame(plot_data)
+    
+    if view_mode == "Total Rates":
+        cmap = {"WG": "#636EFA", "FL": "#EF553B", "IP": "#00CC96"}
+    else:
+        cmap = {"WG (Blue)": "#1E90FF", "FL (Blue)": "#87CEFA", "IP (Blue)": "#4682B4"}
+        
+    fig_sb = px.line(df_plot, x="Count", y="Rate", color="Role", markers=True, color_discrete_map=cmap)
+    
+    if view_mode == "Total Rates":
+        fig_sb.add_hline(y=6.0, line_dash="dot", line_color="gray")
+        fig_sb.add_hline(y=2.0, line_dash="dot", line_color="red")
+        
+    st.plotly_chart(fig_sb, use_container_width=True)
+
+except Exception as e:
+    st.warning(f"Sandbox Error: {e}")
