@@ -127,7 +127,7 @@ if submitted:
                 labels={'value': 'Count', 'timeline': 'Year/Phase'},
                 color_discrete_sequence=['#636EFA', '#EF553B', '#00CC96', "#DC8F7E", "#78CAB4"]
             )
-            st.plotly_chart(fig_pop, use_container_width=True)
+            st.plotly_chart(fig_pop, width='stretch')
 
         with col2:
             st.subheader("CAF Experience Ratio")
@@ -144,7 +144,7 @@ if submitted:
             fig_exp.add_hline(y=0.45, line_dash="dash", line_color="yellow", annotation_text="Sortie Inequity (< 45%)")
             fig_exp.add_hline(y=0.40, line_dash="dot", line_color="red", annotation_text="Broken (< 40%)")
             
-            st.plotly_chart(fig_exp, use_container_width=True)
+            st.plotly_chart(fig_exp, width='stretch')
         
     st.divider()
     st.subheader("Detailed Operational Health: Sortie Rates vs. Manning")
@@ -230,7 +230,7 @@ if submitted:
             borderpad=10
         )
 
-    st.plotly_chart(fig_health, use_container_width=True)
+    st.plotly_chart(fig_health, width='stretch')
 
     # --- Stability Frontier Section ---
     if run_sensitivity:
@@ -296,7 +296,7 @@ if submitted:
             color_discrete_sequence=px.colors.sequential.Reds_r 
         )
         fig_frontier.add_hline(y=0.45, line_dash="dot", line_color="yellow", annotation_text="Runaway Inequity")
-        st.plotly_chart(fig_frontier, use_container_width=True)
+        st.plotly_chart(fig_frontier, width='stretch')
 else:
     st.info("Set parameters and click 'Run Simulation'.")
 
@@ -322,6 +322,7 @@ try:
     upgrade_type = col_v.radio("Vary:", ["MQT", "FLUG", "IPUG"])
     view_mode = col_m.radio("View:", ["Total Rates", "Blue Air"])
     
+    feature_names = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
     plot_data = []
     for x in range(16):
         m = x if upgrade_type == "MQT" else 0
@@ -329,7 +330,12 @@ try:
         i = x if upgrade_type == "IPUG" else 0
         
         # Predict
-        input_vec = np.array([[sb_paa, sb_ute, sb_ratio, sb_pilots, m, f, i, sb_ips]])
+        # input_vec = np.array([[sb_paa, sb_ute, sb_ratio, sb_pilots, m, f, i, sb_ips]])
+
+        input_vec = pd.DataFrame([[
+            sb_paa, sb_ute, sb_ratio, sb_pilots, m, f, i, sb_ips
+        ]], columns=feature_names)
+        
         
         wg = brain_models['wg_monthly'].predict(input_vec)[0]
         fl = brain_models['fl_monthly'].predict(input_vec)[0]
@@ -357,10 +363,10 @@ try:
     fig_sb = px.line(df_plot, x="Count", y="Rate", color="Role", markers=True, color_discrete_map=cmap)
     
     if view_mode == "Total Rates":
-        fig_sb.add_hline(y=6.0, line_dash="dot", line_color="gray")
-        fig_sb.add_hline(y=2.0, line_dash="dot", line_color="red")
+        fig_sb.add_hline(y=9.0, line_dash="dot", line_color="red", annotation_text="Inexp.")
+        fig_sb.add_hline(y=8.0, line_dash="dot", line_color="orange", annotation_text="Exp.")
         
-    st.plotly_chart(fig_sb, use_container_width=True)
+    st.plotly_chart(fig_sb, width='stretch')
 
 except Exception as e:
     st.warning(f"Sandbox Error: {e}")

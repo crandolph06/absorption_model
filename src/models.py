@@ -123,9 +123,6 @@ class Pilot:
         
         if self.adsc_remaining > 0:
             self.adsc_remaining -= 4
-
-        if self.upgrade == Upgrade.MQT:
-            self.upgrade = Upgrade.NONE
     
     def check_retention(self, current_year, current_phase, retention_pct: float):
         """
@@ -377,18 +374,28 @@ class SquadronConfig:
                    (wg_monthly, fl_monthly, ip_monthly, etc.)
         """
         # 1. CALCULATE INPUTS (Must match training order EXACTLY)
-        # Features: ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_count', 'flug_count', 'ipug_count', 'ip_qty']
+        # Features: ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
         
         # Count active students
         mqt_count = len([p for p in self.pilots if p.upgrade == Upgrade.MQT])
+        if mqt_count != self.mqt_students:
+            raise AssertionError (f'MQT count incorrect! Check Squadron Logic.')
+        
         flug_count = len([p for p in self.pilots if p.upgrade == Upgrade.FLUG])
+        if flug_count != self.flug_students:
+            raise AssertionError (f'FLUG count incorrect! Check Squadron Logic.')
+
         ipug_count = len([p for p in self.pilots if p.upgrade == Upgrade.IPUG])
+        if ipug_count != self.ipug_students:
+            raise AssertionError (f'IPUG count incorrect! Check Squadron Logic.')
         
         # Ensure we are using Line Pilots (Cockpit Strength)
         line_pilots = len([p for p in self.pilots if p.current_assignment == Assignment.LINE])
         
         # Construct Input Vector (2D Array for sklearn)
-        input_vector = np.array([[
+        feature_names = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
+        
+        input_data = pd.DataFrame([[
             self.paa,
             self.ute,
             self.experience_ratio,
@@ -397,18 +404,18 @@ class SquadronConfig:
             flug_count,
             ipug_count,
             self.ip_qty
-        ]])
+        ]], columns=feature_names)
 
         # 2. GET PREDICTIONS (Monthly Rates)
         try:
-            wg_mo = brain['wg_monthly'].predict(input_vector)[0]
-            fl_mo = brain['fl_monthly'].predict(input_vector)[0]
-            ip_mo = brain['ip_monthly'].predict(input_vector)[0]
+            wg_mo = brain['wg_monthly'].predict(input_data)[0]
+            fl_mo = brain['fl_monthly'].predict(input_data)[0]
+            ip_mo = brain['ip_monthly'].predict(input_data)[0]
             
             # Blue Air Predictions
-            wg_blue_mo = brain['wg_blue_monthly'].predict(input_vector)[0]
-            fl_blue_mo = brain['fl_blue_monthly'].predict(input_vector)[0]
-            ip_blue_mo = brain['ip_blue_monthly'].predict(input_vector)[0]
+            wg_blue_mo = brain['wg_blue_monthly'].predict(input_data)[0]
+            fl_blue_mo = brain['fl_blue_monthly'].predict(input_data)[0]
+            ip_blue_mo = brain['ip_blue_monthly'].predict(input_data)[0]
         except KeyError as e:
             print(f"🚨 Brain Missing Model: {e}")
             return AgingRate() # Return empty/zero rate on failure
@@ -430,3 +437,67 @@ class SquadronConfig:
             fl_blue_phase=max(0, fl_blue_mo * months_per_phase),
             ip_blue_phase=max(0, ip_blue_mo * months_per_phase)
         )
+    
+    def store_stats(self, year: int, phase_num: int, rates: AgingRate):
+        months = self.phase_length_days / 30
+        limit = self.manning_limit
+
+        wg_count = sum(1 for p in self.pilots if p.qual == Qual.WG and p.current_assignment == Assignment.LINE and p.active)
+        fl_count = sum(1 for p in self.pilots if p.qual == Qual.FL and p.current_assignment == Assignment.LINE and p.active)
+        ip_count = sum(1 for p in self.pilots if p.qual == Qual.IP and p.current_assignment == Assignment.LINE and p.active)
+        line_pilot_count = sum(1 for p in self.pilots if p.current_assignment == Assignment.LINE and p.active)
+
+        if line_pilot_count != wg_count + fl_count + ip_count:
+            raise AssertionError(f'The math does not check! Check Pilot Logic!')
+
+        current_stats = {
+            'year': year,
+            'phase': phase_num,
+            'squadron_id': self.id,
+            'wg_count': wg_count,
+            'fl_count': fl_count,
+            'ip_count': ip_count,
+            'percent_manned': line_pilot_count / limit,
+            'total_pilots': line_pilot_count,
+            'exp_rat': (fl_count + ip_count) / line_pilot_count,
+            'staff_ips': 0,
+            'staff_fls': 0,
+            'separated': 0,
+            'retained': 0,
+            'wg_rate_mo': rates.wg_phase / months,
+            'fl_rate_mo': rates.fl_phase / months,
+            'ip_rate_mo': rates.ip_phase / months,
+            'wg_rate_blue': rates.wg_blue_phase / months,
+            'fl_rate_blue': rates.fl_blue_phase / months,
+            'ip_rate_blue': rates.ip_blue_phase / months
+        }
+    
+        return current_stats
+    
+    def send_to_staff(self, min_ips: int = 3):
+        current_line_pilots = []
+        limit = self.manning_limit
+
+        for p in self.pilots:
+            if p.active and p.current_assignment == Assignment.LINE:
+                current_line_pilots.append(p)
+
+        if len(current_line_pilots) > limit:
+            excess_count = len(current_line_pilots) - limit
+
+            ips = []
+            fls = []
+            for p in current_line_pilots:
+                if p.qual == Qual.IP: ips.append(p)
+                elif p.qual == Qual.FL: fls.append(p)
+
+            ips.sort(key=lambda x: x.year_group)
+            fls.sort(key=lambda x: x.year_group)
+
+            eligible_ips = ips[min_ips:] if len(ips) > min_ips else [] # Min of 3 protects Sq/CC, DO, and WO
+
+            funnel_queue = eligible_ips + fls
+            movers_count = min(excess_count, len(funnel_queue))
+        
+            for i in range(int(movers_count)): # Not sure why streamlit thinks this is a float
+                funnel_queue[i].move_to_staff()

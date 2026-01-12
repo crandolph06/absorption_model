@@ -31,7 +31,7 @@ for target in targets:
     # n_estimators: 100 -> 20 (5x faster, 5x smaller)
     # max_depth: 15 -> 10 (Prevents storing massive tree branches)
     # n_jobs=-1: Uses all CPU cores
-    model = RandomForestRegressor(n_estimators=20, max_depth=10, n_jobs=-1, random_state=42)
+    model = RandomForestRegressor(n_estimators=2, max_depth=15, n_jobs=-1, random_state=42)
     model.fit(X, y)
     
     models[target] = model
