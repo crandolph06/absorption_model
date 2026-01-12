@@ -91,6 +91,9 @@ class Pilot:
     sortie_blue_phase: float = 0 
     sortie_red_phase: float = 0 
 
+    target_sorties: float = 0
+    rap_shortfall: float = 0
+
     sortie_monthly: float = 0
     sim_monthly: float = 0
     sortie_blue_monthly: float = 0
@@ -105,9 +108,15 @@ class Pilot:
     separation_date: tuple = (9999, 0)
     current_assignment: Assignment = Assignment.LINE
     
+    def set_rap_requirement(self):
+        if self.qual == Qual.WG:
+            self.target_sorties = 9
+        elif self.qual == Qual.FL or Qual.IP:
+            self.target_sorties = 8
+    
     def update_total(self):
         self.total_phase = self.sortie_phase + self.sim_phase
-        self.rap_shortfall = max(0, self.target_sorties - self.total_phase)
+        self.rap_shortfall = max(0, self.target_sorties - self.total_phase) 
 
     def update_monthly(self, phase_length_days: int):
         months = phase_length_days / 30
@@ -143,8 +152,7 @@ class Pilot:
             
         self.upgrade = Upgrade.NONE
 
-    def age_one_phase_with_rates(self, aging_rate: float, asd: float): 
-        """Updates pilot experience based on the calculated environment."""
+    def age_one_phase_with_rates(self, aging_rate: float, asd: float, phase_length_months: int):  
         if not self.active:
             return
             
@@ -152,7 +160,7 @@ class Pilot:
         self.hours_flown += aging_rate * asd
         
         if self.adsc_remaining > 0:
-            self.adsc_remaining -= 4
+            self.adsc_remaining -= phase_length_months
     
     def check_retention(self, current_year, current_phase, retention_pct: float):
         """
@@ -166,13 +174,12 @@ class Pilot:
                 self.separation_date = (current_year, current_phase)
 
             else: 
-                self.adsc_remaining += 24.1 # Assumes additional 2-year ADSC
+                self.adsc_remaining += 24.1 # Assumes additional 2-year ADSC; .1 is a flag for logic elsewhere in the code
 
     def move_to_staff(self):
         self.current_assignment = Assignment.STAFF
-        self.squadron_id = None
+        self.squadron_id = 0
     
-
 # ----------------------
 # Squadron Config 
 # ----------------------
@@ -180,17 +187,19 @@ class Pilot:
 class SquadronConfig:
     ute: float
     paa: int
-    mqt_students: int
-    flug_students: int
-    ipug_students: int
-    wg_qty: int
-    fl_qty: int
-    ip_qty: int
-    phase_length_days: int = 120  # ~1/3 year or 4 months
+    id: int
+
+    mqt_students: int = 0 
+    flug_students: int = 0
+    ipug_students: int = 0
+    wg_qty: int = 0
+    fl_qty: int = 0
+    ip_qty: int = 0
+    total_pilots: int = 0
+    line_pilots: int = 0
+    experience_ratio: float = 0.0
+    phase_length_days: int = 120  
     avg_sortie_dur: float = 1.3
-    id: int = 99
-    total_pilots: int
-    experience_ratio: int
 
     pilots: List[Pilot] = field(default_factory=list)
 
@@ -201,16 +210,18 @@ class SquadronConfig:
     def update_stats(self):
         # 1. Filter for Active Line Pilots (The only ones who count for stats)
         line_pilots = [p for p in self.pilots if p.active and p.current_assignment == Assignment.LINE]
+        total_pilots = [p for p in self.pilots if p.active]
         
         # 2. Update Counts
-        self.total_pilots = len(line_pilots)
+        self.line_pilots = len(line_pilots)
+        self.total_pilots = len(total_pilots)
         self.ip_qty = sum(1 for p in line_pilots if p.qual == Qual.IP)
         self.fl_qty = sum(1 for p in line_pilots if p.qual == Qual.FL)
         self.wg_qty = sum(1 for p in line_pilots if p.qual == Qual.WG)
         
         # 3. Update Experience Ratio
-        if self.total_pilots > 0:
-            self.experience_ratio = (self.ip_qty + self.fl_qty) / self.total_pilots
+        if self.line_pilots > 0:
+            self.experience_ratio = (self.ip_qty + self.fl_qty) / self.line_pilots
         else:
             self.experience_ratio = 0.0
 
@@ -220,17 +231,19 @@ class SquadronConfig:
         self.ipug_students = sum(1 for p in line_pilots if p.upgrade == Upgrade.IPUG)
 
     def graduate_current_upgrades(self):
+        dirty = False 
+
         for pilot in self.pilots:
             if pilot.upgrade != Upgrade.NONE:
                 pilot.graduate()
+                dirty = True
         
-        self.update_stats()
+        if dirty:
+            self.update_stats()
         if self.mqt_students > 0 or self.flug_students > 0 or self.ipug_students > 0:
             raise AssertionError(f'Graduation logic not functioning properly.')
 
     def new_phase_upgrades(self, flug_window_start:int, ipug_window_start:int):
-        mqt_count = sum(1 for p in self.pilots if p.upgrade == Upgrade.MQT)
-
         flug_eligible = [
             p for p in self.pilots if p.qual == Qual.WG and p.upgrade == Upgrade.NONE 
             and flug_window_start <= p.sorties_flown 
@@ -246,11 +259,10 @@ class SquadronConfig:
             p.upgrade = Upgrade.IPUG
 
         self.update_stats()
-
-        return mqt_count, len(flug_eligible), len(ipug_eligible)
         
     def apply_phase_aging(self, rates: AgingRate):
         "Ages pilots by adding phase aging rate in hours/sorties and subtracts phase length from ADSC remaining."
+        phase_length_months = self.phase_length_days / 30
 
         for p in self.pilots:
             if p.qual == Qual.IP:
@@ -262,7 +274,7 @@ class SquadronConfig:
             else:
                 p_rate = rates.wg_phase
 
-            p.age_one_phase_with_rates(p_rate, self.avg_sortie_dur)
+            p.age_one_phase_with_rates(p_rate, self.avg_sortie_dur, phase_length_months)
 
     def calc_aging_rate(self, sim_upgrades: bool):
         phase_months = self.phase_length_days / 30
@@ -280,7 +292,7 @@ class SquadronConfig:
                 fl_phase=exp_rate * phase_months,
                 ip_phase=exp_rate * phase_months,
                 mqt_blue_phase=4.0 * phase_months,
-                wg_blue_phase=None,
+                wg_blue_phase=None, # TODO figure out this proportion...
                 fl_blue_phase=None,
                 ip_blue_phase=None
             )
@@ -313,11 +325,12 @@ class SquadronConfig:
         # Construct Input Vector (2D Array for sklearn)
         feature_names = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
         
+        # 3. Construct Input Vector
         input_data = pd.DataFrame([[
             self.paa,
             self.ute,
             self.experience_ratio,
-            line_pilots,
+            line_pilots,       
             mqt_count,
             flug_count,
             ipug_count,
@@ -339,8 +352,6 @@ class SquadronConfig:
             return AgingRate() # Return empty/zero rate on failure
 
         # 3. CONVERT TO PHASE OUTPUT (Sorties per Phase)
-        # The simulation executes in phases (e.g., 1 month), so we scale monthly rate to phase length.
-        # Assuming phase_length_days is usually 30, this factor is ~1.0.
         months_per_phase = self.phase_length_days / 30.0
 
         return AgingRate(
@@ -360,37 +371,22 @@ class SquadronConfig:
         months = self.phase_length_days / 30
         limit = self.manning_limit
 
-        wg_count = sum(1 for p in self.pilots if p.qual == Qual.WG and p.current_assignment == Assignment.LINE and p.active)
-        fl_count = sum(1 for p in self.pilots if p.qual == Qual.FL and p.current_assignment == Assignment.LINE and p.active)
-        ip_count = sum(1 for p in self.pilots if p.qual == Qual.IP and p.current_assignment == Assignment.LINE and p.active)
-        line_pilot_count = sum(1 for p in self.pilots if p.current_assignment == Assignment.LINE and p.active)
-
-        mqt_count = sum(1 for p in self.pilots if p.upgrade == Upgrade.MQT and p.active and p.current_assignment == Assignment.LINE)
-        if mqt_count != self.mqt_students:
-            raise AssertionError(f'MQT count is off. Check Pilot Logic!')
-        flug_count = sum(1 for p in self.pilots if p.upgrade == Upgrade.FLUG and p.active and p.current_assignment == Assignment.LINE)
-        if flug_count != self.flug_students:
-            raise AssertionError(f'FLUG count is off. Check Pilot Logic!')
-        ipug_count = sum(1 for p in self.pilots if p.upgrade == Upgrade.IPUG and p.active and p.current_assignment == Assignment.LINE)
-        if ipug_count != self.ipug_students:
-            raise AssertionError(f'IPUG count is off. Check Pilot Logic!')
-
-        if line_pilot_count != wg_count + fl_count + ip_count:
-            raise AssertionError(f'The math does not check! Check Pilot Logic!')
+        self.update_stats()
 
         current_stats = {
             'year': year,
             'phase': phase_num,
             'squadron_id': self.id,
-            'wg_count': wg_count,
-            'fl_count': fl_count,
-            'ip_count': ip_count,
+            'wg_count': self.wg_qty,
+            'fl_count': self.fl_qty,
+            'ip_count': self.ip_qty,
             'mqt_count': self.mqt_students,
             'flug_count': self.flug_students,
             'ipug_count': self.ipug_students,
-            'percent_manned': line_pilot_count / limit,
-            'total_pilots': line_pilot_count,
-            'exp_rat': (fl_count + ip_count) / line_pilot_count,
+            'percent_manned': self.line_pilots / limit,
+            'line_pilots': self.line_pilots,
+            'total_pilots': self.total_pilots,
+            'exp_rat': self.experience_ratio,
             'staff_ips': 0,
             'staff_fls': 0,
             'separated': 0,
@@ -432,3 +428,5 @@ class SquadronConfig:
         
             for i in range(int(movers_count)): # Not sure why streamlit thinks this is a float
                 funnel_queue[i].move_to_staff()
+
+            self.update_stats()
