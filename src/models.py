@@ -47,6 +47,32 @@ class AgingRate:
     wg_blue_phase: float = 0.0
     fl_blue_phase: float = 0.0
     ip_blue_phase: float = 0.0
+
+    def monthly_to_phase(self, phase_length_days):
+        phase_length_months = phase_length_days / 30
+
+        self.mqt_phase *= phase_length_months
+        self.wg_phase *= phase_length_months
+        self.fl_phase *= phase_length_months
+        self.ip_phase *= phase_length_months
+
+        self.mqt_blue_phase *= phase_length_months
+        self.wg_blue_phase *= phase_length_months
+        self.fl_blue_phase *= phase_length_months
+        self.ip_blue_phase *= phase_length_months
+
+    def phase_to_monthly(self, phase_length_days):
+        phase_length_months = phase_length_days / 30
+
+        self.mqt_phase /= phase_length_months
+        self.wg_phase /= phase_length_months
+        self.fl_phase /= phase_length_months
+        self.ip_phase /= phase_length_months
+
+        self.mqt_blue_phase /= phase_length_months
+        self.wg_blue_phase /= phase_length_months
+        self.fl_blue_phase /= phase_length_months
+        self.ip_blue_phase /= phase_length_months
 # ----------------------
 # Pilot Entity
 # ----------------------
@@ -251,8 +277,8 @@ class SquadronConfig:
         exp_pilots = fl_count + ip_count # TODO Where do we re-hack experience ratio? Must just include LINE pilots
 
         if not sim_upgrades:
-            wg_rate = (ute * paa) / wg_count
-            fl_rate = ((ute * paa)/ exp_pilots) / 2
+            wg_rate = ((ute * paa) / 2) / wg_count
+            fl_rate = ((ute * paa) / 2) / (exp_pilots / 2)
             ip_rate = fl_rate
 
             return AgingRate(
@@ -265,7 +291,6 @@ class SquadronConfig:
                 fl_blue_phase=None,
                 ip_blue_phase=None
             )
-
 
 
     def lookup_aging_rate(self, params: dict, original_df: pd.DataFrame, 
@@ -361,8 +386,8 @@ class SquadronConfig:
             ip_blue_phase=(closest_row.get('ip_blue_monthly', 0) * phase_months)
         )
     
-# --------------------------------------------------------------------------
-    # AI PREDICTION ENGINE
+    # --------------------------------------------------------------------------
+    # AI PREDICTION ENGINES
     # --------------------------------------------------------------------------
     def predict_aging_rate(self, brain: dict) -> AgingRate:
         """
@@ -437,7 +462,7 @@ class SquadronConfig:
             fl_blue_phase=max(0, fl_blue_mo * months_per_phase),
             ip_blue_phase=max(0, ip_blue_mo * months_per_phase)
         )
-    
+        
     def store_stats(self, year: int, phase_num: int, rates: AgingRate):
         months = self.phase_length_days / 30
         limit = self.manning_limit
@@ -446,6 +471,16 @@ class SquadronConfig:
         fl_count = sum(1 for p in self.pilots if p.qual == Qual.FL and p.current_assignment == Assignment.LINE and p.active)
         ip_count = sum(1 for p in self.pilots if p.qual == Qual.IP and p.current_assignment == Assignment.LINE and p.active)
         line_pilot_count = sum(1 for p in self.pilots if p.current_assignment == Assignment.LINE and p.active)
+
+        mqt_count = sum(1 for p in self.pilots if p.upgrade == Upgrade.MQT and p.active and p.current_assignment == Assignment.LINE)
+        if mqt_count != self.mqt_students:
+            raise AssertionError(f'MQT count is off. Check Pilot Logic!')
+        flug_count = sum(1 for p in self.pilots if p.upgrade == Upgrade.FLUG and p.active and p.current_assignment == Assignment.LINE)
+        if flug_count != self.flug_students:
+            raise AssertionError(f'FLUG count is off. Check Pilot Logic!')
+        ipug_count = sum(1 for p in self.pilots if p.upgrade == Upgrade.IPUG and p.active and p.current_assignment == Assignment.LINE)
+        if ipug_count != self.ipug_students:
+            raise AssertionError(f'IPUG count is off. Check Pilot Logic!')
 
         if line_pilot_count != wg_count + fl_count + ip_count:
             raise AssertionError(f'The math does not check! Check Pilot Logic!')
@@ -457,6 +492,9 @@ class SquadronConfig:
             'wg_count': wg_count,
             'fl_count': fl_count,
             'ip_count': ip_count,
+            'mqt_count': self.mqt_students,
+            'flug_count': self.flug_students,
+            'ipug_count': self.ipug_students,
             'percent_manned': line_pilot_count / limit,
             'total_pilots': line_pilot_count,
             'exp_rat': (fl_count + ip_count) / line_pilot_count,
