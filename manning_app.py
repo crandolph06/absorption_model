@@ -8,6 +8,7 @@ import os
 
 from src.manning_main import setup_simulation
 from src.manning_engine import CAFSimulation
+from src.predictor import CAFModel
 
 # PATH = 'outputs/simulation_results.parquet'
 # priority_vars = ['exp_ratio', 'ip_qty', 'total_pilots']
@@ -301,15 +302,16 @@ else:
     st.info("Set parameters and click 'Run Simulation'.")
 
 # ==============================================================================
-# 5. AI SANDBOX (Restored)
+# 5. AI SANDBOX (With Ground Truth Overlay)
 # ==============================================================================
 st.divider()
 st.header("🧠 AI Sortie Predictor (Sandbox)")
-st.markdown("Adjust sliders to test specific constraints without running the full simulation.")
+st.markdown("Adjust sliders to test specific constraints. **Toggle 'Show Ground Truth' to see actual data points.**")
 
 try:
     brain_models = load_sandbox_models()
     
+    # --- SLIDERS ---
     with st.container():
         c1, c2, c3, c4, c5 = st.columns(5)
         sb_paa = c1.slider("PAA", 12, 24, 18)
@@ -322,24 +324,25 @@ try:
     upgrade_type = col_v.radio("Vary:", ["MQT", "FLUG", "IPUG"])
     view_mode = col_m.radio("View:", ["Total Rates", "Blue Air"])
     
+    show_truth = col_c.checkbox("Show Ground Truth (Actual Data)", value=True)
+    
+    # --- 1. GENERATE AI PREDICTIONS (Lines) ---
     feature_names = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
     plot_data = []
+    
     for x in range(16):
         m = x if upgrade_type == "MQT" else 0
         f = x if upgrade_type == "FLUG" else 0
         i = x if upgrade_type == "IPUG" else 0
         
-        # Predict
-        # input_vec = np.array([[sb_paa, sb_ute, sb_ratio, sb_pilots, m, f, i, sb_ips]])
-
         input_vec = pd.DataFrame([[
             sb_paa, sb_ute, sb_ratio, sb_pilots, m, f, i, sb_ips
         ]], columns=feature_names)
         
-        
         wg = brain_models['wg_monthly'].predict(input_vec)[0]
         fl = brain_models['fl_monthly'].predict(input_vec)[0]
         ip = brain_models['ip_monthly'].predict(input_vec)[0]
+        
         wg_b = brain_models['wg_blue_monthly'].predict(input_vec)[0]
         fl_b = brain_models['fl_blue_monthly'].predict(input_vec)[0]
         ip_b = brain_models['ip_blue_monthly'].predict(input_vec)[0]
@@ -354,18 +357,108 @@ try:
             plot_data.append({"Count": x, "Rate": ip_b, "Role": "IP (Blue)"})
             
     df_plot = pd.DataFrame(plot_data)
-    
-    if view_mode == "Total Rates":
-        cmap = {"WG": "#636EFA", "FL": "#EF553B", "IP": "#00CC96"}
-    else:
-        cmap = {"WG (Blue)": "#1E90FF", "FL (Blue)": "#87CEFA", "IP (Blue)": "#4682B4"}
+
+    # --- 2. FETCH GROUND TRUTH (Dots) ---
+    truth_data = []
+    if show_truth:
+        # Access the raw dataframe directly from the engine
+        df_raw = cached_sim.df
         
-    fig_sb = px.line(df_plot, x="Count", y="Rate", color="Role", markers=True, color_discrete_map=cmap)
+        # Map the slider selection to the actual column name in the parquet file
+        var_col_map = {"MQT": "mqt_qty", "FLUG": "flug_qty", "IPUG": "ipug_qty"}
+        target_col = var_col_map[upgrade_type]
+
+        # Filter the dataframe (Approximate matches for continuous vars)
+        mask = (
+            (df_raw['paa'] == sb_paa) & 
+            (df_raw['ute'] == sb_ute) & 
+            (df_raw['total_pilots'].between(sb_pilots - 2, sb_pilots + 2)) &
+            (df_raw['ip_qty'].between(sb_ips - 1, sb_ips + 1)) &
+            (df_raw['exp_ratio'].between(sb_ratio - 0.05, sb_ratio + 0.05))
+        )
+        filtered = df_raw[mask]
+
+        if upgrade_type == "MQT":
+            mask &= (df_raw['flug_qty'] == 0) & (df_raw['ipug_qty'] == 0)
+        elif upgrade_type == "FLUG":
+            mask &= (df_raw['mqt_qty'] == 0) & (df_raw['ipug_qty'] == 0)
+        elif upgrade_type == "IPUG":
+            mask &= (df_raw['mqt_qty'] == 0) & (df_raw['flug_qty'] == 0)
+
+        filtered = df_raw[mask]
+
+        if not filtered.empty:
+            # Average the rates for each step of the x-axis variable
+            grouped = filtered.groupby(target_col)[
+                ['wg_monthly', 'fl_monthly', 'ip_monthly', 'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly']
+            ].mean().reset_index()
+            
+            for _, row in grouped.iterrows():
+                x_val = row[target_col]
+                if x_val > 15: continue 
+
+                if view_mode == "Total Rates":
+                    truth_data.append({"Count": x_val, "Rate": row['wg_monthly'], "Role": "WG"})
+                    truth_data.append({"Count": x_val, "Rate": row['fl_monthly'], "Role": "FL"})
+                    truth_data.append({"Count": x_val, "Rate": row['ip_monthly'], "Role": "IP"})
+                else:
+                    truth_data.append({"Count": x_val, "Rate": row['wg_blue_monthly'], "Role": "WG (Blue)"})
+                    truth_data.append({"Count": x_val, "Rate": row['fl_blue_monthly'], "Role": "FL (Blue)"})
+                    truth_data.append({"Count": x_val, "Rate": row['ip_blue_monthly'], "Role": "IP (Blue)"})
     
+    # --- 3. BUILD CHART (Using Graph Objects for Mix of Lines/Dots) ---
+    fig_sb = go.Figure()
+    
+    # Define Colors
+    colors = {"WG": "#636EFA", "FL": "#EF553B", "IP": "#00CC96"}
+    if view_mode == "Blue Air":
+        colors = {"WG": "#1E90FF", "FL": "#87CEFA", "IP": "#4682B4"} # Just fallback
+    
+    # Plot Lines (AI Prediction)
+    for role in df_plot['Role'].unique():
+        subset = df_plot[df_plot['Role'] == role]
+        # Determine color based on role name
+        c = "#888888"
+        if "WG" in role: c = colors["WG"] if "Blue" not in role else "#1E90FF"
+        if "FL" in role: c = colors["FL"] if "Blue" not in role else "#87CEFA"
+        if "IP" in role: c = colors["IP"] if "Blue" not in role else "#4682B4"
+
+        fig_sb.add_trace(go.Scatter(
+            x=subset['Count'], y=subset['Rate'], 
+            name=role, mode='lines', 
+            line=dict(color=c, width=3)
+        ))
+
+    # Plot Dots (Ground Truth)
+    if truth_data:
+        df_truth = pd.DataFrame(truth_data)
+        for role in df_truth['Role'].unique():
+            subset = df_truth[df_truth['Role'] == role]
+            
+            # Match color to the line
+            c = "#888888"
+            if "WG" in role: c = colors["WG"] if "Blue" not in role else "#1E90FF"
+            if "FL" in role: c = colors["FL"] if "Blue" not in role else "#87CEFA"
+            if "IP" in role: c = colors["IP"] if "Blue" not in role else "#4682B4"
+            
+            fig_sb.add_trace(go.Scatter(
+                x=subset['Count'], y=subset['Rate'], 
+                name=f"{role} (Actual)", mode='markers',
+                marker=dict(color=c, size=8, symbol="circle-open", line=dict(width=2))
+            ))
+
+    # Add Reference Lines
     if view_mode == "Total Rates":
         fig_sb.add_hline(y=9.0, line_dash="dot", line_color="red", annotation_text="Inexp.")
         fig_sb.add_hline(y=8.0, line_dash="dot", line_color="orange", annotation_text="Exp.")
         
+    fig_sb.update_layout(
+        title=f"Predicted vs. Actual ({upgrade_type})",
+        xaxis_title=f"{upgrade_type} Count",
+        yaxis_title="Sorties/Month",
+        hovermode="x unified"
+    )
+
     st.plotly_chart(fig_sb, width='stretch')
 
 except Exception as e:

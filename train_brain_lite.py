@@ -28,15 +28,12 @@ for target in targets:
     y = clean_df[target]
     
     # ⚡ OPTIMIZATION SETTINGS ⚡
-    # n_estimators: 100 -> 20 (5x faster, 5x smaller)
-    # max_depth: 15 -> 10 (Prevents storing massive tree branches)
-    # n_jobs=-1: Uses all CPU cores
-    # model = RandomForestRegressor(n_estimators=20, max_depth=20, n_jobs=-1, min_samples_leaf=50, max_features=0.8, random_state=42)
     model = HistGradientBoostingRegressor(
-        max_iter=200,          
-        max_depth=15,          
-        min_samples_leaf=10,   # <--- Reduced from 50 to 10 to catch the "dots"
-        l2_regularization=0.1,
+        max_iter=300,           # High iterations to refine the "cliffs"
+        max_depth=10,           # 10 is the "Sweet Spot." Deep enough for physics, shallow enough for RAM.
+        min_samples_leaf=10,    # Small enough to catch the "Surge" dots you saw
+        l2_regularization=0.1,  # Keeps the curves smooth (prevents jagged zig-zags)
+        learning_rate=0.1,      # Standard learning rate for stability
         random_state=42
     )
     model.fit(X, y)

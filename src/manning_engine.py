@@ -2,7 +2,6 @@ import pandas as pd
 from typing import List
 from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, AgingRate
 import os
-from debug_lookup import diagnose_lookup
 import joblib
 
 
@@ -23,31 +22,9 @@ class CAFSimulation:
             self.brain = joblib.load(brain_path)
         else:
             raise FileNotFoundError(f"Could not find {brain_path}. Please run train_brain.py first.")
-        
+
         self.df = pd.read_parquet(path)
         self.sim_upgrades = sim_upgrades
-
-        self.base_cols = ['paa', 'ute', 'total_pilots', 'ip_qty', 'exp_ratio']
-        self.student_cols = ['mqt_qty', 'flug_qty', 'ipug_qty']
-
-        # self.valid_base_cols = [c for c in self.base_cols if c in self.df.columns]
-        # self.valid_stud_cols = [c for c in self.student_cols if c in self.df.columns]
-
-        # base_data = self.df[self.valid_base_cols].values 
-        # base_std = base_data.std(axis=0)
-        # base_std[base_std == 0] = 1.0 # Prevent div/0
-        # self.norm_base_matrix = base_data / base_std 
-        # self.base_std = base_std 
-
-        # if self.sim_upgrades and self.valid_stud_cols:
-        #     stud_data = self.df[self.valid_stud_cols].values
-        #     stud_std = stud_data.std(axis=0)
-        #     stud_std[stud_std == 0] = 1.0
-        #     self.norm_stud_matrix = stud_data / stud_std
-        #     self.stud_std = stud_std
-        # else:
-        #     self.norm_stud_matrix = None
-        #     self.stud_std = None
 
     @property
     def all_pilots(self):
@@ -123,6 +100,7 @@ class CAFSimulation:
 
         for sq in self.squadrons:
             sq.ute = ute # TODO UTE not behaving correctly throughout simulation in Streamlit
+            phase_length_months = sq.phase_length_days / 30
 
         for year in range(self.current_year, self.current_year + years_to_run):
             phase_intake = annual_intake // 3
@@ -145,7 +123,7 @@ class CAFSimulation:
                     
                     if self.sim_upgrades:
                         rates = sq.predict_aging_rate(self.brain)
-                    
+                                       
                     else:
                         rates = sq.calc_aging_rate(self.sim_upgrades)
 
@@ -203,6 +181,6 @@ class CAFSimulation:
             
         sq.pilots = active_pilots_only
 
-        print(f'{year}-P{phase_num} -- {sq.id} FS: {sq.total_pilots} pilots, {sq.ip_qty} IPs, {sq.experience_ratio}')
+        # print(f'{year}-P{phase_num} -- {sq.id} FS: {sq.total_pilots} pilots, {sq.ip_qty} IPs, {sq.experience_ratio}')
             
 

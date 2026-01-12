@@ -51,28 +51,32 @@ class AgingRate:
     def monthly_to_phase(self, phase_length_days):
         phase_length_months = phase_length_days / 30
 
-        self.mqt_phase *= phase_length_months
-        self.wg_phase *= phase_length_months
-        self.fl_phase *= phase_length_months
-        self.ip_phase *= phase_length_months
+        return AgingRate(
+            mqt_phase=self.mqt_phase * phase_length_months,
+            wg_phase=self.wg_phase * phase_length_months,
+            fl_phase=self.fl_phase * phase_length_months,
+            ip_phase=self.ip_phase * phase_length_months,
 
-        self.mqt_blue_phase *= phase_length_months
-        self.wg_blue_phase *= phase_length_months
-        self.fl_blue_phase *= phase_length_months
-        self.ip_blue_phase *= phase_length_months
-
+            mqt_blue_phase=self.mqt_blue_phase * phase_length_months,
+            wg_blue_phase=self.wg_blue_phase * phase_length_months,
+            fl_blue_phase=self.fl_blue_phase * phase_length_months,
+            ip_blue_phase=self.ip_blue_phase * phase_length_months
+        )
+    
     def phase_to_monthly(self, phase_length_days):
         phase_length_months = phase_length_days / 30
 
-        self.mqt_phase /= phase_length_months
-        self.wg_phase /= phase_length_months
-        self.fl_phase /= phase_length_months
-        self.ip_phase /= phase_length_months
+        return AgingRate(
+            mqt_phase=self.mqt_phase / phase_length_months,
+            wg_phase=self.wg_phase / phase_length_months,
+            fl_phase=self.fl_phase / phase_length_months,
+            ip_phase=self.ip_phase / phase_length_months,
 
-        self.mqt_blue_phase /= phase_length_months
-        self.wg_blue_phase /= phase_length_months
-        self.fl_blue_phase /= phase_length_months
-        self.ip_blue_phase /= phase_length_months
+            mqt_blue_phase=self.mqt_blue_phase / phase_length_months,
+            wg_blue_phase=self.wg_blue_phase / phase_length_months,
+            fl_blue_phase=self.fl_blue_phase / phase_length_months,
+            ip_blue_phase=self.ip_blue_phase / phase_length_months
+        )
 # ----------------------
 # Pilot Entity
 # ----------------------
