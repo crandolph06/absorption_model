@@ -183,58 +183,50 @@ class SquadronConfig:
     mqt_students: int
     flug_students: int
     ipug_students: int
+    wg_qty: int
+    fl_qty: int
     ip_qty: int
     phase_length_days: int = 120  # ~1/3 year or 4 months
     avg_sortie_dur: float = 1.3
     id: int = 99
-
-    _total_pilots: Optional[int] = None
-    _experience_ratio: Optional[float] = None
+    total_pilots: int
+    experience_ratio: int
 
     pilots: List[Pilot] = field(default_factory=list)
 
     @property
-    def total_pilots(self) -> int:
-        if self._total_pilots is not None:
-            return self._total_pilots
-        return sum(1 for p in self.pilots if p.active)
-    
-    @total_pilots.setter
-    def total_pilots(self, value: int):
-        self._total_pilots = value
-
-    @property
-    def experience_ratio(self) -> float:
-        if self._experience_ratio is not None:
-            return self._experience_ratio
-        
-        tp = self.total_pilots
-        if tp == 0: return 0.0
-        exp_count = sum(1 for p in self.pilots if p.active and p.qual in [Qual.FL, Qual.IP] and p.current_assignment == Assignment.LINE)
-        return exp_count/tp
-    
-    @experience_ratio.setter
-    def experience_ratio(self, value:float):
-        self._experience_ratio = value
-
-    @property
     def manning_limit(self) -> int:
         return 1.5 * self.paa
+    
+    def update_stats(self):
+        # 1. Filter for Active Line Pilots (The only ones who count for stats)
+        line_pilots = [p for p in self.pilots if p.active and p.current_assignment == Assignment.LINE]
+        
+        # 2. Update Counts
+        self.total_pilots = len(line_pilots)
+        self.ip_qty = sum(1 for p in line_pilots if p.qual == Qual.IP)
+        self.fl_qty = sum(1 for p in line_pilots if p.qual == Qual.FL)
+        self.wg_qty = sum(1 for p in line_pilots if p.qual == Qual.WG)
+        
+        # 3. Update Experience Ratio
+        if self.total_pilots > 0:
+            self.experience_ratio = (self.ip_qty + self.fl_qty) / self.total_pilots
+        else:
+            self.experience_ratio = 0.0
+
+        # 4. Update Student Counts
+        self.mqt_students = sum(1 for p in line_pilots if p.upgrade == Upgrade.MQT)
+        self.flug_students = sum(1 for p in line_pilots if p.upgrade == Upgrade.FLUG)
+        self.ipug_students = sum(1 for p in line_pilots if p.upgrade == Upgrade.IPUG)
 
     def graduate_current_upgrades(self):
         for pilot in self.pilots:
             if pilot.upgrade != Upgrade.NONE:
                 pilot.graduate()
-
-        self.mqt_students = 0
-        self.flug_students = 0
-        self.ipug_students = 0
-        self.ip_qty = sum(1 for p in self.pilots if p.active and p.qual == Qual.IP and p.current_assignment == Assignment.LINE)
-        self.total_pilots = sum(1 for p in self.pilots if p.active and p.current_assignment == Assignment.LINE)
-        fl_count = sum(1 for p in self.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual == Qual.FL)
-
-        self.experience_ratio = (self.ip_qty + fl_count) / self.total_pilots # TODO is this right? or setter/getter?
-
+        
+        self.update_stats()
+        if self.mqt_students > 0 or self.flug_students > 0 or self.ipug_students > 0:
+            raise AssertionError(f'Graduation logic not functioning properly.')
 
     def new_phase_upgrades(self, flug_window_start:int, ipug_window_start:int):
         mqt_count = sum(1 for p in self.pilots if p.upgrade == Upgrade.MQT)
@@ -252,6 +244,8 @@ class SquadronConfig:
         ]
         for p in ipug_eligible:
             p.upgrade = Upgrade.IPUG
+
+        self.update_stats()
 
         return mqt_count, len(flug_eligible), len(ipug_eligible)
         
@@ -275,129 +269,24 @@ class SquadronConfig:
         
         ute = self.ute
         paa = self.paa
-        wg_count = sum(1 for p in self.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual == Qual.WG)
-        fl_count = sum(1 for p in self.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual == Qual.FL)
-        ip_count = sum(1 for p in self.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual == Qual.IP)
-        exp_pilots = fl_count + ip_count # TODO Where do we re-hack experience ratio? Must just include LINE pilots
 
         if not sim_upgrades:
-            wg_rate = ((ute * paa) / 2) / wg_count
-            fl_rate = ((ute * paa) / 2) / (exp_pilots / 2)
-            ip_rate = fl_rate
+            wg_rate = ((ute * paa) / 2) / self.wg_qty
+            exp_rate = ((ute * paa) / 2) / ((self.fl_qty + self.ip_qty) / 2)
 
             return AgingRate(
                 mqt_phase=4.0 * phase_months,
                 wg_phase=wg_rate * phase_months,
-                fl_phase=fl_rate * phase_months,
-                ip_phase=ip_rate * phase_months,
+                fl_phase=exp_rate * phase_months,
+                ip_phase=exp_rate * phase_months,
                 mqt_blue_phase=4.0 * phase_months,
                 wg_blue_phase=None,
                 fl_blue_phase=None,
                 ip_blue_phase=None
             )
-
-
-    def lookup_aging_rate(self, params: dict, original_df: pd.DataFrame, 
-                                  base_matrix, base_std, base_cols, 
-                                  stud_matrix, stud_std, stud_cols, 
-                                  sim_upgrades: bool) -> 'AgingRate':
-        """
-        Sequential Drill-Down Lookup:
-        1. PAA/UTE (Exact)
-        2. IP Qty (Closest)
-        3. Exp Ratio (Closest)
-        4. Total Pilots (Closest)
-        5. Student Counts (Distance Tie-Breaker)
-        """
-        # --- 0. Handle Non-Upgrade Logic ---
-        # If upgrades are OFF, we force the target student counts to 0.
-        # This makes the lookup find "healthy" rows (low student load).
-        current_stud_params = {}
-        if sim_upgrades:
-            current_stud_params = {c: params.get(c, 0) for c in stud_cols}
-        else:
-            current_stud_params = {c: 0 for c in stud_cols}
-
-        # --- 1. Environmental Lock (Exact Match) ---
-        target_paa = params.get('paa')
-        target_ute = params.get('ute')
-        
-        mask = (original_df['paa'].values == target_paa) & (original_df['ute'].values == target_ute)
-        
-        # Safety fallback
-        if not np.any(mask):
-            mask = np.ones(len(original_df), dtype=bool)
-
-        # --- 2. Sequential Soft Locks (The "Drill Down") ---
-        # We define the priority order of variables to lock down
-        priority_vars = ['exp_ratio', 'ip_qty', 'total_pilots']
-        
-        for var in priority_vars:
-            target_val = params.get(var, 0)
-            # Get values only from the currently surviving rows
-            valid_values = original_df[var].values[mask]
-            
-            if len(valid_values) > 0:
-                # Find the smallest difference available in the current subset
-                min_diff = np.min(np.abs(valid_values - target_val))
-                
-                # Update mask: Keep only rows that are this close to the target
-                # We use a small epsilon for float comparison safety on exp_ratio
-                is_closest = np.abs(original_df[var].values - target_val) <= (min_diff + 0.00001)
-                
-                # Intersect with current mask
-                mask = mask & is_closest
-
-        # --- 3. Final Distance Calculation (Student Bottleneck) ---
-        
-        # Start with zero distance (all survivors are considered "equal" on base stats now)
-        dists = np.zeros(len(original_df))
-        
-        # Add Student Distance (using the 0-forced values if sim_upgrades=False)
-        if stud_matrix is not None:
-            input_stud = np.array([current_stud_params.get(c, 0) for c in stud_cols])
-            norm_input_stud = input_stud / stud_std
-            
-            # Calculate distance only on student columns
-            dists += np.sum((stud_matrix - norm_input_stud)**2, axis=1)
-
-        # --- 4. Apply Mask & Pick Winner ---
-        # Set non-survivors to infinity
-        dists[~mask] = np.inf
-        
-        closest_idx = np.argmin(dists)
-        closest_row = original_df.iloc[closest_idx]
-
-        if params.get('exp_ratio', 1.0) < 0.30:
-            print("\n🚨 LOW RATIO LOOKUP TRIGGERED")
-            print(f"INPUTS:  Ratio={params.get('exp_ratio'):.2f} | Pilots={params.get('total_pilots')} | IPs={params.get('ip_qty')}")
-            print(f"WINNER:  Index={closest_idx} | Ratio={closest_row['exp_ratio']:.2f} | Pilots={closest_row['total_pilots']}")
-            print(f"TOTAL RATES:   WG={closest_row.get('wg_monthly'):.2f} | IP={closest_row.get('ip_monthly'):.2f}")
-            print(f"BLUE RATES:   WG={closest_row.get('wg_blue_monthly'):.2f} | IP={closest_row.get('ip_blue_monthly'):.2f}")
-            print(f"CONTEXT: PAA={closest_row['paa']} | UTE={closest_row['ute']}")
-            print("-" * 50)
-
-        phase_months = self.phase_length_days / 30
-
-        return AgingRate(
-            mqt_phase=4.0 * phase_months,
-            wg_phase=(closest_row.get('wg_monthly', 0) * phase_months),
-            fl_phase=(closest_row.get('fl_monthly', 0) * phase_months),
-            ip_phase=(closest_row.get('ip_monthly', 0) * phase_months),
-            mqt_blue_phase=4.0,
-            wg_blue_phase=(closest_row.get('wg_blue_monthly', 0) * phase_months),
-            fl_blue_phase=(closest_row.get('fl_blue_monthly', 0) * phase_months),
-            ip_blue_phase=(closest_row.get('ip_blue_monthly', 0) * phase_months)
-        )
     
-    # --------------------------------------------------------------------------
-    # AI PREDICTION ENGINES
-    # --------------------------------------------------------------------------
     def predict_aging_rate(self, brain: dict) -> AgingRate:
         """
-        Uses the trained Random Forest models (brain) to predict sortie rates
-        based on the current squadron state.
-        
         Args:
             brain: Dictionary containing the trained sklearn models 
                    (wg_monthly, fl_monthly, ip_monthly, etc.)
