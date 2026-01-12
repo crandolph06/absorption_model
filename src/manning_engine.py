@@ -30,24 +30,24 @@ class CAFSimulation:
         self.base_cols = ['paa', 'ute', 'total_pilots', 'ip_qty', 'exp_ratio']
         self.student_cols = ['mqt_qty', 'flug_qty', 'ipug_qty']
 
-        self.valid_base_cols = [c for c in self.base_cols if c in self.df.columns]
-        self.valid_stud_cols = [c for c in self.student_cols if c in self.df.columns]
+        # self.valid_base_cols = [c for c in self.base_cols if c in self.df.columns]
+        # self.valid_stud_cols = [c for c in self.student_cols if c in self.df.columns]
 
-        base_data = self.df[self.valid_base_cols].values 
-        base_std = base_data.std(axis=0)
-        base_std[base_std == 0] = 1.0 # Prevent div/0
-        self.norm_base_matrix = base_data / base_std 
-        self.base_std = base_std 
+        # base_data = self.df[self.valid_base_cols].values 
+        # base_std = base_data.std(axis=0)
+        # base_std[base_std == 0] = 1.0 # Prevent div/0
+        # self.norm_base_matrix = base_data / base_std 
+        # self.base_std = base_std 
 
-        if self.sim_upgrades and self.valid_stud_cols:
-            stud_data = self.df[self.valid_stud_cols].values
-            stud_std = stud_data.std(axis=0)
-            stud_std[stud_std == 0] = 1.0
-            self.norm_stud_matrix = stud_data / stud_std
-            self.stud_std = stud_std
-        else:
-            self.norm_stud_matrix = None
-            self.stud_std = None
+        # if self.sim_upgrades and self.valid_stud_cols:
+        #     stud_data = self.df[self.valid_stud_cols].values
+        #     stud_std = stud_data.std(axis=0)
+        #     stud_std[stud_std == 0] = 1.0
+        #     self.norm_stud_matrix = stud_data / stud_std
+        #     self.stud_std = stud_std
+        # else:
+        #     self.norm_stud_matrix = None
+        #     self.stud_std = None
 
     @property
     def all_pilots(self):
@@ -143,7 +143,11 @@ class CAFSimulation:
                     sq.flug_students = flug_count
                     sq.ipug_students = ipug_count
                     
-                    rates = sq.predict_aging_rate(self.brain)
+                    if self.sim_upgrades:
+                        rates = sq.predict_aging_rate(self.brain)
+                    
+                    else:
+                        rates = sq.calc_aging_rate(self.sim_upgrades)
 
                     sq.apply_phase_aging(rates)
 
@@ -165,7 +169,7 @@ class CAFSimulation:
 
         sq.send_to_staff()
 
-        for p in self.active_pilots:
+        for p in sq.pilots:
             p.check_retention(year, phase_num, retention_rate)
 
         for p in sq.pilots:
