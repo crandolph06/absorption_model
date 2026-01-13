@@ -8,10 +8,6 @@ import os
 
 from src.manning_main import setup_simulation
 from src.manning_engine import CAFSimulation
-from src.predictor import CAFModel
-
-# PATH = 'outputs/simulation_results.parquet'
-# priority_vars = ['exp_ratio', 'ip_qty', 'total_pilots']
 
 st.set_page_config(page_title="CAF Absorption Simulator", layout="wide")
 
@@ -21,20 +17,20 @@ This dashboard simulates the **"Absorption Death Spiral"**. It models how adding
 overwhelms the instructional capacity of a fighter squadron, causing training rates to collapse.
 """)
 
-@st.cache_resource
+# @st.cache_resource
 def load_base_engine():
     """
     Initializes the CAFSimulation object and loads the AI Brain ONCE.
     This object will be passed to setup_simulation() to be reused.
     """
-    path = 'outputs/simulation_results.parquet' # TODO Why do we need this?
+    path = 'outputs/simulation_results.parquet' 
     
     # Check for brain
     if not os.path.exists("sortie_brain.pkl"):
         st.error("🚨 'sortie_brain.pkl' not found! Please run 'train_brain_lite.py'.")
         st.stop()
         
-    return CAFSimulation(path, sim_upgrades=True)
+    return CAFSimulation(path, sim_upgrades=True, round_robin=True) #TODO might want to add checkbox for these earlier in the process
 
 @st.cache_resource
 def load_sandbox_models():
@@ -45,28 +41,41 @@ cached_sim = load_base_engine()
 
 # --- Sidebar Controls ---
 st.sidebar.header("Simulation Parameters")
-with st.sidebar.form("sim_params"):
-    years = st.sidebar.slider("Years to Run", 5, 20, 10)
-    intake = st.sidebar.slider("Annual B-Course Intake", 10, 350, 150)
-    retention = st.sidebar.slider("Retention Rate (0.0 - 1.0)", 0.0, 1.0, 0.4)
-    ute_val = st.sidebar.slider("UTE", 6, 20, 10)
 
-    include_upgrades = st.sidebar.checkbox(
+with st.sidebar.form("sim_params"):
+    years = st.slider("Years to Run", 5, 20, 10)
+    intake = st.slider("Annual B-Course Intake", 10, 350, 150)
+    retention = st.slider("Retention Rate (0.0 - 1.0)", 0.0, 1.0, 0.4)
+    ute_val = st.slider("UTE", 6, 20, 10)
+
+    st.markdown("---") # Visual separator
+    
+    round_robin = st.checkbox(
+        "Round Robin Assignment", 
+        value=True,
+        help="If Checked: Graduates are assigned equally (1, 2, 3...). If Unchecked: Healthiest squadrons get students first."
+    )
+
+    include_upgrades = st.checkbox(
         "Realistic Upgrade Bottlenecks", 
         value=False,
-        help="If checked, student counts (MQT/FLUG/IPUG) will drastically reduce flying rates."
+        help="If checked, student counts will drastically reduce flying rates (using AI Brain)."
     )
-    run_sensitivity = st.sidebar.checkbox(
-        "Run Detailed Intake Analysis", value=False,
-        help="If checked, runs sensitivity analysis over all intake rates.")
     
+    run_sensitivity = st.checkbox(
+        "Run Detailed Intake Analysis", 
+        value=False,
+        help="If checked, runs sensitivity analysis over all intake rates."
+    )
+    
+    # The Submit Button
     submitted = st.form_submit_button("🚀 Run Simulation")
 
 # --- Run Simulation ---
 if submitted:
     with st.spinner("Running Simulation..."):
         # 1. Setup & Run
-        sim, squadrons = setup_simulation(sim_upgrades=include_upgrades, existing_sim=cached_sim)
+        sim, squadrons = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades, existing_sim=cached_sim)
         df = sim.run_simulation(
             years_to_run=years, annual_intake=intake, 
             retention_rate=retention, squadron_configs=squadrons, ute=ute_val) # Took out multiple run_simulation requirements
@@ -86,12 +95,13 @@ if submitted:
 
         # 3. IMMEDIATE AGGREGATION (CAF Wide)
         df_display = df.groupby(['year', 'phase', 'timeline']).agg({
-            'wg_count': 'sum',
-            'fl_count': 'sum',
-            'ip_count': 'sum',
+            'wg_qty': 'sum',
+            'fl_qty': 'sum',
+            'ip_qty': 'sum',
             'staff_ips': 'sum',
             'staff_fls': 'sum',
             'total_pilots': 'sum',
+            'line_pilots': 'sum',
             'exp_rat': 'mean',
             'percent_manned': 'mean',
             'separated': 'sum',
@@ -103,9 +113,6 @@ if submitted:
             'fl_rate_blue': 'mean' if 'fl_rate_blue' in df.columns else lambda x: 0,
             'ip_rate_blue': 'mean' if 'ip_rate_blue' in df.columns else lambda x: 0
         }).reset_index()
-
-        # Recalculate Exp Ratio based on the summed counts
-        # df_display['exp_rat'] = (df_display['fl_count'] + df_display['ip_count']) / df_display['total_pilots']
 
         # --- Top Level Metrics (Optional) ---
         st.markdown(f"### CAF Status at Year {years}")
@@ -123,7 +130,7 @@ if submitted:
             fig_pop = px.area(
                 df_display, 
                 x='timeline', 
-                y=['wg_count', 'fl_count', 'ip_count', 'staff_fls', 'staff_ips'],
+                y=['wg_qty', 'fl_qty', 'ip_qty', 'staff_fls', 'staff_ips'],
                 title="CAF Qualification Mix",
                 labels={'value': 'Count', 'timeline': 'Year/Phase'},
                 color_discrete_sequence=['#636EFA', '#EF553B', '#00CC96', "#DC8F7E", "#78CAB4"]
@@ -246,7 +253,7 @@ if submitted:
         test_range = list(range(100, 351, 25)) 
         stability_data = []
 
-        base_sim, base_squadrons = setup_simulation(sim_upgrades=include_upgrades)
+        base_sim, base_squadrons = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades)
 
         # Loop with enumeration to update the bar
         for i, val in enumerate(test_range):
@@ -254,7 +261,7 @@ if submitted:
             pct_complete = (i + 1) / len(test_range)
             sensitivity_progress.progress(pct_complete, text=f"Simulating Intake: {val} pilots/yr...")
 
-            t_sim, t_sqs = setup_simulation(sim_upgrades=include_upgrades)
+            t_sim, t_sqs = setup_simulation(round_robin=round, sim_upgrades=include_upgrades)
 
             t_df = t_sim.run_simulation(
                 years_to_run=20, 
@@ -273,7 +280,7 @@ if submitted:
                 
                 if not snapshot.empty:
                     total_pilots = snapshot['total_pilots'].sum()
-                    exp_pilots = snapshot['fl_count'].sum() + snapshot['ip_count'].sum()
+                    exp_pilots = snapshot['fl_qty'].sum() + snapshot['ip_qty'].sum()
                     ratio = exp_pilots / total_pilots if total_pilots > 0 else 0
                     
                     stability_data.append({

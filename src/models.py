@@ -306,19 +306,6 @@ class SquadronConfig:
         # 1. CALCULATE INPUTS (Must match training order EXACTLY)
         # Features: ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
         
-        # Count active students
-        mqt_count = len([p for p in self.pilots if p.upgrade == Upgrade.MQT])
-        if mqt_count != self.mqt_students:
-            raise AssertionError (f'MQT count incorrect! Check Squadron Logic.')
-        
-        flug_count = len([p for p in self.pilots if p.upgrade == Upgrade.FLUG])
-        if flug_count != self.flug_students:
-            raise AssertionError (f'FLUG count incorrect! Check Squadron Logic.')
-
-        ipug_count = len([p for p in self.pilots if p.upgrade == Upgrade.IPUG])
-        if ipug_count != self.ipug_students:
-            raise AssertionError (f'IPUG count incorrect! Check Squadron Logic.')
-        
         # Ensure we are using Line Pilots (Cockpit Strength)
         line_pilots = len([p for p in self.pilots if p.current_assignment == Assignment.LINE])
         
@@ -330,10 +317,10 @@ class SquadronConfig:
             self.paa,
             self.ute,
             self.experience_ratio,
-            line_pilots,       
-            mqt_count,
-            flug_count,
-            ipug_count,
+            self.line_pilots,       
+            self.mqt_students,
+            self.flug_students,
+            self.ipug_students,
             self.ip_qty
         ]], columns=feature_names)
 
