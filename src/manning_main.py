@@ -1,4 +1,4 @@
-from src.models import SquadronConfig, Pilot, Qual, Upgrade
+from src.models import SquadronConfig, Pilot, Qual, Assignment
 from src.manning_engine import CAFSimulation
 import random
 from typing import Optional
@@ -17,14 +17,14 @@ WG_SORTIE_START, WG_SORTIE_END = 50, 300
 
 path = 'outputs/simulation_results.parquet'
 
-def setup_simulation(sim_upgrades: bool = False, existing_sim: Optional[CAFSimulation] = None):
+def setup_simulation(round_robin: bool, sim_upgrades: bool = False, existing_sim: Optional[CAFSimulation] = None):
     if existing_sim:
         sim = existing_sim
         sim.reset()
         sim.sim_upgrades = sim_upgrades
     
     else:
-        sim = CAFSimulation(path, sim_upgrades)
+        sim = CAFSimulation(path, sim_upgrades, round_robin)
 
     squadron_manning_targets = [
         {"total": 27, "exp": 0.5}, # Get Exp Ratio from FR1/2
@@ -138,7 +138,7 @@ def setup_simulation(sim_upgrades: bool = False, existing_sim: Optional[CAFSimul
                 adsc_remaining=max(0, 120 - ((sim.current_year - year_group - 2) * 12)),
                 sorties_flown=random.randint(IP_SORTIE_START, IP_SORTIE_END), 
                 hours_flown=random.randint(IP_HOUR_START, IP_HOUR_END), 
-                squadron_id=sq.id
+                squadron_id=sq.id, current_assignment=Assignment.LINE
             ))
         
         while sum(1 for p in sq.pilots if p.qual in [Qual.IP, Qual.FL]) < target_exp_count:
@@ -149,7 +149,7 @@ def setup_simulation(sim_upgrades: bool = False, existing_sim: Optional[CAFSimul
                 adsc_remaining=max(0, 120 - ((sim.current_year - year_group - 2) * 12)),
                 sorties_flown=random.randint(FL_SORTIE_START, FL_SORTIE_END),
                 hours_flown=random.randint(FL_HOUR_START, FL_HOUR_END),
-                squadron_id=sq.id
+                squadron_id=sq.id, current_assignment=Assignment.LINE
             ))
 
         while len(sq.pilots) < tgt["total"]:
@@ -160,9 +160,13 @@ def setup_simulation(sim_upgrades: bool = False, existing_sim: Optional[CAFSimul
                 adsc_remaining=max(0, 120 - ((sim.current_year - year_group - 2) * 12)),
                 sorties_flown=random.randint(WG_SORTIE_START, WG_SORTIE_END),
                 hours_flown=random.randint(WG_HOUR_START, WG_HOUR_END),
-                squadron_id=sq.id
+                squadron_id=sq.id,
+                current_assignment=Assignment.LINE
             ))
 
+    for sq in squadrons:
+        sq.update_stats()
+    
     return sim, squadrons
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ class CAFSimulation:
 
         self.df = pd.read_parquet(path)
         self.sim_upgrades = sim_upgrades
+        self.round_robin = round_robin
 
     @property
     def all_pilots(self):
@@ -96,8 +97,7 @@ class CAFSimulation:
         self.squadrons = squadron_configs
 
         for sq in self.squadrons:
-            sq.ute = ute # TODO UTE not behaving correctly throughout simulation in Streamlit
-            phase_length_months = sq.phase_length_days / 30
+            sq.ute = ute # LATER cannot go squadron by squadron for ute if using streamlit slider value
 
         for year in range(self.current_year, self.current_year + years_to_run):
             phase_intake = annual_intake // 3
@@ -105,22 +105,17 @@ class CAFSimulation:
 
             for phase_num in range(1, 4): 
                 current_batch = phase_intake + (remainder if phase_num == 3 else 0)
-                self.add_new_bcourse_graduates(year, current_batch)
+                self.add_new_bcourse_graduates(year, current_batch, self.round_robin)
 
                 for sq in self.squadrons:
 
-                    mqt_count, flug_count, ipug_count = sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
-
-                    if sq.flug_students != 0:
+                    if sq.flug_students != 0 or sq.ipug_students != 0:
                         raise AssertionError(f'Critical Data Mismatch in Squadron Pilots')
-                    
-                    sq.mqt_students = mqt_count
-                    sq.flug_students = flug_count
-                    sq.ipug_students = ipug_count
-                    
+
+                    sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
+
                     if self.sim_upgrades:
                         rates = sq.predict_aging_rate(self.brain)
-                                       
                     else:
                         rates = sq.calc_aging_rate(self.sim_upgrades)
 
@@ -178,6 +173,6 @@ class CAFSimulation:
             
         sq.pilots = active_pilots_only
 
-        # print(f'{year}-P{phase_num} -- {sq.id} FS: {sq.total_pilots} pilots, {sq.ip_qty} IPs, {sq.experience_ratio}')
-            
+        sq.update_stats()
+
 
