@@ -110,7 +110,7 @@ with col_main:
         fig_equity.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
         fig_equity.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
         fig_equity.update_layout(xaxis_title='UTE', yaxis_title='Monthly Sorties', hovermode="x unified", margin=dict(l=20, r=20, t=30, b=20), height=350)
-        st.plotly_chart(fig_equity, use_container_width=True)
+        st.plotly_chart(fig_equity, width='stretch')
 
     # CHART 2: COMPOSITION # TODO update X axis title based on selectbox
     st.write("---")
@@ -135,7 +135,7 @@ with col_main:
         fig_comp.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
         fig_comp.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
         fig_comp.update_layout(xaxis_title='Experience Ratio', yaxis_title='Monthly Sorties', barmode='group', height=450, margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-        st.plotly_chart(fig_comp, use_container_width=True)
+        st.plotly_chart(fig_comp, width='stretch')
 
     # CHART 3: HEATMAP
     st.write("---")
@@ -188,7 +188,7 @@ with col_main:
 
     fig_heat.update_layout(xaxis_title="Experience Ratio", yaxis_title="UTE", height=500)
     # fig_heat.update_layout(xaxis_title="Experience Ratio", yaxis_title="UTE", height=500, xaxis=dict(tickformat=".0%"))
-    st.plotly_chart(fig_heat, use_container_width=True)
+    st.plotly_chart(fig_heat, width='stretch')
 
 # --- SUMMARY SIDEBAR ---
 with col_summary:
@@ -249,7 +249,7 @@ with col_summary:
         })
         fig_burden = px.bar(burden_df, y='Role', x='Red Pct', orientation='h', color_discrete_sequence=['#f43f5e'])
         fig_burden.update_layout(xaxis_tickformat='.0%', height=250, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Red Air %")
-        st.plotly_chart(fig_burden, use_container_width=True)
+        st.plotly_chart(fig_burden, width='stretch')
     else:
         st.info("No exact match for these filters.")
 # ==============================================================================
@@ -411,6 +411,6 @@ with chart_col:
         fig_line.add_hline(y=9.0, line_dash="dot", line_color="red", annotation_text="Inexp.")
         fig_line.add_hline(y=8.0, line_dash="dot", line_color="orange", annotation_text="Exp.")
         
-        st.plotly_chart(fig_line, use_container_width=True)
+        st.plotly_chart(fig_line, width='stretch')
 
         
