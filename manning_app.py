@@ -116,11 +116,12 @@ if submitted:
 
         # --- Top Level Metrics (Optional) ---
         st.markdown(f"### CAF Status at Year {years}")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Final Total Line Pilots", int(df_display['total_pilots'].iloc[-1]))
-        m2.metric("Final Total Staff Officers", int(df_display['staff_ips'].iloc[-1] + int(df_display['staff_fls'].iloc[-1])))
-        m3.metric("Final Exp Ratio", f"{df_display['exp_rat'].iloc[-1]*100:.1f}%")
-        m4.metric("Total Separations", int(df_display['separated'].sum()))
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Final Total Pilots", int(df_display['total_pilots'].iloc[-1]))
+        m2.metric("Final Total Line Pilots", int(df_display['line_pilots'].iloc[-1]))
+        m3.metric("Final Total Staff Officers", int(df_display['staff_ips'].iloc[-1] + int(df_display['staff_fls'].iloc[-1])))
+        m4.metric("Final Exp Ratio", f"{df_display['exp_rat'].iloc[-1]*100:.1f}%")
+        m5.metric("Total Separations", int(df_display['separated'].sum()))
 
         # --- Charts ---
         col1, col2 = st.columns(2)
