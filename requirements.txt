@@ -4,4 +4,4 @@ streamlit
 joblib
 altair<5
 streamlit>=1.30.0
-sklearn
+scikit-learn
