@@ -1,6 +1,6 @@
 import pandas as pd
 from typing import List
-from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, AgingRate
+from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment
 import os
 import joblib
 
