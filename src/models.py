@@ -186,6 +186,8 @@ class SquadronConfig:
     ute: float
     paa: int
     id: int
+    ccr: float = 1.5
+    max_manning: float = 1.5
 
     mqt_students: int = 0 
     flug_students: int = 0
@@ -203,7 +205,8 @@ class SquadronConfig:
 
     @property
     def manning_limit(self) -> int:
-        return 1.5 * self.paa
+        ideal_manning = self.ccr * self.paa
+        return int(self.max_manning * ideal_manning)
     
     def update_stats(self):
         # 1. Filter for Active Line Pilots (The only ones who count for stats)
