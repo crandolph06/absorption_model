@@ -57,7 +57,7 @@ with st.sidebar.form("sim_params"):
 
     include_upgrades = st.checkbox(
         "Realistic Upgrade Bottlenecks", 
-        value=False,
+        value=True,
         help="If checked, student counts will drastically reduce flying rates (using AI Brain)."
     )
     
