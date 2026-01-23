@@ -1,10 +1,8 @@
 from dataclasses import dataclass, field
 from enum import Enum
 import random
-from typing import List, Optional
-from math import sqrt
+from typing import List
 import pandas as pd
-import numpy as np
 
 # ----------------------
 # Math 
