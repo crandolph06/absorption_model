@@ -6,7 +6,6 @@ import joblib
 import os
 
 from src.manning_main import setup_simulation
-from src.manning_engine import CAFSimulation
 from src.models import PriorityMode
 
 st.set_page_config(page_title="CAF Absorption Simulator", layout="wide")
@@ -188,6 +187,9 @@ if submitted:
     fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['fl_rate_blue'], name='FL Blue Rate', line=dict(color='#EF553B', dash='dot'), hovertemplate='%{y:.1f}'))
     fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['ip_rate_blue'], name='IP Blue Rate', line=dict(color='#00CC96', dash='dot'), hovertemplate='%{y:.1f}'))
 
+    fig_health.add_hline(y=9.0, line_dash="dot", line_color="red", annotation_text="Inexp.")
+    fig_health.add_hline(y=8.0, line_dash="dot", line_color="orange", annotation_text="Exp.")
+
     # --- Right Axis: Percentages (0-100%+) ---
     # Manning % (Thick White Dash)
     fig_health.add_trace(go.Scatter(
@@ -235,7 +237,7 @@ if submitted:
             ),
             
             hovermode="x unified",
-            margin=dict(l=50, r=50, t=50, b=100) # Increased bottom margin for legends
+            margin=dict(l=50, r=50, t=50, b=150) # Increased bottom margin for legends
         )
 
     fig_health.add_annotation(
@@ -305,7 +307,7 @@ if submitted:
                     # total_pilots = snapshot['total_pilots'].sum()
                     # exp_pilots = snapshot['fl_qty'].sum() + snapshot['ip_qty'].sum()
                     # ratio = exp_pilots / total_pilots if total_pilots > 0 else 0
-                    ratio = snapshot['exp_rat']
+                    ratio = snapshot['exp_rat'].mean()
                     
                     stability_data.append({
                         "Annual Intake": val, 
@@ -494,3 +496,14 @@ else:
 
 # except Exception as e:
 #     st.warning(f"Sandbox Error: {e}")
+
+
+# --- Footer / Contact Section ---
+st.divider()
+st.subheader("🐛 Report a Bug / Feature Request")
+st.markdown("""
+This simulation is a work in progress. If you notice any calculation errors, crashes, 
+or have ideas for new features, please let me know!
+
+**📧 Contact:** [Send me an email](mailto:claire.randolph@us.af.mil)
+""")
