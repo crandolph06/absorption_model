@@ -1,18 +1,19 @@
 import pandas as pd
 from typing import List, Optional
-from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment
+from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, PriorityMode
 import os
 import joblib
 
 
 class CAFSimulation:
-    def __init__(self, path: str, sim_upgrades: bool, round_robin: bool, flug_window_start: int = 250, ipug_window_start: int = 400, max_manning_pct: int = 150):
+    def __init__(self, path: str, sim_upgrades: bool, round_robin: bool, flug_window_start: int = 250, ipug_window_start: int = 400, max_manning_pct: int = 150, staff_priority_mode: PriorityMode = PriorityMode.RANDOM):
         self.history = []
         self.current_year = 2025
         self.squadrons: List[SquadronConfig] = []
         self.flug_window_start = flug_window_start # Sorties for FLUG auto-start
         self.ipug_window_start = ipug_window_start # Hours for IPUG auto-start
         self.max_manning = max_manning_pct/100
+        self.staff_priority = staff_priority_mode
 
         if not os.path.exists(path):
             raise FileNotFoundError(f'Lookup File Not Found at {path}.')    
@@ -139,7 +140,7 @@ class CAFSimulation:
 
         sq.graduate_current_upgrades()
 
-        sq.send_to_staff()
+        sq.send_to_staff(priority_mode=self.staff_priority)
 
         for p in sq.pilots:
             p.check_retention(year, phase_num, retention_rate)
