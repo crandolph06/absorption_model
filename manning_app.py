@@ -16,28 +16,6 @@ This dashboard simulates the **"Absorption Death Spiral"**. It models how adding
 overwhelms the instructional capacity of a fighter squadron, causing training rates to collapse.
 """)
 
-# @st.cache_resource
-def load_base_engine():
-    """
-    Initializes the CAFSimulation object and loads the AI Brain ONCE.
-    This object will be passed to setup_simulation() to be reused.
-    """
-    path = 'outputs/simulation_results.parquet' 
-    
-    # Check for brain
-    if not os.path.exists("sortie_brain.pkl"):
-        st.error("🚨 'sortie_brain.pkl' not found! Please run 'train_brain_lite.py'.")
-        st.stop()
-        
-    return CAFSimulation(path, sim_upgrades=True, round_robin=True) #TODO might want to add checkbox for these earlier in the process
-
-@st.cache_resource
-def load_sandbox_models():
-    """Loads the brain directly for the Sandbox tool at the bottom."""
-    return joblib.load("sortie_brain.pkl")
-
-cached_sim = load_base_engine()
-
 # --- Sidebar Controls ---
 st.sidebar.header("Simulation Parameters")
 
@@ -46,6 +24,8 @@ with st.sidebar.form("sim_params"):
     intake = st.slider("Annual B-Course Intake", 10, 350, 150)
     retention = st.slider("Retention Rate (0.0 - 1.0)", 0.0, 1.0, 0.4)
     ute_val = st.slider("UTE", 6, 20, 10)
+    flug_start = st.slider("FLUG Entry -- Sorties", 50, 300, 250)
+    ipug_start = st.slider("IPUG Entry -- Hours", 150, 500, 400)
 
     st.markdown("---") # Visual separator
     
@@ -69,6 +49,29 @@ with st.sidebar.form("sim_params"):
     
     # The Submit Button
     submitted = st.form_submit_button("🚀 Run Simulation")
+
+# @st.cache_resource
+def load_base_engine():
+    """
+    Initializes the CAFSimulation object and loads the AI Brain ONCE.
+    This object will be passed to setup_simulation() to be reused.
+    """
+    path = 'outputs/simulation_results.parquet' 
+    
+    # Check for brain
+    if not os.path.exists("sortie_brain.pkl"):
+        st.error("🚨 'sortie_brain.pkl' not found! Please run 'train_brain_lite.py'.")
+        st.stop()
+        
+    return CAFSimulation(path, sim_upgrades=True, round_robin=True, flug_window_start=flug_start, ipug_window_start=ipug_start) 
+
+@st.cache_resource
+def load_sandbox_models():
+    """Loads the brain directly for the Sandbox tool at the bottom."""
+    return joblib.load("sortie_brain.pkl")
+
+cached_sim = load_base_engine()
+
 
 # --- Run Simulation ---
 if submitted:
