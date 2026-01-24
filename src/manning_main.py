@@ -1,7 +1,8 @@
-from src.models import SquadronConfig, Pilot, Qual, Assignment
+from src.models import SquadronConfig, Pilot, Qual, Assignment, PriorityMode
 from src.manning_engine import CAFSimulation
 import random
 from typing import Optional
+import copy
 
 IP_YEAR_START, IP_YEAR_END = 2010, 2014
 IP_HOUR_START, IP_HOUR_END = 400, 1500
@@ -17,14 +18,28 @@ WG_SORTIE_START, WG_SORTIE_END = 50, 300
 
 path = 'outputs/simulation_results.parquet'
 
-def setup_simulation(round_robin: bool, sim_upgrades: bool = False, existing_sim: Optional[CAFSimulation] = None):
+def setup_simulation(round_robin: bool,ai_brain, sim_upgrades: bool = False, existing_sim: Optional[CAFSimulation] = None, flug_window_start: int = 250, ipug_window_start: int = 400, max_manning_pct: int = 150, staff_priority_mode: PriorityMode = PriorityMode.RANDOM):
     if existing_sim:
-        sim = existing_sim
+        sim = copy.deepcopy(existing_sim)
         sim.reset()
+
         sim.sim_upgrades = sim_upgrades
+        sim.round_robin = round_robin
+        sim.flug_window_start = flug_window_start
+        sim.ipug_window_start = ipug_window_start
+        sim.max_manning = max_manning_pct / 100
+        sim.staff_priority = staff_priority_mode
+
+        sim.brain = ai_brain
+
+        if len(sim.squadrons) > 0:
+            return sim, sim.squadrons  
     
     else:
-        sim = CAFSimulation(path, sim_upgrades, round_robin)
+        sim = CAFSimulation(sim_upgrades=sim_upgrades, round_robin=round_robin,
+                            brain = ai_brain, flug_window_start=flug_window_start, 
+                            ipug_window_start=ipug_window_start, max_manning_pct=max_manning_pct, 
+                            staff_priority_mode=staff_priority_mode)
 
     squadron_manning_targets = [
         {"total": 27, "exp": 0.5}, # Get Exp Ratio from FR1/2
