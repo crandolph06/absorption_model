@@ -7,6 +7,7 @@ import os
 
 from src.manning_main import setup_simulation
 from src.manning_engine import CAFSimulation
+from src.models import PriorityMode
 
 st.set_page_config(page_title="CAF Absorption Simulator", layout="wide")
 
@@ -15,6 +16,14 @@ st.markdown("""
 This dashboard simulates the **"Absorption Death Spiral"**. It models how adding too many students 
 overwhelms the instructional capacity of a fighter squadron, causing training rates to collapse.
 """)
+
+# --- Staff Priority Backend ---
+priority_options = {
+    "Flight Leads First": PriorityMode.FL_FIRST,
+    "Instructors First": PriorityMode.IP_FIRST,
+    "Random Shuffle": PriorityMode.RANDOM
+}
+
 
 # --- Sidebar Controls ---
 st.sidebar.header("Simulation Parameters")
@@ -27,6 +36,12 @@ with st.sidebar.form("sim_params"):
     flug_start = st.slider("FLUG Entry -- Sorties", 50, 300, 250)
     ipug_start = st.slider("IPUG Entry -- Hours", 150, 500, 400)
     max_manning_pct = st.slider("Maximum Squadron Manning (%)", 50, 150, 100)
+    selected_label = st.radio(
+    "Staff Assignment Priority",
+    options=priority_options.keys(),
+    horizontal=True, # <--- This makes it look like a toggle bar
+    help="Determines who has the priority of going to staff once unit hits max capacity."
+)
 
     st.markdown("---") # Visual separator
     
@@ -47,6 +62,8 @@ with st.sidebar.form("sim_params"):
         value=False,
         help="If checked, runs sensitivity analysis over all intake rates."
     )
+
+    staff_priority_mode = priority_options[selected_label]
     
     # The Submit Button
     submitted = st.form_submit_button("🚀 Run Simulation")
