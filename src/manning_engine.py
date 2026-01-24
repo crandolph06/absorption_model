@@ -6,12 +6,13 @@ import joblib
 
 
 class CAFSimulation:
-    def __init__(self, path: str, sim_upgrades: bool, round_robin: bool, flug_window_start: int = 250, ipug_window_start: int = 400):
+    def __init__(self, path: str, sim_upgrades: bool, round_robin: bool, flug_window_start: int = 250, ipug_window_start: int = 400, max_manning_pct: int = 150):
         self.history = []
         self.current_year = 2025
         self.squadrons: List[SquadronConfig] = []
         self.flug_window_start = flug_window_start # Sorties for FLUG auto-start
         self.ipug_window_start = ipug_window_start # Hours for IPUG auto-start
+        self.max_manning = max_manning_pct/100
 
         if not os.path.exists(path):
             raise FileNotFoundError(f'Lookup File Not Found at {path}.')    
@@ -89,18 +90,16 @@ class CAFSimulation:
             target_sq.update_stats()
 
         
-    def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0, max_manning: Optional[int] = 150):
+    def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0):
         """
         squadron_configs: list -> [Config(id=1, paa=12...), Config(id=2, paa=24...)]
         """
         self.history = []
         self.squadrons = squadron_configs
 
-        manning_multiplier = max_manning/100
-
         for sq in self.squadrons:
             sq.ute = ute # With current implementation all squadrons must have same UTE
-            sq.manning_pct = manning_multiplier
+            sq.manning_pct = self.max_manning
 
         for year in range(self.current_year, self.current_year + years_to_run):
             phase_intake = annual_intake // 3
