@@ -365,7 +365,6 @@ class SquadronConfig:
         
     def store_stats(self, year: int, phase_num: int, rates: AgingRate):
         months = self.phase_length_days / 30
-        limit = int(self.ccr * self.paa)
 
         self.update_stats()
 
