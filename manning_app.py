@@ -24,13 +24,12 @@ priority_options = {
     "Random Shuffle": PriorityMode.RANDOM
 }
 
-
 # --- Sidebar Controls ---
 st.sidebar.header("Simulation Parameters")
 
 with st.sidebar.form("sim_params"):
     years = st.slider("Years to Run", 5, 20, 10)
-    intake = st.slider("Annual B-Course Intake", 10, 350, 150)
+    intake = st.slider("Annual B-Course Intake", 10, 350, 200)
     retention = st.slider("Retention Rate (0.0 - 1.0)", 0.0, 1.0, 0.4)
     ute_val = st.slider("UTE", 6, 20, 10)
     flug_start = st.slider("FLUG Entry -- Sorties", 50, 300, 250)
@@ -40,7 +39,8 @@ with st.sidebar.form("sim_params"):
     "Staff Assignment Priority",
     options=priority_options.keys(),
     horizontal=True, # <--- This makes it look like a toggle bar
-    help="Determines who has the priority of going to staff once unit hits max capacity."
+    help="Determines who has the priority of going to staff once unit hits max capacity.",
+    index=2
 )
 
     st.markdown("---") # Visual separator
@@ -68,37 +68,31 @@ with st.sidebar.form("sim_params"):
     # The Submit Button
     submitted = st.form_submit_button("🚀 Run Simulation")
 
-# @st.cache_resource
-def load_base_engine():
+@st.cache_resource
+def load_ai_brain():
     """
-    Initializes the CAFSimulation object and loads the AI Brain ONCE.
-    This object will be passed to setup_simulation() to be reused.
+    Loads the heavy AI Brain ONCE.
+    This object is passed to the simulation engine to prevent reloading.
     """
-    path = 'outputs/simulation_results.parquet' 
-    
     # Check for brain
     if not os.path.exists("sortie_brain.pkl"):
         st.error("🚨 'sortie_brain.pkl' not found! Please run 'train_brain_lite.py'.")
         st.stop()
-        
-    return CAFSimulation(path, sim_upgrades=True, round_robin=True, flug_window_start=flug_start, ipug_window_start=ipug_start, max_manning_pct=max_manning_pct) 
 
-@st.cache_resource
-def load_sandbox_models():
-    """Loads the brain directly for the Sandbox tool at the bottom."""
-    return joblib.load("sortie_brain.pkl")
+    return joblib.load("sortie_brain.pkl")        
 
-cached_sim = load_base_engine()
-
+cached_brain = load_ai_brain()
 
 # --- Run Simulation ---
 if submitted:
     with st.spinner("Running Simulation..."):
         # 1. Setup & Run
-        sim, squadrons = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades, existing_sim=cached_sim)
+        sim, squadrons = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades, ai_brain=cached_brain,
+                                          flug_window_start=flug_start, ipug_window_start=ipug_start,
+                                          max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode)
         df = sim.run_simulation(
             years_to_run=years, annual_intake=intake, 
-            retention_rate=retention, squadron_configs=squadrons, ute=ute_val) # Took out multiple run_simulation requirements
+            retention_rate=retention, squadron_configs=squadrons, ute=ute_val) 
 
         st.write("### 🔍 Debugging Tools")
         csv = df.to_csv(index=False).encode('utf-8')
@@ -276,7 +270,10 @@ if submitted:
         test_range = list(range(100, 351, 25)) 
         stability_data = []
 
-        base_sim, base_squadrons = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades)
+        master_sim, _ = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades,
+                                         ai_brain=cached_brain, flug_window_start=flug_start, 
+                                         ipug_window_start= ipug_start, max_manning_pct=max_manning_pct,
+                                         staff_priority_mode=staff_priority_mode)
 
         # Loop with enumeration to update the bar
         for i, val in enumerate(test_range):
@@ -284,14 +281,17 @@ if submitted:
             pct_complete = (i + 1) / len(test_range)
             sensitivity_progress.progress(pct_complete, text=f"Simulating Intake: {val} pilots/yr...")
 
-            t_sim, t_sqs = setup_simulation(round_robin=round, sim_upgrades=include_upgrades)
+            t_sim, t_sqs = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades,
+                                            ai_brain=cached_brain, existing_sim=master_sim,
+                                            flug_window_start=flug_start, ipug_window_start=ipug_start,
+                                            max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode)
 
             t_df = t_sim.run_simulation(
                 years_to_run=20, 
                 annual_intake=val, 
                 retention_rate=retention, 
                 squadron_configs=t_sqs, 
-                ute=ute_val # TODO fix UTE issue 
+                ute=ute_val 
             )
 
             start_year = t_df['year'].min()
@@ -302,9 +302,10 @@ if submitted:
                 snapshot = t_df[t_df['year'] == target_year]
                 
                 if not snapshot.empty:
-                    total_pilots = snapshot['total_pilots'].sum()
-                    exp_pilots = snapshot['fl_qty'].sum() + snapshot['ip_qty'].sum()
-                    ratio = exp_pilots / total_pilots if total_pilots > 0 else 0
+                    # total_pilots = snapshot['total_pilots'].sum()
+                    # exp_pilots = snapshot['fl_qty'].sum() + snapshot['ip_qty'].sum()
+                    # ratio = exp_pilots / total_pilots if total_pilots > 0 else 0
+                    ratio = snapshot['exp_rat']
                     
                     stability_data.append({
                         "Annual Intake": val, 
@@ -392,7 +393,7 @@ else:
 #     truth_data = []
 #     if show_truth:
 #         # Access the raw dataframe directly from the engine
-#         df_raw = cached_sim.df
+#         df_raw = cached_sim.df # TODO bring back parquet file for this widget
         
 #         # Map the slider selection to the actual column name in the parquet file
 #         var_col_map = {"MQT": "mqt_qty", "FLUG": "flug_qty", "IPUG": "ipug_qty"}
