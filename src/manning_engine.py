@@ -6,7 +6,7 @@ import joblib
 
 
 class CAFSimulation:
-    def __init__(self, path: str, sim_upgrades: bool, round_robin: bool, flug_window_start: int = 250, ipug_window_start: int = 400, max_manning_pct: int = 150, staff_priority_mode: PriorityMode = PriorityMode.RANDOM):
+    def __init__(self, sim_upgrades: bool, round_robin: bool, brain = None, flug_window_start: int = 250, ipug_window_start: int = 400, max_manning_pct: int = 150, staff_priority_mode: PriorityMode = PriorityMode.RANDOM):
         self.history = []
         self.current_year = 2025
         self.squadrons: List[SquadronConfig] = []
@@ -15,17 +15,14 @@ class CAFSimulation:
         self.max_manning = max_manning_pct/100
         self.staff_priority = staff_priority_mode
 
-        if not os.path.exists(path):
-            raise FileNotFoundError(f'Lookup File Not Found at {path}.')    
-        
-        brain_path = "sortie_brain.pkl"
-        if os.path.exists(brain_path):
-            print(f"🧠 Loading Sortie Brain from {brain_path}...")
-            self.brain = joblib.load(brain_path)
+        if brain:
+            self.brain = brain
+        elif os.path.exists("sortie_brain.pkl"):
+            print(f"🧠 Loading Sortie Brain from disk...")
+            self.brain = joblib.load("sortie_brain.pkl")
         else:
-            raise FileNotFoundError(f"Could not find {brain_path}. Please run train_brain.py first.")
+            raise FileNotFoundError(f"Could not find sortie_brain.pkl. Please run train_brain.py first.")
 
-        self.df = pd.read_parquet(path)
         self.sim_upgrades = sim_upgrades
         self.round_robin = round_robin
 
