@@ -1,5 +1,5 @@
 import pandas as pd
-from typing import List
+from typing import List, Optional
 from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment
 import os
 import joblib
@@ -89,15 +89,18 @@ class CAFSimulation:
             target_sq.update_stats()
 
         
-    def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0):
+    def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0, max_manning: Optional[int] = 150):
         """
         squadron_configs: list -> [Config(id=1, paa=12...), Config(id=2, paa=24...)]
         """
         self.history = []
         self.squadrons = squadron_configs
 
+        manning_multiplier = max_manning/100
+
         for sq in self.squadrons:
-            sq.ute = ute # LATER cannot go squadron by squadron for ute if using streamlit slider value
+            sq.ute = ute # With current implementation all squadrons must have same UTE
+            sq.manning_pct = manning_multiplier
 
         for year in range(self.current_year, self.current_year + years_to_run):
             phase_intake = annual_intake // 3
@@ -123,7 +126,7 @@ class CAFSimulation:
 
                     current_stats = sq.store_stats(year, phase_num, rates)
 
-                    self.process_end_of_phase(sq, year, phase_num, retention_rate, current_stats) # TODO aging rates and manning percentage not populating correctly in Streamlit
+                    self.process_end_of_phase(sq, year, phase_num, retention_rate, current_stats) 
             
         return pd.DataFrame(self.history)
     
