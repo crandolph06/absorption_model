@@ -26,6 +26,7 @@ with st.sidebar.form("sim_params"):
     ute_val = st.slider("UTE", 6, 20, 10)
     flug_start = st.slider("FLUG Entry -- Sorties", 50, 300, 250)
     ipug_start = st.slider("IPUG Entry -- Hours", 150, 500, 400)
+    max_manning_pct = st.slider("Maximum Squadron Manning (%)", 50, 150, 100)
 
     st.markdown("---") # Visual separator
     
@@ -63,7 +64,7 @@ def load_base_engine():
         st.error("🚨 'sortie_brain.pkl' not found! Please run 'train_brain_lite.py'.")
         st.stop()
         
-    return CAFSimulation(path, sim_upgrades=True, round_robin=True, flug_window_start=flug_start, ipug_window_start=ipug_start) 
+    return CAFSimulation(path, sim_upgrades=True, round_robin=True, flug_window_start=flug_start, ipug_window_start=ipug_start, max_manning_pct=max_manning_pct) 
 
 @st.cache_resource
 def load_sandbox_models():
@@ -149,6 +150,8 @@ if submitted:
                 title="Experience Ratio (%)",
                 labels={'exp_rat': 'Exp Ratio', 'timeline': 'Year/Phase'}
             )
+
+            fig_exp.update_yaxes(range=[0, 1], tickformat=".0%")
             
             # Reference Lines
             fig_exp.add_hline(y=0.60, line_dash="dot", line_color="green", annotation_text="Healthy (> 60%)")
@@ -226,7 +229,7 @@ if submitted:
 
     fig_health.add_annotation(
             xref="paper", yref="paper",
-            x=1, y=-0.15,  # Bottom Right Position
+            x=1, y=-0.25,  # Bottom Right Position
             xanchor="right", yanchor="top",
             text=(
                 "<b>Right Axis Legend:</b><br>"
