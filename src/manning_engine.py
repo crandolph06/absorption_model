@@ -1,6 +1,6 @@
 import pandas as pd
 from typing import List, Optional
-from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, PriorityMode
+from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, PriorityMode, AgingRate
 import os
 import joblib
 
@@ -95,6 +95,8 @@ class CAFSimulation:
         self.history = []
         self.squadrons = squadron_configs
 
+        FEATURE_NAMES = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
+
         for sq in self.squadrons:
             sq.ute = ute # With current implementation all squadrons must have same UTE
             sq.manning_pct = self.max_manning
@@ -105,19 +107,35 @@ class CAFSimulation:
 
             for phase_num in range(1, 4): 
                 current_batch = phase_intake + (remainder if phase_num == 3 else 0)
-                self.add_new_bcourse_graduates(year, current_batch, self.round_robin)
+                self.add_new_bcourse_graduates(year, current_batch, self.round_robin) 
+
 
                 for sq in self.squadrons:
-
                     if sq.flug_students != 0 or sq.ipug_students != 0:
                         raise AssertionError(f'Critical Data Mismatch in Squadron Pilots')
-
                     sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
 
+                if self.sim_upgrades:
+                    batch_data = [sq.get_feature_vector() for sq in self.squadrons]
+                    df_batch = pd.DataFrame(batch_data, columns=FEATURE_NAMES)
+
+                    wg_rates = self.brain['wg_monthly'].predict(df_batch)
+                    fl_rates = self.brain['fl_monthly'].predict(df_batch)
+                    ip_rates = self.brain['ip_monthly'].predict(df_batch)
+
+                    wg_blue_rates = self.brain['wg_blue_monthly'].predict(df_batch)
+                    fl_blue_rates = self.brain['fl_blue_monthly'].predict(df_batch)
+                    ip_blue_rates = self.brain['ip_blue_monthly'].predict(df_batch)
+
+                for i, sq in enumerate(self.squadrons):
                     if self.sim_upgrades:
-                        rates = sq.predict_aging_rate(self.brain)
+                        monthly_rates = AgingRate(4.0, wg_rates[i], fl_rates[i], ip_rates[i],
+                                          4.0, wg_blue_rates[i], fl_blue_rates[i], 
+                                          ip_blue_rates[i])
+                        rates =  monthly_rates.monthly_to_phase(sq.phase_length_days)
+
                     else:
-                        rates = sq.calc_aging_rate(self.sim_upgrades)
+                        rates = sq.calc_aging_rate(False)
 
                     sq.apply_phase_aging(rates)
 
