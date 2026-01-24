@@ -329,7 +329,9 @@ if submitted:
             labels={"Exp Ratio": "Experience Ratio", "Annual Intake": "Annual Intake"},
             color_discrete_sequence=px.colors.sequential.Reds_r 
         )
-        fig_frontier.add_hline(y=0.45, line_dash="dot", line_color="yellow", annotation_text="Runaway Inequity")
+        fig_frontier.add_hline(y=0.60, line_dash="dot", line_color="green", annotation_text="Healthy (> 60%)")
+        fig_frontier.add_hline(y=0.45, line_dash="dash", line_color="yellow", annotation_text="Sortie Inequity (< 45%)")
+        fig_frontier.add_hline(y=0.40, line_dash="dot", line_color="red", annotation_text="Broken (< 40%)")
         st.plotly_chart(fig_frontier, width='stretch')
 else:
     st.info("Set parameters and click 'Run Simulation'.")
