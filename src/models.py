@@ -34,6 +34,11 @@ class Assignment(Enum):
     STAFF = 'STAFF'
     TRAINING = 'TRAINING'
 
+class PriorityMode(Enum):
+    FL_FIRST = 'fl_first'
+    IP_FIRST = 'ip_first'
+    RANDOM = 'random'
+
 @dataclass 
 class AgingRate:
     mqt_phase: float = 0.0
@@ -187,7 +192,7 @@ class SquadronConfig:
     paa: int
     id: int
     ccr: float = 1.5
-    max_manning: float = 1.5
+    manning_pct: float = 1.5
 
     mqt_students: int = 0 
     flug_students: int = 0
@@ -204,9 +209,12 @@ class SquadronConfig:
     pilots: List[Pilot] = field(default_factory=list)
 
     @property
-    def manning_limit(self) -> int:
-        ideal_manning = self.ccr * self.paa
-        return int(self.max_manning * ideal_manning)
+    def desired_manning(self) -> int:
+        return int(self.ccr * self.paa)
+
+    @property
+    def max_manning(self) -> int:
+        return int(self.desired_manning * self.manning_pct)
     
     def update_stats(self):
         # 1. Filter for Active Line Pilots (The only ones who count for stats)
@@ -357,7 +365,7 @@ class SquadronConfig:
         
     def store_stats(self, year: int, phase_num: int, rates: AgingRate):
         months = self.phase_length_days / 30
-        limit = self.manning_limit
+        limit = int(self.ccr * self.paa)
 
         self.update_stats()
 
@@ -371,7 +379,7 @@ class SquadronConfig:
             'mqt_qty': self.mqt_students,
             'flug_qty': self.flug_students,
             'ipug_qty': self.ipug_students,
-            'percent_manned': self.line_pilots / limit,
+            'percent_manned': self.line_pilots / self.desired_manning,
             'line_pilots': self.line_pilots,
             'total_pilots': self.total_pilots,
             'exp_rat': self.experience_ratio,
@@ -389,9 +397,9 @@ class SquadronConfig:
     
         return current_stats
     
-    def send_to_staff(self, min_ips: int = 3):
+    def send_to_staff(self, priority_mode: PriorityMode = PriorityMode.RANDOM, min_ips: int = 3):
         current_line_pilots = []
-        limit = self.manning_limit
+        limit = self.max_manning
 
         for p in self.pilots:
             if p.active and p.current_assignment == Assignment.LINE:
@@ -411,7 +419,14 @@ class SquadronConfig:
 
             eligible_ips = ips[min_ips:] if len(ips) > min_ips else [] # Min of 3 protects Sq/CC, DO, and WO
 
-            funnel_queue = eligible_ips + fls
+            if priority_mode == PriorityMode.FL_FIRST:
+                funnel_queue = fls + eligible_ips
+            elif priority_mode == PriorityMode.IP_FIRST:
+                funnel_queue = eligible_ips + fls
+            elif priority_mode == PriorityMode.RANDOM:
+                funnel_queue = eligible_ips + fls
+                random.shuffle(funnel_queue)
+
             movers_count = min(excess_count, len(funnel_queue))
         
             for i in range(int(movers_count)): # Not sure why streamlit thinks this is a float
