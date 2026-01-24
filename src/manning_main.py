@@ -18,7 +18,11 @@ WG_SORTIE_START, WG_SORTIE_END = 50, 300
 
 path = 'outputs/simulation_results.parquet'
 
-def setup_simulation(round_robin: bool,ai_brain, sim_upgrades: bool = False, existing_sim: Optional[CAFSimulation] = None, flug_window_start: int = 250, ipug_window_start: int = 400, max_manning_pct: int = 150, staff_priority_mode: PriorityMode = PriorityMode.RANDOM):
+def setup_simulation(round_robin: bool,ai_brain, sim_upgrades: bool = False, 
+                     existing_sim: Optional[CAFSimulation] = None, 
+                     flug_window_start: int = 250, ipug_window_start: int = 400, 
+                     max_manning_pct: int = 150, 
+                     staff_priority_mode: PriorityMode = PriorityMode.RANDOM):
     if existing_sim:
         sim = copy.deepcopy(existing_sim)
         sim.reset()
