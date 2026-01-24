@@ -216,6 +216,20 @@ class SquadronConfig:
     def max_manning(self) -> int:
         return int(self.desired_manning * self.manning_pct)
     
+    def get_feature_vector(self) -> list:
+        """Returns the ordered list of features expected by the AI Brain."""
+
+        return [
+            self.paa,
+            self.ute,
+            self.experience_ratio,
+            self.line_pilots,       
+            self.mqt_students,
+            self.flug_students,
+            self.ipug_students,
+            self.ip_qty
+        ]
+    
     def update_stats(self):
         # 1. Filter for Active Line Pilots (The only ones who count for stats)
         line_pilots = [p for p in self.pilots if p.active and p.current_assignment == Assignment.LINE]
