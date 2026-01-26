@@ -251,165 +251,165 @@ with col_summary:
         st.plotly_chart(fig_burden, width='stretch')
     else:
         st.info("No exact match for these filters.")
-# ==============================================================================
-# 📂 DATA INSPECTOR (Parquet Lookup)
-# ==============================================================================
-st.divider()
-st.header("🔍 Data Lookup Inspector")
-st.markdown("""
-**Direct Data Visualization:** This tool queries your `simulation_results.parquet` file directly. 
-It does not use formulas. It shows you the **actual historical data** available for the selected parameters.
-*If the chart is blank, it means no matching rows exist in the lookup table for that specific combination.*
-""")
+# # ==============================================================================
+# # 📂 DATA INSPECTOR (Parquet Lookup)
+# # ==============================================================================
+# st.divider()
+# st.header("🔍 Data Lookup Inspector")
+# st.markdown("""
+# **Direct Data Visualization:** This tool queries your `simulation_results.parquet` file directly. 
+# It does not use formulas. It shows you the **actual historical data** available for the selected parameters.
+# *If the chart is blank, it means no matching rows exist in the lookup table for that specific combination.*
+# """)
 
-# --- 1. LOAD DATA ---
-# @st.cache_data
-# def load_lookup_data():
-#     return pd.read_parquet("outputs/simulation_results.parquet")
+# # --- 1. LOAD DATA ---
+# # @st.cache_data
+# # def load_lookup_data():
+# #     return pd.read_parquet("outputs/simulation_results.parquet")
 
-# try:
-#     df_lookup = load_lookup_data()
-# except Exception as e:
-#     st.error(f"Could not load parquet file: {e}")
-#     st.stop()
+# # try:
+# #     df_lookup = load_lookup_data()
+# # except Exception as e:
+# #     st.error(f"Could not load parquet file: {e}")
+# #     st.stop()
 
-# --- 2. CONFIGURATION SLIDERS ---
-with st.container():
-    col_sb1, col_sb2, col_sb3, col_sb4, col_sb5 = st.columns(5)
-    with col_sb1:
-        # Get unique PAA values from file to ensure user picks valid ones
-        valid_paas = sorted(df['paa'].unique())
-        default_paa = 18 if 18 in valid_paas else valid_paas[0]
-        sb_paa = st.selectbox("PAA", valid_paas, index=valid_paas.index(default_paa))
+# # --- 2. CONFIGURATION SLIDERS ---
+# with st.container():
+#     col_sb1, col_sb2, col_sb3, col_sb4, col_sb5 = st.columns(5)
+#     with col_sb1:
+#         # Get unique PAA values from file to ensure user picks valid ones
+#         valid_paas = sorted(df['paa'].unique())
+#         default_paa = 18 if 18 in valid_paas else valid_paas[0]
+#         sb_paa = st.selectbox("PAA", valid_paas, index=valid_paas.index(default_paa))
         
-    with col_sb2:
-        valid_utes = sorted(df['ute'].unique())
-        default_ute = 10.0 if 10.0 in valid_utes else valid_utes[len(valid_utes)//2]
-        sb_ute = st.selectbox("UTE Rate", valid_utes, index=valid_utes.index(default_ute))
+#     with col_sb2:
+#         valid_utes = sorted(df['ute'].unique())
+#         default_ute = 10.0 if 10.0 in valid_utes else valid_utes[len(valid_utes)//2]
+#         sb_ute = st.selectbox("UTE Rate", valid_utes, index=valid_utes.index(default_ute))
         
-    with col_sb3:
-        # Range slider for pilots to make it easier to find matches
-        min_p, max_p = int(df['total_pilots'].min()), int(df['total_pilots'].max())
-        sb_pilots = st.slider("Line Pilots", min_p, max_p, 40)
+#     with col_sb3:
+#         # Range slider for pilots to make it easier to find matches
+#         min_p, max_p = int(df['total_pilots'].min()), int(df['total_pilots'].max())
+#         sb_pilots = st.slider("Line Pilots", min_p, max_p, 40)
         
-    with col_sb4:
-        min_ip, max_ip = int(df['ip_qty'].min()), int(df['ip_qty'].max())
-        sb_ips = st.slider("Active IPs", min_ip, max_ip, 6)
+#     with col_sb4:
+#         min_ip, max_ip = int(df['ip_qty'].min()), int(df['ip_qty'].max())
+#         sb_ips = st.slider("Active IPs", min_ip, max_ip, 6)
 
-    with col_sb5:
-        min_rat, max_rat = float(df['exp_ratio'].min()), float(df['exp_ratio'].max())
-        sb_rats = st.slider("Experience Ratio", min_rat, max_rat, 0.40)
+#     with col_sb5:
+#         min_rat, max_rat = float(df['exp_ratio'].min()), float(df['exp_ratio'].max())
+#         sb_rats = st.slider("Experience Ratio", min_rat, max_rat, 0.40)
 
-# --- 3. QUERY ENGINE ---
-def query_lookup(paa, ute, pilots, ips, upgrade_col):
-    """
-    Filters the dataframe for the specific PAA/UTE/Pilots/IPs bucket 
-    and returns how rates vary with the upgrade_col (e.g., mqt_count).
-    """
-    # 1. Exact Match on PAA & UTE (These are usually discrete buckets)
-    mask = (df['paa'] == paa) & (df['ute'] == ute)
+# # --- 3. QUERY ENGINE ---
+# def query_lookup(paa, ute, pilots, ips, upgrade_col):
+#     """
+#     Filters the dataframe for the specific PAA/UTE/Pilots/IPs bucket 
+#     and returns how rates vary with the upgrade_col (e.g., mqt_count).
+#     """
+#     # 1. Exact Match on PAA & UTE (These are usually discrete buckets)
+#     mask = (df['paa'] == paa) & (df['ute'] == ute)
     
-    # 2. Approximate Match on Pilots & IPs (Since you might not have exactly 40 pilots)
-    # We take a small window (+/- 2 pilots, +/- 1 IP) to ensure we find data
-    mask &= (df['total_pilots'].between(pilots - 2, pilots + 2))
-    mask &= (df['ip_qty'].between(ips - 1, ips + 1))
+#     # 2. Approximate Match on Pilots & IPs (Since you might not have exactly 40 pilots)
+#     # We take a small window (+/- 2 pilots, +/- 1 IP) to ensure we find data
+#     mask &= (df['total_pilots'].between(pilots - 2, pilots + 2))
+#     mask &= (df['ip_qty'].between(ips - 1, ips + 1))
     
-    filtered = df[mask].copy()
+#     filtered = df[mask].copy()
     
-    if filtered.empty:
-            return pd.DataFrame()
+#     if filtered.empty:
+#             return pd.DataFrame()
 
-    cols_to_avg = [
-        'wg_monthly', 'fl_monthly', 'ip_monthly', 
-        'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
-    ]
+#     cols_to_avg = [
+#         'wg_monthly', 'fl_monthly', 'ip_monthly', 
+#         'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
+#     ]
     
-    grouped = filtered.groupby(upgrade_col)[cols_to_avg].mean().reset_index()
-    return grouped
+#     grouped = filtered.groupby(upgrade_col)[cols_to_avg].mean().reset_index()
+#     return grouped
 
 
 
-# --- 4. CHART 1: LINE CHART ---
-st.subheader("📉 Impact of Student Load (Historical Data)")
-st.caption(f"Showing actual data for PAA={sb_paa}, UTE={sb_ute}, Pilots≈{sb_pilots}, IPs≈{sb_ips}")
+# # --- 4. CHART 1: LINE CHART ---
+# st.subheader("📉 Impact of Student Load (Historical Data)")
+# st.caption(f"Showing actual data for PAA={sb_paa}, UTE={sb_ute}, Pilots≈{sb_pilots}, IPs≈{sb_ips}")
 
-var_col, chart_col = st.columns([1, 3])
+# var_col, chart_col = st.columns([1, 3])
 
-with var_col:
-    upgrade_type = st.radio(
-        "Select Upgrade to Vary:", 
-        ["MQT Students", "FLUG Students", "IPUG Students"]
-    )
-    # Map friendly name to column name
-    col_map = {
-        "MQT Students": "mqt_qty", 
-        "FLUG Students": "flug_qty", 
-        "IPUG Students": "ipug_qty"
-    }
-    target_col = col_map[upgrade_type]
+# with var_col:
+#     upgrade_type = st.radio(
+#         "Select Upgrade to Vary:", 
+#         ["MQT Students", "FLUG Students", "IPUG Students"]
+#     )
+#     # Map friendly name to column name
+#     col_map = {
+#         "MQT Students": "mqt_qty", 
+#         "FLUG Students": "flug_qty", 
+#         "IPUG Students": "ipug_qty"
+#     }
+#     target_col = col_map[upgrade_type]
 
-# Execute Query
-df_chart = query_lookup(sb_paa, sb_ute, sb_pilots, sb_ips, target_col)
+# # Execute Query
+# df_chart = query_lookup(sb_paa, sb_ute, sb_pilots, sb_ips, target_col)
 
-with chart_col:
-    if df_chart.empty:
-        st.warning("⚠️ No data found for this combination! Try widening your Pilot/IP search or picking a standard PAA/UTE.")
-    else:
-        # 1. Melt ALL columns (Total + Blue)
-        df_melt = df_chart.melt(
-            id_vars=[target_col], 
-            value_vars=[
-                'wg_monthly', 'fl_monthly', 'ip_monthly', 
-                'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
-            ], 
-            var_name='Role', 
-            value_name='Rate'
-        )
+# with chart_col:
+#     if df_chart.empty:
+#         st.warning("⚠️ No data found for this combination! Try widening your Pilot/IP search or picking a standard PAA/UTE.")
+#     else:
+#         # 1. Melt ALL columns (Total + Blue)
+#         df_melt = df_chart.melt(
+#             id_vars=[target_col], 
+#             value_vars=[
+#                 'wg_monthly', 'fl_monthly', 'ip_monthly', 
+#                 'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
+#             ], 
+#             var_name='Role', 
+#             value_name='Rate'
+#         )
         
-        # 2. Map Names for the Legend
-        name_map = {
-            'wg_monthly': 'Wingman (Total)', 
-            'fl_monthly': 'Flight Lead (Total)', 
-            'ip_monthly': 'Instructor (Total)',
-            'wg_blue_monthly': 'Wingman (Blue)', 
-            'fl_blue_monthly': 'Flight Lead (Blue)', 
-            'ip_blue_monthly': 'Instructor (Blue)'
-        }
-        df_melt['Role'] = df_melt['Role'].map(name_map)
+#         # 2. Map Names for the Legend
+#         name_map = {
+#             'wg_monthly': 'Wingman (Total)', 
+#             'fl_monthly': 'Flight Lead (Total)', 
+#             'ip_monthly': 'Instructor (Total)',
+#             'wg_blue_monthly': 'Wingman (Blue)', 
+#             'fl_blue_monthly': 'Flight Lead (Blue)', 
+#             'ip_blue_monthly': 'Instructor (Blue)'
+#         }
+#         df_melt['Role'] = df_melt['Role'].map(name_map)
         
-        # 3. Define Colors
-        # Total Rates = Standard distinct colors
-        # Blue Rates = Varying shades of blue/cyan
-        color_map = {
-            "Wingman (Total)": "#636EFA",    
-            "Flight Lead (Total)": "#EF553B",
-            "Instructor (Total)": "#00CC96", 
-            "Wingman (Blue)": "#636EFA",     
-            "Flight Lead (Blue)": "#EF553B", 
-            "Instructor (Blue)": "#00CC96"   
-        }
+#         # 3. Define Colors
+#         # Total Rates = Standard distinct colors
+#         # Blue Rates = Varying shades of blue/cyan
+#         color_map = {
+#             "Wingman (Total)": "#636EFA",    
+#             "Flight Lead (Total)": "#EF553B",
+#             "Instructor (Total)": "#00CC96", 
+#             "Wingman (Blue)": "#636EFA",     
+#             "Flight Lead (Blue)": "#EF553B", 
+#             "Instructor (Blue)": "#00CC96"   
+#         }
 
-        line_dash_map = {
-            "Wingman (Total)": "solid",
-            "Flight Lead (Total)": "solid",
-            "Instructor (Total)": "solid",
-            "Wingman (Blue)": "dot",     
-            "Flight Lead (Blue)": "dot",
-            "Instructor (Blue)": "dot"
-        }
+#         line_dash_map = {
+#             "Wingman (Total)": "solid",
+#             "Flight Lead (Total)": "solid",
+#             "Instructor (Total)": "solid",
+#             "Wingman (Blue)": "dot",     
+#             "Flight Lead (Blue)": "dot",
+#             "Instructor (Blue)": "dot"
+#         }
         
-        fig_line = px.line(
-            df_melt, x=target_col, y="Rate", color="Role",
-            line_dash="Role", markers=True,
-            title=f"Actual Rates (Total vs Blue) vs. {upgrade_type}",
-            color_discrete_map=color_map,
-            line_dash_map=line_dash_map
-        )
+#         fig_line = px.line(
+#             df_melt, x=target_col, y="Rate", color="Role",
+#             line_dash="Role", markers=True,
+#             title=f"Actual Rates (Total vs Blue) vs. {upgrade_type}",
+#             color_discrete_map=color_map,
+#             line_dash_map=line_dash_map
+#         )
         
-        # Add Reference Lines
-        fig_line.add_hline(y=9.0, line_dash="dot", line_color="red", annotation_text="Inexp.")
-        fig_line.add_hline(y=8.0, line_dash="dot", line_color="orange", annotation_text="Exp.")
+#         # Add Reference Lines
+#         fig_line.add_hline(y=9.0, line_dash="dot", line_color="red", annotation_text="Inexp.")
+#         fig_line.add_hline(y=8.0, line_dash="dot", line_color="orange", annotation_text="Exp.")
         
-        st.plotly_chart(fig_line, width='stretch')
+#         st.plotly_chart(fig_line, width='stretch')
 
         
