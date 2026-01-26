@@ -263,41 +263,41 @@ It does not use formulas. It shows you the **actual historical data** available 
 """)
 
 # --- 1. LOAD DATA ---
-@st.cache_data
-def load_lookup_data():
-    return pd.read_parquet("outputs/simulation_results.parquet")
+# @st.cache_data
+# def load_lookup_data():
+#     return pd.read_parquet("outputs/simulation_results.parquet")
 
-try:
-    df_lookup = load_lookup_data()
-except Exception as e:
-    st.error(f"Could not load parquet file: {e}")
-    st.stop()
+# try:
+#     df_lookup = load_lookup_data()
+# except Exception as e:
+#     st.error(f"Could not load parquet file: {e}")
+#     st.stop()
 
 # --- 2. CONFIGURATION SLIDERS ---
 with st.container():
     col_sb1, col_sb2, col_sb3, col_sb4, col_sb5 = st.columns(5)
     with col_sb1:
         # Get unique PAA values from file to ensure user picks valid ones
-        valid_paas = sorted(df_lookup['paa'].unique())
+        valid_paas = sorted(df['paa'].unique())
         default_paa = 18 if 18 in valid_paas else valid_paas[0]
         sb_paa = st.selectbox("PAA", valid_paas, index=valid_paas.index(default_paa))
         
     with col_sb2:
-        valid_utes = sorted(df_lookup['ute'].unique())
+        valid_utes = sorted(df['ute'].unique())
         default_ute = 10.0 if 10.0 in valid_utes else valid_utes[len(valid_utes)//2]
         sb_ute = st.selectbox("UTE Rate", valid_utes, index=valid_utes.index(default_ute))
         
     with col_sb3:
         # Range slider for pilots to make it easier to find matches
-        min_p, max_p = int(df_lookup['total_pilots'].min()), int(df_lookup['total_pilots'].max())
+        min_p, max_p = int(df['total_pilots'].min()), int(df['total_pilots'].max())
         sb_pilots = st.slider("Line Pilots", min_p, max_p, 40)
         
     with col_sb4:
-        min_ip, max_ip = int(df_lookup['ip_qty'].min()), int(df_lookup['ip_qty'].max())
+        min_ip, max_ip = int(df['ip_qty'].min()), int(df['ip_qty'].max())
         sb_ips = st.slider("Active IPs", min_ip, max_ip, 6)
 
     with col_sb5:
-        min_rat, max_rat = float(df_lookup['exp_ratio'].min()), float(df_lookup['exp_ratio'].max())
+        min_rat, max_rat = float(df['exp_ratio'].min()), float(df['exp_ratio'].max())
         sb_rats = st.slider("Experience Ratio", min_rat, max_rat, 0.40)
 
 # --- 3. QUERY ENGINE ---
@@ -307,14 +307,14 @@ def query_lookup(paa, ute, pilots, ips, upgrade_col):
     and returns how rates vary with the upgrade_col (e.g., mqt_count).
     """
     # 1. Exact Match on PAA & UTE (These are usually discrete buckets)
-    mask = (df_lookup['paa'] == paa) & (df_lookup['ute'] == ute)
+    mask = (df['paa'] == paa) & (df['ute'] == ute)
     
     # 2. Approximate Match on Pilots & IPs (Since you might not have exactly 40 pilots)
     # We take a small window (+/- 2 pilots, +/- 1 IP) to ensure we find data
-    mask &= (df_lookup['total_pilots'].between(pilots - 2, pilots + 2))
-    mask &= (df_lookup['ip_qty'].between(ips - 1, ips + 1))
+    mask &= (df['total_pilots'].between(pilots - 2, pilots + 2))
+    mask &= (df['ip_qty'].between(ips - 1, ips + 1))
     
-    filtered = df_lookup[mask].copy()
+    filtered = df[mask].copy()
     
     if filtered.empty:
             return pd.DataFrame()
