@@ -215,7 +215,7 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
     phase_months = cfg.phase_length_days / 30.0
     total_capacity = int(total_phase_capacity(cfg) * phase_months)
     
-    allocate_continuation_training(pilots, CONTINUATION_PROFILE, total_capacity, allocation_noise)
+    allocate_continuation_training(cfg, pilots, CONTINUATION_PROFILE, total_capacity, allocation_noise)
 
     # 5. Finalize Stats
     for p in pilots:
