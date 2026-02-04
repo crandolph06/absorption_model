@@ -7,18 +7,26 @@ from src.rap_state import rap_assess, rap_state_code, rap_state_label
 
 def run_research_sweep(average_iterations=True):
     # --- RANGES ---
-    ute_values = list(range(6, 21))
-    ip_qty_values = list(range(3, 8))
-    exp_ratios = [0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
-    paa_values = [18, 21, 24]
-    mqt_students = [0, 2, 4, 6, 8, 10]
-    flug_students = [0, 2, 4, 6, 8, 10]
-    ipug_students = [0, 2, 4, 6, 8, 10]
-    total_pilots = [25, 30, 35, 40]
+    # ute_values = list(range(6, 21))
+    # ip_qty_values = list(range(3, 8))
+    # exp_ratios = [0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
+    # paa_values = [18, 21, 24]
+    # mqt_students = [0, 2, 4, 6, 8, 10]
+    # flug_students = [0, 2, 4, 6, 8, 10]
+    # ipug_students = [0, 2, 4, 6, 8, 10]
+    # total_pilots = [25, 30, 35, 40]
+    ute_values = [6, 7]
+    ip_qty_values = [3, 4]
+    exp_ratios = [0.3, 0.35]
+    paa_values = [18]
+    mqt_students = [0]
+    flug_students = [0]
+    ipug_students = [0]
+    total_pilots = [25]
 
     PHASE_DAYS = 120
     ITERATIONS_PER_CONFIG = 3 
-    OUTPUT_FILE = "outputs/research_data.csv"
+    OUTPUT_FILE = "outputs/research_data_debug.csv"
 
     # 1. PREPARE THE FILE (Header includes total_capacity now)
     os.makedirs("outputs", exist_ok=True)
@@ -48,7 +56,7 @@ def run_research_sweep(average_iterations=True):
                                     cfg = SquadronConfig(
                                         paa=paa, ute=ute, experience_ratio=exp, ip_qty=ip_q,
                                         mqt_students=mqt, flug_students=flug, ipug_students=ipug,
-                                        phase_length_days=PHASE_DAYS, total_pilots=total
+                                        phase_length_days=PHASE_DAYS, total_pilots=total, id=99
                                     )
 
                                     for i in range(ITERATIONS_PER_CONFIG):
