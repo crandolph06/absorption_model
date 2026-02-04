@@ -56,7 +56,7 @@ def select_upgrade_students(pilots: List[Pilot], upgrade_type: Upgrade, count: i
 # ----------------------
 # Allocation Helpers
 # ----------------------
-def assign_sortie(candidates: List[Pilot], side: str = "Blue", noise: float = 0.0) -> bool:
+def assign_sortie(candidates: List[Pilot], side: str = "Blue", noise: float = 0.0, avg_sortie_dur: float = 1.3) -> bool:
     """
     Selects the best candidate (lowest utilization) to fly a sortie.
     Returns True if a pilot was found and assigned, False otherwise.
@@ -70,14 +70,7 @@ def assign_sortie(candidates: List[Pilot], side: str = "Blue", noise: float = 0.
     winner = candidates[0]
     
     # Use helper method if available in models.py, otherwise update manually
-    if hasattr(winner, 'add_sortie'):
-        winner.add_sortie(side)
-    else:
-        winner.sortie_phase += 1
-        if side == "Blue":
-            winner.sortie_blue_phase += 1
-        elif side == "Red":
-            winner.sortie_red_phase += 1
+    winner.add_sortie(avg_sortie_dur, side)
         
     return True
 
@@ -85,6 +78,7 @@ def assign_sortie(candidates: List[Pilot], side: str = "Blue", noise: float = 0.
 # Syllabus Execution
 # ----------------------
 def process_syllabus_event(
+    cfg: SquadronConfig,
     event: SyllabusEvent, 
     upgrade_students: List[Pilot], 
     all_pilots: List[Pilot], 
@@ -100,44 +94,41 @@ def process_syllabus_event(
         for _ in range(event.num_student):
             
             # -- Student flies --
-            if hasattr(student, 'add_sortie'):
-                student.add_sortie("Blue")
-            else:
-                student.sortie_phase += 1
-                student.sortie_blue_phase += 1
+            student.add_sortie(cfg.avg_sortie_dur, "Blue")
             
             # -- Instructor flies (Per student sortie) --
             for _ in range(event.num_instructor):
                 # Only IPs can instruct
                 ips = [p for p in all_pilots if rules.can_fill_seat(p, Qual.IP, syllabus_upgrade_type)]
-                assign_sortie(ips, "Blue", noise)
+                assign_sortie(ips, "Blue", noise, cfg.avg_sortie_dur)
 
             # -- Blue Wingmen (Per student sortie) --
             for _ in range(event.num_blue_wg):
                 candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.WG, syllabus_upgrade_type)]
                 # Filter out the student themselves if they are in the candidate list
                 candidates = [p for p in candidates if p is not student]
-                assign_sortie(candidates, "Blue", noise)
+                assign_sortie(candidates, "Blue", noise, cfg.avg_sortie_dur)
 
             # -- Blue Flight Leads (Per student sortie) --
             for _ in range(event.num_blue_fl):
                 candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.FL, syllabus_upgrade_type)]
                 candidates = [p for p in candidates if p is not student]
-                assign_sortie(candidates, "Blue", noise)
+                assign_sortie(candidates, "Blue", noise, cfg.avg_sortie_dur)
 
             # -- Red Wingmen (Per student sortie) --
             for _ in range(event.num_red_wg):
                 candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.WG, syllabus_upgrade_type)]
                 candidates = [p for p in candidates if p is not student]
-                assign_sortie(candidates, "Red", noise)
+                assign_sortie(candidates, "Red", noise, cfg.avg_sortie_dur)
 
             # -- Red Flight Leads (Per student sortie) --
             for _ in range(event.num_red_fl):
                 candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.FL, syllabus_upgrade_type)]
                 candidates = [p for p in candidates if p is not student]
-                assign_sortie(candidates, "Red", noise)
+                assign_sortie(candidates, "Red", noise, cfg.avg_sortie_dur)
 
 def run_upgrade_program(
+    cfg: SquadronConfig,
     syllabus: List[SyllabusEvent],
     students: List[Pilot],
     all_pilots: List[Pilot],
@@ -145,12 +136,13 @@ def run_upgrade_program(
     noise: float
 ):
     for event in syllabus:
-        process_syllabus_event(event, students, all_pilots, upgrade_type, noise)
+        process_syllabus_event(cfg, event, students, all_pilots, upgrade_type, noise)
 
 # ----------------------
 # Continuation Training (CT)
 # ----------------------
 def allocate_continuation_training(
+    cfg: SquadronConfig,
     pilots: List[Pilot],
     profile: ContinuationProfile,
     total_capacity: int,
@@ -188,7 +180,7 @@ def allocate_continuation_training(
         eligible = [p for p in ct_candidates if rules._qual_hierarchy_check(p.qual, bucket.min_qual)]
         
         for _ in range(qty):
-            assign_sortie(eligible, bucket.side, noise)
+            assign_sortie(eligible, bucket.side, noise, cfg.avg_sortie_dur)
 
 # ----------------------
 # Main Simulation Phase
@@ -213,13 +205,6 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
     ipug_students = select_upgrade_students(pilots, Upgrade.IPUG, cfg.ipug_students)
 
     # 3. Execute Syllabi
-    # Import these from your syllabi file
-
-    # run_upgrade_program(TEST_MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise)
-    # run_upgrade_program(TEST_FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise)
-    # run_upgrade_program(TEST_IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise)
-
-
     run_upgrade_program(MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise)
     run_upgrade_program(FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise)
     run_upgrade_program(IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise)
