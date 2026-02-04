@@ -35,10 +35,10 @@ with st.sidebar.form("sim_params"):
     ipug_start = st.slider("IPUG Entry -- Hours", 150, 500, 400)
     max_manning_pct = st.slider("Maximum Squadron Manning (%)", 50, 150, 100)
     selected_label = st.radio(
-    "Staff Assignment Priority",
+    "Non-Line Assignment Priority",
     options=priority_options.keys(),
     horizontal=True, # <--- This makes it look like a toggle bar
-    help="Determines who has the priority of going to staff once unit hits max capacity.",
+    help="Determines who has the priority of going to non-line assigmnets once unit hits max capacity.",
     index=2
 )
 
@@ -132,7 +132,7 @@ if submitted:
         m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Final Total Pilots", int(df_display['total_pilots'].iloc[-1]))
         m2.metric("Final Total Line Pilots", int(df_display['line_pilots'].iloc[-1]))
-        m3.metric("Final Total Staff Officers", int(df_display['staff_ips'].iloc[-1] + int(df_display['staff_fls'].iloc[-1])))
+        m3.metric("Final Total Non-Line Pilots", int(df_display['staff_ips'].iloc[-1] + int(df_display['staff_fls'].iloc[-1])))
         m4.metric("Final Exp Ratio", f"{df_display['exp_rat'].iloc[-1]*100:.1f}%")
         m5.metric("Total Separations", int(df_display['separated'].sum()))
 
