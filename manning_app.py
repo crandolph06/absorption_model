@@ -133,42 +133,148 @@ if submitted:
         m1.metric("Final Total Pilots", int(df_display['total_pilots'].iloc[-1]))
         m2.metric("Final Total Line Pilots", int(df_display['line_pilots'].iloc[-1]))
         m3.metric("Final Total Non-Line Pilots", int(df_display['staff_ips'].iloc[-1] + int(df_display['staff_fls'].iloc[-1])))
-        m4.metric("Final Exp Ratio", f"{df_display['exp_rat'].iloc[-1]*100:.1f}%")
+        m4.metric("Final Line Exp Ratio", f"{df_display['exp_rat'].iloc[-1]*100:.1f}%")
         m5.metric("Total Separations", int(df_display['separated'].sum()))
 
         # --- Charts ---
-        col1, col2 = st.columns(2)
+        st.subheader("Pilot Population by Qualification")
+        fig_pop = px.area(
+            df_display, 
+            x='timeline', 
+            y=['wg_qty', 'fl_qty', 'ip_qty', 'staff_fls', 'staff_ips'],
+            title="CAF Qualification Mix",
+            labels={'value': 'Count', 'timeline': 'Year/Phase'},
+            color_discrete_sequence=['#636EFA', '#EF553B', '#00CC96', "#DC8F7E", "#78CAB4"]
+        )
+        st.plotly_chart(fig_pop, width='stretch')
 
-        with col1:
-            st.subheader("Pilot Population by Qualification")
-            fig_pop = px.area(
-                df_display, 
-                x='timeline', 
-                y=['wg_qty', 'fl_qty', 'ip_qty', 'staff_fls', 'staff_ips'],
-                title="CAF Qualification Mix",
-                labels={'value': 'Count', 'timeline': 'Year/Phase'},
-                color_discrete_sequence=['#636EFA', '#EF553B', '#00CC96', "#DC8F7E", "#78CAB4"]
-            )
-            st.plotly_chart(fig_pop, width='stretch')
+        st.divider()
+        st.subheader("CAF Experience Ratio")
 
-        with col2:
-            st.subheader("CAF Experience Ratio")
-            fig_exp = px.line(
-                df_display, 
-                x='timeline', 
-                y='exp_rat', 
-                title="Experience Ratio (%)",
-                labels={'exp_rat': 'Exp Ratio', 'timeline': 'Year/Phase'}
-            )
+        use_blue_rap = st.toggle("Blue RAP Only", value=False)
+        color_map = {
+            0: "#22c55e",          
+            1: "#fef08a",          
+            2: "#fde047",          
+            3: "#fdba74",          
+            4: "#eab308",     
+            5: "#f97316",     
+            6: "#ea580c",     
+            7: "#ef4444" 
+        }
 
-            fig_exp.update_yaxes(range=[0, 1], tickformat=".0%")
+        state_labels_dict = {
+            0: "All Make RAP",          
+            1: "WG Shortfall",          
+            2: "FL Shortfall",          
+            3: "WG + FL Shortfall",          
+            4: "IP Shortfall",     
+            5: "WG + IP Shortfall",     
+            6: "FL + IP Shortfall",     
+            7: "WG + FL + IP Shortfall"
+        }
+
+        def get_rap_code(row, use_blue):
+            suffix = "_blue" if use_blue else "_mo"
+            wg_rate = row.get(f'wg_rate{suffix}', 0)
+            fl_rate = row.get(f'fl_rate{suffix}', 0)
+            ip_rate = row.get(f'ip_rate{suffix}', 0)
+
+            code = 0
+            if wg_rate < 9: code += 1
+            if fl_rate < 8: code += 2
+            if ip_rate < 8: code += 4
+
+            return code
+        
+        df_display['rap_code'] = df_display.apply(lambda row: get_rap_code(row, use_blue_rap), axis=1)
+
+        fig_exp = go.Figure()
+
+        # --- PART A: The Multi-Colored Line ---
+        x_data = df_display['timeline'].tolist()
+        y_data = df_display['exp_rat'].tolist()
+        codes = df_display['rap_code'].tolist()
+
+        if len(x_data) > 0:
+            curr_x = [x_data[0]]
+            curr_y = [y_data[0]]
+            curr_code = codes[0]
             
-            # Reference Lines
-            fig_exp.add_hline(y=0.60, line_dash="dot", line_color="green", annotation_text="Healthy (> 60%)")
-            fig_exp.add_hline(y=0.45, line_dash="dash", line_color="yellow", annotation_text="Sortie Inequity (< 45%)")
-            fig_exp.add_hline(y=0.40, line_dash="dot", line_color="red", annotation_text="Broken (< 40%)")
+            for i in range(1, len(x_data)):
+                if codes[i] != curr_code:
+                    # Connect the segments
+                    curr_x.append(x_data[i])
+                    curr_y.append(y_data[i])
+                    
+                    fig_exp.add_trace(go.Scatter(
+                        x=curr_x, y=curr_y,
+                        mode='lines',
+                        line=dict(color=color_map.get(curr_code, "grey"), width=3),
+                        hoverinfo='skip',
+                        showlegend=False # Don't show these segments in legend
+                    ))
+                    
+                    curr_x = [x_data[i]]
+                    curr_y = [y_data[i]]
+                    curr_code = codes[i]
+                else:
+                    curr_x.append(x_data[i])
+                    curr_y.append(y_data[i])
             
-            st.plotly_chart(fig_exp, width='stretch')
+            # Final segment
+            fig_exp.add_trace(go.Scatter(
+                x=curr_x, y=curr_y,
+                mode='lines',
+                line=dict(color=color_map.get(curr_code, "grey"), width=3),
+                hoverinfo='skip',
+                showlegend=False
+            ))
+
+        # --- PART B: The "Fake" Legend Traces ---
+        # This loop creates the legend items on the right side
+        for code, color in color_map.items():
+            fig_exp.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode='markers',
+                marker=dict(size=12, symbol='square', color=color),
+                showlegend=True,
+                name=state_labels_dict.get(code, "Unknown")
+            ))
+
+        # --- PART C: Invisible Hover Data ---
+        fig_exp.add_trace(go.Scatter(
+            x=df_display['timeline'],
+            y=df_display['exp_rat'],
+            mode='markers',
+            marker=dict(size=0, opacity=0),
+            hovertemplate="<b>%{text}</b><br>Exp Ratio: %{y:.1%}<extra></extra>",
+            text=[state_labels_dict.get(c, "Unknown") for c in codes],
+            showlegend=False
+        ))
+
+        # 5. Layout
+        fig_exp.update_layout(
+            title="Experience Ratio (%)",
+            xaxis_title="Year/Phase",
+            yaxis_title="Exp Ratio",
+            yaxis=dict(tickformat=".0%", range=[0, 1]),
+            height=500,
+            legend=dict(
+                title="RAP Status",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02 # Puts the legend just outside the graph to the right
+            )
+        )
+
+        # Reference Lines
+        fig_exp.add_hline(y=0.60, line_dash="dot", line_color="green", annotation_text="Healthy")
+        fig_exp.add_hline(y=0.45, line_dash="dash", line_color="orange", annotation_text="Sortie Inequity")
+        fig_exp.add_hline(y=0.40, line_dash="dot", line_color="red", annotation_text="Broken")
+
+        st.plotly_chart(fig_exp, width='stretch')
         
     st.divider()
     st.subheader("Detailed Operational Health: Sortie Rates vs. Manning")
