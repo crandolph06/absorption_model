@@ -205,9 +205,9 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
     ipug_students = select_upgrade_students(pilots, Upgrade.IPUG, cfg.ipug_students)
 
     # 3. Execute Syllabi
-    run_upgrade_program(MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise)
-    run_upgrade_program(FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise)
-    run_upgrade_program(IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise)
+    run_upgrade_program(cfg, MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise)
+    run_upgrade_program(cfg, FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise)
+    run_upgrade_program(cfg, IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise)
 
 
     # 4. Continuation Training
