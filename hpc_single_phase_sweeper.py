@@ -7,12 +7,13 @@ from src.engine import run_phase_simulation, create_pilots
 from src.models import SquadronConfig
 from src.rap_state import rap_assess, rap_state_code, rap_state_label
 
-# --- HPC CONFIGURATGION ---
+# --- HPC CONFIGURATION ---
 PHASE_DAYS = 120
 ITERATIONS_PER_CONFIG = 3
-OUTPUT_DIR = "outputs"
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, "research_data_hpc.csv")
-CHUNK_SIZE = 5000 # Rows to buffer before writing to disk
+OUTPUT_DIR = "outputs/single_phase/parquet"  
+CHUNK_SIZE = 500000 
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def get_sweep_configs():
     ute_values = range(6, 21)
@@ -23,14 +24,6 @@ def get_sweep_configs():
     flug_students = range(0, 15)
     ipug_students = range(0, 15)
     total_pilots = range(25, 50)
-    # ute_values = range(6, 8)
-    # ip_qty_values = [3]
-    # exp_ratios = [.45]
-    # paa_values = [18]
-    # mqt_students = [4]
-    # flug_students = [4]
-    # ipug_students = [3]
-    # total_pilots = [25]
 
     keys = ['ute', 'ip_qty', 'exp', 'paa', 'mqt', 'flug', 'ipug', 'total_pilots']
     values = [ute_values, ip_qty_values, exp_ratios, paa_values, mqt_students, flug_students, ipug_students, total_pilots]
@@ -68,7 +61,6 @@ def process_single_config(args):
         return None
 
     # 2. Setup Config Object
-    # 99 is dummy ID. We cast types here to be safe.
     cfg = SquadronConfig(
         paa=int(paa), ute=float(ute), experience_ratio=float(exp), ip_qty=int(ip_q),
         mqt_students=int(mqt), flug_students=int(flug), ipug_students=int(ipug),
@@ -127,31 +119,15 @@ def process_single_config(args):
     }
 
 def run_parallel_sweep():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    # Initialize Output File with Header
-    dummy_res = {
-        "paa": 0, "ute": 0, "total_capacity": 0, "exp_ratio": 0, "ip_qty": 0, "total_pilots": 0,
-        "mqt_qty": 0, "flug_qty": 0, "ipug_qty": 0,
-        "rap_state_code": 0, "rap_state_label": "", "blue_rap_state_code": 0, "blue_rap_state_label": "",
-        "mqt_monthly": 0, "wg_monthly": 0, "fl_monthly": 0, "ip_monthly": 0,
-        "wg_blue_monthly": 0, "fl_blue_monthly": 0, "ip_blue_monthly": 0,
-        "wg_red_monthly": 0, "fl_red_monthly": 0, "ip_red_monthly": 0,
-        "wg_red_pct": 0, "fl_red_pct": 0, "ip_red_pct": 0
-    }
-    cols = list(dummy_res.keys())
-    pd.DataFrame(columns=cols).to_csv(OUTPUT_FILE, index=False)
-
     print("Generating parameter space...")
     _, param_generator = get_sweep_configs()
     
-    # We use a trick to estimate size or just iterate blind if huge
-    # For HPC, we just iterate.
-    
     print(f"🚀 Launching Parallel Sweep on {os.cpu_count()} cores...")
-    print(f"Writing to: {OUTPUT_FILE}")
+    print(f"Writing batches to: {OUTPUT_DIR}") 
 
     count = 0
+    batch_index = 0  
     buffer = []
 
     with ProcessPoolExecutor() as executor:
@@ -161,19 +137,25 @@ def run_parallel_sweep():
                 buffer.append(result)
 
             if len(buffer) >= CHUNK_SIZE:
-                # Append to CSV
-                pd.DataFrame(buffer, columns=cols).to_csv(OUTPUT_FILE, mode='a', header=False, index=False)
+                batch_index += 1
+                batch_file = os.path.join(OUTPUT_DIR, f"batch_{batch_index:04d}.parquet")
+                
+                # Convert buffer to DataFrame and save to Parquet
+                df_chunk = pd.DataFrame(buffer)
+                df_chunk.to_parquet(batch_file, index=False) 
+                
                 count += len(buffer)
-                print(f"Processed {count} valid configs...", end='\r')
+                print(f"Saved {batch_file} | Total processed: {count}", end='\r')
                 buffer = [] # Clear RAM
 
         # Final Flush
         if buffer:
-            pd.DataFrame(buffer, columns=cols).to_csv(OUTPUT_FILE, mode='a', header=False, index=False)
+            batch_index += 1
+            batch_file = os.path.join(OUTPUT_DIR, f"batch_{batch_index:04d}.parquet")
+            pd.DataFrame(buffer).to_parquet(batch_file, index=False)
             count += len(buffer)
 
     print(f"\n✅ Sweep Complete. Total valid configs: {count}")
 
 if __name__ == "__main__":
     run_parallel_sweep()
-
