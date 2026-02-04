@@ -304,9 +304,6 @@ if submitted:
                 snapshot = t_df[t_df['year'] == target_year]
                 
                 if not snapshot.empty:
-                    # total_pilots = snapshot['total_pilots'].sum()
-                    # exp_pilots = snapshot['fl_qty'].sum() + snapshot['ip_qty'].sum()
-                    # ratio = exp_pilots / total_pilots if total_pilots > 0 else 0
                     ratio = snapshot['exp_rat'].mean()
                     
                     stability_data.append({
