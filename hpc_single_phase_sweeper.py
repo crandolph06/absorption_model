@@ -136,14 +136,20 @@ def run_parallel_sweep():
         os.remove(last_file)
         completed_batches.remove(last_batch)
 
-    print(f"Skipping {len(completed_batches)} batches already found in {OUTPUT_DIR}")
+    num_completed = len(completed_batches)
+    rows_to_skip = num_completed * CHUNK_SIZE
     
+    batch_index = num_completed
+    count = num_completed * CHUNK_SIZE
+    buffer = []
+
+    if rows_to_skip > 0:
+        print(f"⏩ Fast-forwarding: Skipping {rows_to_skip:,} configurations...")
+        for _ in range(rows_to_skip):
+            next(param_generator) 
+
     print(f"🚀 Launching Parallel Sweep on {os.cpu_count()} cores...")
     print(f"Writing batches to: {OUTPUT_DIR}") 
-
-    count = 0
-    batch_index = 0  
-    buffer = []
 
     with ProcessPoolExecutor() as executor:
         # chunksize=500 gives good granularity for load balancing
@@ -153,11 +159,6 @@ def run_parallel_sweep():
 
             if len(buffer) >= CHUNK_SIZE:
                 batch_index += 1
-
-                if batch_index in completed_batches:
-                    count += len(buffer)
-                    buffer = []
-                    continue
 
                 batch_file = os.path.join(OUTPUT_DIR, f"batch_{batch_index:04d}.parquet")
                 
