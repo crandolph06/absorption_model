@@ -122,6 +122,21 @@ def run_parallel_sweep():
     
     print("Generating parameter space...")
     _, param_generator = get_sweep_configs()
+
+    completed_batches = {
+        int(f.split('_')[1].split('.')[0]) 
+        for f in os.listdir(OUTPUT_DIR) 
+        if f.startswith('batch_') and f.endswith('.parquet')
+    }
+
+    if completed_batches:
+        last_batch = max(completed_batches)
+        last_file = os.path.join(OUTPUT_DIR, f"batch_{last_batch:04d}.parquet")
+        print(f"Clean-up: Removing potentially partial file {last_file}")
+        os.remove(last_file)
+        completed_batches.remove(last_batch)
+
+    print(f"Skipping {len(completed_batches)} batches already found in {OUTPUT_DIR}")
     
     print(f"🚀 Launching Parallel Sweep on {os.cpu_count()} cores...")
     print(f"Writing batches to: {OUTPUT_DIR}") 
@@ -138,6 +153,12 @@ def run_parallel_sweep():
 
             if len(buffer) >= CHUNK_SIZE:
                 batch_index += 1
+
+                if batch_index in completed_batches:
+                    count += len(buffer)
+                    buffer = []
+                    continue
+
                 batch_file = os.path.join(OUTPUT_DIR, f"batch_{batch_index:04d}.parquet")
                 
                 # Convert buffer to DataFrame and save to Parquet
@@ -151,9 +172,10 @@ def run_parallel_sweep():
         # Final Flush
         if buffer:
             batch_index += 1
-            batch_file = os.path.join(OUTPUT_DIR, f"batch_{batch_index:04d}.parquet")
-            pd.DataFrame(buffer).to_parquet(batch_file, index=False)
-            count += len(buffer)
+            if batch_index not in completed_batches:
+                batch_file = os.path.join(OUTPUT_DIR, f"batch_{batch_index:04d}.parquet")
+                pd.DataFrame(buffer).to_parquet(batch_file, index=False)
+                count += len(buffer)
 
     print(f"\n✅ Sweep Complete. Total valid configs: {count}")
 
