@@ -177,6 +177,8 @@ def run_parallel_sweep():
                 pd.DataFrame(buffer).to_parquet(batch_file, index=False)
                 count += len(buffer)
 
+    with open("SWEEP_COMPLETE.txt", "w") as f:
+        f.write("Done")
     print(f"\n✅ Sweep Complete. Total valid configs: {count}")
 
 if __name__ == "__main__":
