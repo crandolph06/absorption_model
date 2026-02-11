@@ -93,6 +93,15 @@ def run_long_term_sweep():
     keys, valid_gen = get_valid_long_term_configs()
     
     brain = load_ai_brain(os.path.join(BRAIN_PATH, "hpc_sortie_brain_lite.pkl"))
+
+    while os.path.exists(os.path.join(OUTPUT_DIR, f"long_term_batch_{count:04d}.parquet"))
+        count += 1
+
+    configs_to_skip = CHUNK_SIZE * count
+    print(f'Skipping {configs_to_skip} configurations (found {count} existing batches).')
+
+    remaining_gen = itertools.islice(valid_gen, configs_to_skip, None)
+
     gen_with_brain = (params + (brain,) for params in valid_gen)
 
     buffer = []
@@ -114,6 +123,9 @@ def run_long_term_sweep():
         # Final Flush
         if buffer:
             pd.DataFrame(buffer).to_parquet(f"{OUTPUT_DIR}/final_long_term_batch.parquet", index=False)
+
+        with open("SWEEP_COMPLETE.txt", "W") as f:
+            f.write("done")
 
     print("✅ Long-term sweep complete.")
 
