@@ -43,8 +43,8 @@ def setup_simulation(round_robin: bool,ai_brain, sim_upgrades: bool = False,
     return sim, squadrons
 
 if __name__ == "__main__":
-    # brain = joblib.load('outputs/single_phase/brains') # For HPC
-    brain = joblib.load('brains/hpc_sortie_brain_lite.pkl') # For local
+    brain = joblib.load('outputs/single_phase/brains') # For HPC
+    # brain = joblib.load('brains/hpc_sortie_brain_lite.pkl') # For local
     sim, squadrons = setup_simulation(round_robin=False, ai_brain=brain, sim_upgrades=True)
 
     results_df = sim.run_simulation(
