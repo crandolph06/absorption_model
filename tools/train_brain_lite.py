@@ -42,7 +42,7 @@ for target in targets:
     print(f"   - {target} Score: {model.score(X, y):.4f}")
 
 # 3. SAVE WITH COMPRESSION
-filename = "sortie_brain.pkl"
+filename = "brains/sortie_brain.pkl"
 # compress=3 drastically reduces file size
 joblib.dump(models, filename, compress=3) 
 print(f"\n✅ Lite Brain saved to {filename}")
