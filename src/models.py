@@ -406,12 +406,12 @@ class SquadronConfig:
             'wg_rate_blue': rates.wg_blue_phase / months,
             'fl_rate_blue': rates.fl_blue_phase / months,
             'ip_rate_blue': rates.ip_blue_phase / months,
-            'wg_rap_shortfall': max(0, 9 - (rates.wg_phase / months)),
-            'fl_rap_shortfall': max(0, 8 - (rates.fl_phase / months)),
-            'ip_rap_shortfall': max(0, 8 - (rates.ip_phase / months)),
-            'wg_blue_shortfall': max(0, 9 - (rates.wg_blue_phase / months)),
-            'fl_blue_shortfall': max(0, 8 - (rates.fl_blue_phase / months)),
-            'ip_blue_shortfall': max(0, 8 - (rates.ip_blue_phase / months))
+            'wg_rap_shortfall': 9 - (rates.wg_phase / months), # Positive number is shortfall, Negative number is surplus
+            'fl_rap_shortfall': 8 - (rates.fl_phase / months),
+            'ip_rap_shortfall': 8 - (rates.ip_phase / months),
+            'wg_blue_shortfall': 9 - (rates.wg_blue_phase / months),
+            'fl_blue_shortfall': 8 - (rates.fl_blue_phase / months),
+            'ip_blue_shortfall': 8 - (rates.ip_blue_phase / months)
         }
     
         return current_stats
