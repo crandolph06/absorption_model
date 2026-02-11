@@ -27,7 +27,10 @@ def train_hpc_brain():
     mini_batches = []
     total_rows_seen = 0
 
-    for f in files:
+    for i, f in enumerate(files):
+        if i % 50 == 0: 
+            print (f"   Processing file {i}/{len(files)}...", end='\r')
+        
         df_chunk = pd.read_parquet(f)
         total_rows_seen += len (df_chunk)
 
@@ -57,7 +60,7 @@ def train_hpc_brain():
 
     df['total_students'] = df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']
 
-    df['ip_ratio'] = df['ipug_qty'] / df['total_pilots'].replace(0, 1)
+    df['ip_ratio'] = df['ip_qty'] / df['total_pilots'].replace(0, 1)
     df ['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
 
     df.replace([np.inf, -np.inf], 0, inplace=True)
@@ -72,7 +75,7 @@ def train_hpc_brain():
     ]
 
     # 3. SPLIT DATA
-    X_train, X_test, df_train, df_test = train_test_split(X, df[targets], test_size=SAMPLE_FRAC, random_state=RANDOM_SEED)
+    X_train, X_test, df_train, df_test = train_test_split(X, df[targets], test_size=0.2, random_state=RANDOM_SEED)
     
 
     # 3. TRAIN MODELS 
