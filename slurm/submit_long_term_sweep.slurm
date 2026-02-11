@@ -36,7 +36,7 @@ export PYTHONUNBUFFERED=1
 python -u hpc_long_term_sweeper.py
 #
 
-if [ -f final_long_term_batch.parquet ]; then
+if [ -f SWEEP_COMPLETE.txt ]; then
    echo "✅ Sweep finished. Cleaning up and exiting."
 else
    echo "🔄 Sweep not finished. Resubmitting..."
