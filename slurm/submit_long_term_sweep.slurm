@@ -14,6 +14,7 @@
 #SBATCH --export=ALL
 #SBATCH --output=logs/sweep_%j.out
 #SBATCH --error=logs/sweep_%j.err
+#SBATCH --mem=256G
 #
 ## Execution Block ----------------------------------------------
 # Environment Setup
