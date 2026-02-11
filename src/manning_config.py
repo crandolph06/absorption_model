@@ -3,7 +3,7 @@ import random
 
 IP_YEAR_RANGE = (2010, 2014); IP_HOUR_RANGE = (400, 1500); IP_SORTIE_RANGE = (300, 1200)
 FL_YEAR_RANGE = (2015, 2023); FL_HOUR_RANGE = (200, 500);  FL_SORTIE_RANGE = (180, 400)
-WG_YEAR_RANGE = (2022, 2025); WG_HOUR_RANGE = (50, 250);   WG_SORTIE_RANLGE = (50, 300)
+WG_YEAR_RANGE = (2022, 2026); WG_HOUR_RANGE = (50, 250);   WG_SORTIE_RANGE = (50, 300)
 
 SQUADRON_DATA = [
     (14, 18, 7, 27), (493, 24, 9, 36), (495, 24, 9, 36), (95, 24, 9, 36),
@@ -38,7 +38,7 @@ def get_initial_squadrons(current_year: int):
         while len(sq.pilots) < target_total:
             yg = random.randint(*WG_YEAR_RANGE)
             sq.pilots.append(Pilot(Qual.WG, yg, max(0, 120-((current_year-yg-2)*12)), 
-                             random.randint(*WG_SORTIE_RANLGE), random.randint(*WG_HOUR_RANGE), sq_id, Assignment.LINE))
+                             random.randint(*WG_SORTIE_RANGE), random.randint(*WG_HOUR_RANGE), sq_id, Assignment.LINE))
         
         sq.update_stats()
         squadrons.append(sq)
