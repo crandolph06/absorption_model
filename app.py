@@ -254,14 +254,14 @@ with col_summary:
         st.info("No exact match for these filters.")
 
 # ==============================================================================
-# 🎯 SINGLE SCENARIO INSPECTOR (Pinpoint Accuracy)
+# 📈 SCENARIO TREND INSPECTOR (X-Axis Sweep)
 # ==============================================================================
 st.set_page_config(layout="wide")
-st.title("🎯 Single Scenario Inspector")
+st.title("📈 Scenario Trend Inspector")
 st.markdown("""
-**Precision Mode:** This tool isolates a **single specific scenario** to compare the raw simulation noise against the AI's prediction.
-* **Blue Dots:** Actual simulation runs (Raw Data). Ideally, you want to see a tight cluster.
-* **Red Line:** The AI's prediction. It should cut right through the center of the dots.
+**Trend Validation:** This chart sweeps **one variable** along the X-Axis while holding everything else constant.
+* **Blue Dots:** Actual simulation runs found for each X-value. (Vertical spread = Simulation Chaos).
+* **Red Line:** The AI's prediction. It should trace the center of gravity of the blue dots.
 """)
 
 # --- 1. LOAD RESOURCES ---
@@ -281,152 +281,134 @@ if brain is None or df_raw is None:
     st.error("⚠️ Missing Files! Check your outputs folder.")
     st.stop()
 
-# --- 2. PRECISE CONTROLS ---
+# --- 2. CONTROLS ---
 with st.container():
-    st.subheader("1. Define Exact Scenario")
-    
-    # Row 1: The "Big Movers"
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
-        # PAA (Discrete)
-        valid_paas = sorted(df_raw['paa'].unique())
-        sb_paa = st.selectbox("PAA", valid_paas, index=0)
-    with c2:
-        # UTE (Discrete)
-        valid_utes = sorted(df_raw['ute'].unique())
-        sb_ute = st.selectbox("UTE Rate", valid_utes, index=0)
-    with c3:
-        # Pilots (Exact)
-        min_p, max_p = int(df_raw['total_pilots'].min()), int(df_raw['total_pilots'].max())
-        sb_pilots = st.slider("Total Pilots", min_p, max_p, 40)
-    with c4:
-        # IPs (Exact)
-        min_ip, max_ip = int(df_raw['ip_qty'].min()), int(df_raw['ip_qty'].max())
-        sb_ips = st.slider("Active IPs", min_ip, max_ip, 6)
-    with c5:
-        # Exp Ratio (Approximate due to float precision)
-        sb_exp = st.slider("Exp Ratio", 0.2, 0.8, 0.45, step=0.01)
-
-    # Row 2: The Student Loads (Exact Sliders)
-    st.caption("Student Load Configuration")
-    s1, s2, s3, s4 = st.columns([1, 1, 1, 2])
-    with s1:
-        sb_mqt = st.number_input("MQT Students", 0, 15, 2)
-    with s2:
-        sb_flug = st.number_input("FLUG Students", 0, 15, 0)
-    with s3:
-        sb_ipug = st.number_input("IPUG Students", 0, 15, 0)
-    with s4:
-        # Target Metric
+    # A. The X-Axis Selector
+    col_x, col_y = st.columns(2)
+    with col_x:
+        x_axis_label = st.radio("Select X-Axis Variable:", ["MQT Students", "FLUG Students", "IPUG Students"], horizontal=True)
+        # Map label to column name
+        x_col_map = {"MQT Students": "mqt_qty", "FLUG Students": "flug_qty", "IPUG Students": "ipug_qty"}
+        x_col = x_col_map[x_axis_label]
+        
+    with col_y:
         inspect_metric = st.selectbox(
-            "Metric to Inspect", 
+            "Y-Axis Metric", 
             ["wg_monthly", "fl_monthly", "ip_monthly", "wg_blue_monthly"],
             format_func=lambda x: x.replace("_monthly", " Sorties").replace("_", " ").title()
         )
 
-# --- 3. GET DATA ---
+    st.divider()
+    st.subheader("Define Fixed Constants")
+    st.caption(f"All variables below are LOCKED. Only {x_axis_label} will change.")
 
-def get_exact_match():
-    # 1. Start with Dataframe
-    mask = (df_raw['paa'] == sb_paa) & (df_raw['ute'] == sb_ute)
+    # B. The Fixed Constants
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        valid_paas = sorted(df_raw['paa'].unique())
+        sb_paa = st.selectbox("PAA", valid_paas, index=0)
+    with c2:
+        valid_utes = sorted(df_raw['ute'].unique())
+        sb_ute = st.selectbox("UTE Rate", valid_utes, index=0)
+    with c3:
+        min_p, max_p = int(df_raw['total_pilots'].min()), int(df_raw['total_pilots'].max())
+        sb_pilots = st.slider("Total Pilots", min_p, max_p, 40)
+    with c4:
+        min_ip, max_ip = int(df_raw['ip_qty'].min()), int(df_raw['ip_qty'].max())
+        sb_ips = st.slider("Active IPs", min_ip, max_ip, 6)
+    with c5:
+        sb_exp = st.slider("Exp Ratio", 0.2, 0.8, 0.45, step=0.01)
+
+    # C. The "Other" Student Loads (Must be fixed to 0 or specific value)
+    s1, s2, s3 = st.columns(3)
     
-    # 2. Exact Integer Matches
+    # We dynamically disable the slider for the variable currently selected as X-Axis
+    with s1:
+        sb_mqt = st.number_input("MQT Baseline", 0, 15, 0, disabled=(x_col == "mqt_qty"))
+    with s2:
+        sb_flug = st.number_input("FLUG Baseline", 0, 15, 0, disabled=(x_col == "flug_qty"))
+    with s3:
+        sb_ipug = st.number_input("IPUG Baseline", 0, 15, 0, disabled=(x_col == "ipug_qty"))
+
+# --- 3. DATA ENGINE ---
+
+def get_trend_data():
+    # 1. Filter Raw Data
+    mask = (df_raw['paa'] == sb_paa) & (df_raw['ute'] == sb_ute)
     mask &= (df_raw['total_pilots'] == sb_pilots)
     mask &= (df_raw['ip_qty'] == sb_ips)
-    mask &= (df_raw['mqt_qty'] == sb_mqt)
-    mask &= (df_raw['flug_qty'] == sb_flug)
-    mask &= (df_raw['ipug_qty'] == sb_ipug)
-    
-    # 3. Float Match (Exp Ratio needs a tiny epsilon for float errors)
-    # We allow +/- 0.01 just to catch "0.4500001" vs "0.45"
+    # Float tolerance for Exp Ratio
     mask &= df_raw['exp_ratio'].between(sb_exp - 0.01, sb_exp + 0.01)
+    
+    # Filter the "Other" students (Fixed Baselines)
+    if x_col != "mqt_qty": mask &= (df_raw['mqt_qty'] == sb_mqt)
+    if x_col != "flug_qty": mask &= (df_raw['flug_qty'] == sb_flug)
+    if x_col != "ipug_qty": mask &= (df_raw['ipug_qty'] == sb_ipug)
+    
+    # We DO NOT filter by x_col, because that's what we want to see vary!
     
     return df_raw[mask].copy()
 
-def get_ai_point():
-    # Construct Single Row DataFrame
-    row = pd.DataFrame({
-        'paa': [sb_paa], 'ute': [sb_ute], 'total_pilots': [sb_pilots],
-        'ip_qty': [sb_ips], 'exp_ratio': [sb_exp],
-        'mqt_qty': [sb_mqt], 'flug_qty': [sb_flug], 'ipug_qty': [sb_ipug]
-    })
+def get_ai_trend():
+    # Sweep X from 0 to 15
+    sweep_range = range(0, 16)
     
-    # Calc Features
-    row['total_students'] = row['mqt_qty'] + row['flug_qty'] + row['ipug_qty']
-    row['ip_ratio'] = row['ip_qty'] / row['total_pilots'].replace(0, 1)
-    row['ip_to_stud_ratio'] = row['ip_qty'] / row['total_students'].replace(0, 0.1)
+    # Create Base Frame
+    df_sweep = pd.DataFrame({
+        'paa': sb_paa, 'ute': sb_ute, 'total_pilots': sb_pilots,
+        'ip_qty': sb_ips, 'exp_ratio': sb_exp,
+        'mqt_qty': sb_mqt, 'flug_qty': sb_flug, 'ipug_qty': sb_ipug
+    }, index=sweep_range)
+    
+    # Overwrite the X-Column with the sweep
+    df_sweep[x_col] = sweep_range
+    
+    # Feature Engineering
+    df_sweep['total_students'] = df_sweep['mqt_qty'] + df_sweep['flug_qty'] + df_sweep['ipug_qty']
+    df_sweep['ip_ratio'] = df_sweep['ip_qty'] / df_sweep['total_pilots'].replace(0, 1)
+    df_sweep['ip_to_stud_ratio'] = df_sweep['ip_qty'] / df_sweep['total_students'].replace(0, 0.1)
     
     features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty', 'ip_ratio', 'ip_to_stud_ratio']
     
     if inspect_metric in brain:
-        return brain[inspect_metric].predict(row[features])[0]
-    return 0.0
+        return df_sweep[x_col], brain[inspect_metric].predict(df_sweep[features])
+    return [], []
 
 # --- 4. VISUALIZE ---
-df_match = get_exact_match()
-ai_val = get_ai_point()
+df_trend = get_trend_data()
+x_ai, y_ai = get_ai_trend()
 
-st.divider()
+fig = go.Figure()
 
-if df_match.empty:
-    st.warning(f"⚠️ No exact match found in simulation data for this combination.")
-    st.info("💡 Tip: Try adjusting the 'Total Pilots' or 'Exp Ratio' slightly to find recorded runs.")
-else:
-    # Calculate Stats
-    raw_mean = df_match[inspect_metric].mean()
-    raw_std = df_match[inspect_metric].std()
-    count = len(df_match)
-    
-    # Display Stats
-    st.metric(
-        label=f"AI Prediction vs Raw Mean (N={count})",
-        value=f"{ai_val:.2f}",
-        delta=f"{ai_val - raw_mean:.2f} difference",
-        delta_color="off"
-    )
-
-    # Build Strip Plot
-    fig = go.Figure()
-
-    # Layer 1: Raw Data (Jittered Dots)
-    fig.add_trace(go.Box(
-        y=df_match[inspect_metric],
-        name="Raw Simulation",
-        boxpoints='all', # Show all points
-        jitter=0.5,      # Spread them out horizontally
-        pointpos=0,      # Center them
-        fillcolor='rgba(0,0,0,0)', # Invisible box
-        line=dict(width=0),        # Invisible lines
-        marker=dict(size=12, color='#636EFA', opacity=0.6),
-        hoverinfo='y'
+# Layer 1: Raw Data (Blue Scatter)
+if not df_trend.empty:
+    fig.add_trace(go.Scatter(
+        x=df_trend[x_col],
+        y=df_trend[inspect_metric],
+        mode='markers',
+        name='Raw Simulation',
+        marker=dict(size=10, color='#636EFA', opacity=0.6, line=dict(width=1, color='white')),
+        hovertemplate="<b>Raw Run</b><br>Students: %{x}<br>Sorties: %{y:.2f}<extra></extra>"
     ))
+else:
+    st.warning("⚠️ No raw data found for this specific combination of Pilot/IP/Baselines.")
 
-    # Layer 2: AI Prediction Line
-    fig.add_hline(
-        y=ai_val, 
-        line_color="#EF553B", 
-        line_width=4, 
-        annotation_text="AI Prediction", 
-        annotation_position="top left"
-    )
-    
-    # Layer 3: Raw Mean Line (Dashed)
-    fig.add_hline(
-        y=raw_mean, 
-        line_color="#636EFA", 
-        line_width=2, 
-        line_dash="dot",
-        annotation_text="Raw Mean", 
-        annotation_position="bottom left"
-    )
+# Layer 2: AI Prediction (Red Line)
+fig.add_trace(go.Scatter(
+    x=x_ai,
+    y=y_ai,
+    mode='lines',
+    name='AI Prediction',
+    line=dict(color='#EF553B', width=4)
+))
 
-    fig.update_layout(
-        title=f"Distribution of {inspect_metric}",
-        yaxis_title="Sorties / Month",
-        xaxis=dict(showticklabels=False, title="Simulation Runs"), # Hide X axis labels
-        height=500,
-        template="plotly_dark",
-        showlegend=False
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
+fig.update_layout(
+    title=f"Trend Analysis: {inspect_metric} vs {x_axis_label}",
+    xaxis_title=x_axis_label,
+    yaxis_title="Sorties / Month",
+    height=600,
+    template="plotly_dark",
+    legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99)
+)
+
+st.plotly_chart(fig, use_container_width=True)
