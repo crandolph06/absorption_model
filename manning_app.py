@@ -74,7 +74,7 @@ def load_ai_brain():
     This object is passed to the simulation engine to prevent reloading.
     """
     # Check for brain
-    if not os.path.exists("sortie_brain.pkl"):
+    if not os.path.exists("brains/sortie_brain.pkl"):
         st.error("🚨 'sortie_brain.pkl' not found! Please run 'train_brain_lite.py'.")
         st.stop()
 
@@ -140,7 +140,7 @@ if submitted:
         st.subheader("Pilot Population by Qualification")
         fig_pop = px.area(
             df_display, 
-            x='timeline', 
+            x='timeline',
             y=['wg_qty', 'fl_qty', 'ip_qty', 'staff_fls', 'staff_ips'],
             title="CAF Qualification Mix",
             labels={'value': 'Count', 'timeline': 'Year/Phase'},
