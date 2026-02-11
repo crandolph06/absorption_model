@@ -95,10 +95,7 @@ class CAFSimulation:
         self.history = []
         self.squadrons = squadron_configs
 
-        FEATURE_NAMES = [
-            'paa', 'ute', 'exp_ratio', 'total_pilots', 
-            'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty',
-            'ip_ratio', 'ip_to_stud_ratio']
+        FEATURE_NAMES = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
 
         for sq in self.squadrons:
             sq.ute = ute # With current implementation all squadrons must have same UTE
@@ -111,6 +108,7 @@ class CAFSimulation:
             for phase_num in range(1, 4): 
                 current_batch = phase_intake + (remainder if phase_num == 3 else 0)
                 self.add_new_bcourse_graduates(year, current_batch, self.round_robin) 
+
 
                 for sq in self.squadrons:
                     if sq.flug_students != 0 or sq.ipug_students != 0:
@@ -140,7 +138,9 @@ class CAFSimulation:
                         rates = sq.calc_aging_rate(False)
 
                     sq.apply_phase_aging(rates)
+
                     current_stats = sq.store_stats(year, phase_num, rates)
+
                     self.process_end_of_phase(sq, year, phase_num, retention_rate, current_stats) 
             
         return pd.DataFrame(self.history)
