@@ -217,7 +217,9 @@ class SquadronConfig:
         return int(self.desired_manning * self.manning_pct)
     
     def get_feature_vector(self) -> list:
-        """Returns the ordered list of features expected by the AI Brain."""
+        total_students = self.mqt_students + self.flug_students + self.ipug_students
+        ip_ratio = self.ip_qty / self.line_pilots if self.line_pilots > 0 else 0.0
+        ip_to_stud_ratio = self.ip_qty / total_students if total_students > 0 else 0.0
 
         return [
             self.paa,
@@ -227,7 +229,9 @@ class SquadronConfig:
             self.mqt_students,
             self.flug_students,
             self.ipug_students,
-            self.ip_qty
+            self.ip_qty,
+            ip_ratio,
+            ip_to_stud_ratio
         ]
     
     def update_stats(self):
@@ -319,62 +323,6 @@ class SquadronConfig:
                 fl_blue_phase=None,
                 ip_blue_phase=None
             )
-    
-    def predict_aging_rate(self, brain: dict) -> AgingRate:
-        # Features: ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
-        
-        # line_pilots = len([p for p in self.pilots if p.current_assignment == Assignment.LINE])
-        total_students = self.mqt_students + self.flug_students + self.ipug_students
-        ip_ratio = self.ip_qty / self.line_pilots if self.line_pilots > 0 else 0
-        ip_to_stud_ratio = self.ip_qty / total_students if total_students > 0 else 0
-
-        feature_names = [
-            'paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 
-            'flug_qty', 'ipug_qty', 'ip_qty', 'ip_ratio',
-            'ip_to_stud_ratio']
-        
-        input_data = pd.DataFrame([[
-            self.paa,
-            self.ute,
-            self.experience_ratio,
-            self.line_pilots,       
-            self.mqt_students,
-            self.flug_students,
-            self.ipug_students,
-            self.ip_qty,
-            ip_ratio,
-            ip_to_stud_ratio
-        ]], columns=feature_names)
-
-        # 2. GET PREDICTIONS (Monthly Rates)
-        try:
-            wg_mo = brain['wg_monthly'].predict(input_data)[0]
-            fl_mo = brain['fl_monthly'].predict(input_data)[0]
-            ip_mo = brain['ip_monthly'].predict(input_data)[0]
-            
-            # Blue Air Predictions
-            wg_blue_mo = brain['wg_blue_monthly'].predict(input_data)[0]
-            fl_blue_mo = brain['fl_blue_monthly'].predict(input_data)[0]
-            ip_blue_mo = brain['ip_blue_monthly'].predict(input_data)[0]
-        except KeyError as e:
-            print(f"🚨 Brain Missing Model: {e}")
-            return AgingRate() # Return empty/zero rate on failure
-
-        # 3. CONVERT TO PHASE OUTPUT (Sorties per Phase)
-        months_per_phase = self.phase_length_days / 30.0
-
-        return AgingRate(
-            mqt_phase=4.0 * months_per_phase, # Fixed allocation for MQT
-            wg_phase=max(0, wg_mo * months_per_phase),
-            fl_phase=max(0, fl_mo * months_per_phase),
-            ip_phase=max(0, ip_mo * months_per_phase),
-            
-            # Blue Air Support Requirements
-            mqt_blue_phase=4.0 * months_per_phase, # Fixed allocation for MQT
-            wg_blue_phase=max(0, wg_blue_mo * months_per_phase),
-            fl_blue_phase=max(0, fl_blue_mo * months_per_phase),
-            ip_blue_phase=max(0, ip_blue_mo * months_per_phase)
-        )
         
     def store_stats(self, year: int, phase_num: int, rates: AgingRate):
         months = self.phase_length_days / 30
