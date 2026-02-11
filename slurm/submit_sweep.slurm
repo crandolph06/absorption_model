@@ -12,7 +12,7 @@
 ## Optional Slurm Directives --------------------------------------
 #SBATCH --job-name=single_phase_sweep_full
 #SBATCH --export=ALL
-#SBATCH --output=logs/sweep%j.out
+#SBATCH --output=logs/sweep_%j.out
 #SBATCH --error=logs/sweep_%j.err
 #
 ## Execution Block ----------------------------------------------
