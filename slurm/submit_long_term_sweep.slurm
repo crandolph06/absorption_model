@@ -39,6 +39,7 @@ python -u hpc_long_term_sweeper.py
 
 if [ -f SWEEP_COMPLETE.txt ]; then
    echo "✅ Sweep finished. Cleaning up and exiting."
+   rm SWEEP_COMPLETE.txt
 else
    echo "🔄 Sweep not finished. Resubmitting..."
    sbatch /p/work1/clrand16/absorption_model/submit_long_term_sweep.slurm
