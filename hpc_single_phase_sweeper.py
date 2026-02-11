@@ -56,10 +56,6 @@ def process_single_config(args):
     """
     (ute, ip_q, exp, paa, mqt, flug, ipug, total) = args
 
-    # 1. FAST FAIL CHECK
-    if not is_valid_config(total, exp, ip_q, mqt, flug):
-        return None
-
     # 2. Setup Config Object
     cfg = SquadronConfig(
         paa=int(paa), ute=float(ute), experience_ratio=float(exp), ip_qty=int(ip_q),
