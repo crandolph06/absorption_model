@@ -1,7 +1,7 @@
-import random
 from typing import Optional
 import copy
-from src.models import SquadronConfig, Pilot, Qual, Assignment, PriorityMode
+import joblib
+from src.models import PriorityMode
 from src.manning_engine import CAFSimulation
 from src.manning_config import get_initial_squadrons
 
@@ -43,7 +43,9 @@ def setup_simulation(round_robin: bool,ai_brain, sim_upgrades: bool = False,
     return sim, squadrons
 
 if __name__ == "__main__":
-    sim, squadrons = setup_simulation()
+    # brain = joblib.load('outputs/single_phase/brains') # For HPC
+    brain = joblib.load('brains/hpc_sortie_brain_lite.pkl') # For local
+    sim, squadrons = setup_simulation(round_robin=False, ai_brain=brain, sim_upgrades=True)
 
     results_df = sim.run_simulation(
         years_to_run=10, 
@@ -51,7 +53,3 @@ if __name__ == "__main__":
         retention_rate=0.5, 
         squadron_configs=squadrons,
     )
-
-    # 5. Quick Debug Output
-    print("--- Simulation Complete ---")
-    print(results_df.head(10))
