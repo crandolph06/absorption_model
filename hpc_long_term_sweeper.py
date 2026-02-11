@@ -34,7 +34,7 @@ def get_valid_long_term_configs():
 
     valid_generator = (
         params for params in param_generator
-        if is_valid_upg_logic(params[5], params[6], 1.3)
+        if is_valid_upg_logic(params[5], params[6], 1.3) # If ASD ever changes, need to update here and in squadrons
     )
 
     return keys, valid_generator
@@ -76,7 +76,7 @@ def process_single_config(args):
         card.update({
             "input_intake": annual_intake,
             "input_retention": retention_rate,
-            "inpute_max_man": max_manning,
+            "input_max_man": max_manning,
             "input_staff_mode": staff_logic.value,
             "input_ute": ute_val,
             "input_flug_start": flug_start_sorties,
