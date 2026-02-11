@@ -253,162 +253,162 @@ with col_summary:
     else:
         st.info("No exact match for these filters.")
 
-# ==============================================================================
-# 📈 SCENARIO TREND INSPECTOR (X-Axis Sweep)
-# ==============================================================================
-st.set_page_config(layout="wide")
-st.title("📈 Scenario Trend Inspector")
-st.markdown("""
-**Trend Validation:** This chart sweeps **one variable** along the X-Axis while holding everything else constant.
-* **Blue Dots:** Actual simulation runs found for each X-value. (Vertical spread = Simulation Chaos).
-* **Red Line:** The AI's prediction. It should trace the center of gravity of the blue dots.
-""")
+# # ==============================================================================
+# # 📈 AI Brain Inspector
+# # ==============================================================================
+# st.set_page_config(layout="wide")
+# st.title("📈 Scenario Trend Inspector")
+# st.markdown("""
+# **Trend Validation:** This chart sweeps **one variable** along the X-Axis while holding everything else constant.
+# * **Blue Dots:** Actual simulation runs found for each X-value. (Vertical spread = Simulation Chaos).
+# * **Red Line:** The AI's prediction. It should trace the center of gravity of the blue dots.
+# """)
 
-# --- 1. LOAD RESOURCES ---
-@st.cache_resource
-def load_resources():
-    brain_path = "brains/hpc_sortie_brain_lite.pkl"
-    data_path = "outputs/simulation_results.parquet"
+# # --- 1. LOAD RESOURCES ---
+# @st.cache_resource
+# def load_resources():
+#     brain_path = "brains/hpc_sortie_brain_lite.pkl"
+#     data_path = "outputs/simulation_results.parquet"
     
-    model = joblib.load(brain_path) if os.path.exists(brain_path) else None
-    df = pd.read_parquet(data_path) if os.path.exists(data_path) else None
+#     model = joblib.load(brain_path) if os.path.exists(brain_path) else None
+#     df = pd.read_parquet(data_path) if os.path.exists(data_path) else None
         
-    return model, df
+#     return model, df
 
-brain, df_raw = load_resources()
+# brain, df_raw = load_resources()
 
-if brain is None or df_raw is None:
-    st.error("⚠️ Missing Files! Check your outputs folder.")
-    st.stop()
+# if brain is None or df_raw is None:
+#     st.error("⚠️ Missing Files! Check your outputs folder.")
+#     st.stop()
 
-# --- 2. CONTROLS ---
-with st.container():
-    # A. The X-Axis Selector
-    col_x, col_y = st.columns(2)
-    with col_x:
-        x_axis_label = st.radio("Select X-Axis Variable:", ["MQT Students", "FLUG Students", "IPUG Students"], horizontal=True)
-        # Map label to column name
-        x_col_map = {"MQT Students": "mqt_qty", "FLUG Students": "flug_qty", "IPUG Students": "ipug_qty"}
-        x_col = x_col_map[x_axis_label]
+# # --- 2. CONTROLS ---
+# with st.container():
+#     # A. The X-Axis Selector
+#     col_x, col_y = st.columns(2)
+#     with col_x:
+#         x_axis_label = st.radio("Select X-Axis Variable:", ["MQT Students", "FLUG Students", "IPUG Students"], horizontal=True)
+#         # Map label to column name
+#         x_col_map = {"MQT Students": "mqt_qty", "FLUG Students": "flug_qty", "IPUG Students": "ipug_qty"}
+#         x_col = x_col_map[x_axis_label]
         
-    with col_y:
-        inspect_metric = st.selectbox(
-            "Y-Axis Metric", 
-            ["wg_monthly", "fl_monthly", "ip_monthly", "wg_blue_monthly"],
-            format_func=lambda x: x.replace("_monthly", " Sorties").replace("_", " ").title()
-        )
+#     with col_y:
+#         inspect_metric = st.selectbox(
+#             "Y-Axis Metric", 
+#             ["wg_monthly", "fl_monthly", "ip_monthly", "wg_blue_monthly"],
+#             format_func=lambda x: x.replace("_monthly", " Sorties").replace("_", " ").title()
+#         )
 
-    st.divider()
-    st.subheader("Define Fixed Constants")
-    st.caption(f"All variables below are LOCKED. Only {x_axis_label} will change.")
+#     st.divider()
+#     st.subheader("Define Fixed Constants")
+#     st.caption(f"All variables below are LOCKED. Only {x_axis_label} will change.")
 
-    # B. The Fixed Constants
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
-        valid_paas = sorted(df_raw['paa'].unique())
-        sb_paa = st.selectbox("PAA", valid_paas, index=0)
-    with c2:
-        valid_utes = sorted(df_raw['ute'].unique())
-        sb_ute = st.selectbox("UTE Rate", valid_utes, index=0)
-    with c3:
-        min_p, max_p = int(df_raw['total_pilots'].min()), int(df_raw['total_pilots'].max())
-        sb_pilots = st.slider("Total Pilots", min_p, max_p, 40)
-    with c4:
-        min_ip, max_ip = int(df_raw['ip_qty'].min()), int(df_raw['ip_qty'].max())
-        sb_ips = st.slider("Active IPs", min_ip, max_ip, 6)
-    with c5:
-        sb_exp = st.slider("Exp Ratio", 0.2, 0.8, 0.45, step=0.01)
+#     # B. The Fixed Constants
+#     c1, c2, c3, c4, c5 = st.columns(5)
+#     with c1:
+#         valid_paas = sorted(df_raw['paa'].unique())
+#         sb_paa = st.selectbox("PAA", valid_paas, index=0)
+#     with c2:
+#         valid_utes = sorted(df_raw['ute'].unique())
+#         sb_ute = st.selectbox("UTE Rate", valid_utes, index=0)
+#     with c3:
+#         min_p, max_p = int(df_raw['total_pilots'].min()), int(df_raw['total_pilots'].max())
+#         sb_pilots = st.slider("Total Pilots", min_p, max_p, 40)
+#     with c4:
+#         min_ip, max_ip = int(df_raw['ip_qty'].min()), int(df_raw['ip_qty'].max())
+#         sb_ips = st.slider("Active IPs", min_ip, max_ip, 6)
+#     with c5:
+#         sb_exp = st.slider("Exp Ratio", 0.2, 0.8, 0.45, step=0.01)
 
-    # C. The "Other" Student Loads (Must be fixed to 0 or specific value)
-    s1, s2, s3 = st.columns(3)
+#     # C. The "Other" Student Loads (Must be fixed to 0 or specific value)
+#     s1, s2, s3 = st.columns(3)
     
-    # We dynamically disable the slider for the variable currently selected as X-Axis
-    with s1:
-        sb_mqt = st.number_input("MQT Baseline", 0, 15, 0, disabled=(x_col == "mqt_qty"))
-    with s2:
-        sb_flug = st.number_input("FLUG Baseline", 0, 15, 0, disabled=(x_col == "flug_qty"))
-    with s3:
-        sb_ipug = st.number_input("IPUG Baseline", 0, 15, 0, disabled=(x_col == "ipug_qty"))
+#     # We dynamically disable the slider for the variable currently selected as X-Axis
+#     with s1:
+#         sb_mqt = st.number_input("MQT Baseline", 0, 15, 0, disabled=(x_col == "mqt_qty"))
+#     with s2:
+#         sb_flug = st.number_input("FLUG Baseline", 0, 15, 0, disabled=(x_col == "flug_qty"))
+#     with s3:
+#         sb_ipug = st.number_input("IPUG Baseline", 0, 15, 0, disabled=(x_col == "ipug_qty"))
 
-# --- 3. DATA ENGINE ---
+# # --- 3. DATA ENGINE ---
 
-def get_trend_data():
-    # 1. Filter Raw Data
-    mask = (df_raw['paa'] == sb_paa) & (df_raw['ute'] == sb_ute)
-    mask &= (df_raw['total_pilots'] == sb_pilots)
-    mask &= (df_raw['ip_qty'] == sb_ips)
-    # Float tolerance for Exp Ratio
-    mask &= df_raw['exp_ratio'].between(sb_exp - 0.01, sb_exp + 0.01)
+# def get_trend_data():
+#     # 1. Filter Raw Data
+#     mask = (df_raw['paa'] == sb_paa) & (df_raw['ute'] == sb_ute)
+#     mask &= (df_raw['total_pilots'] == sb_pilots)
+#     mask &= (df_raw['ip_qty'] == sb_ips)
+#     # Float tolerance for Exp Ratio
+#     mask &= df_raw['exp_ratio'].between(sb_exp - 0.01, sb_exp + 0.01)
     
-    # Filter the "Other" students (Fixed Baselines)
-    if x_col != "mqt_qty": mask &= (df_raw['mqt_qty'] == sb_mqt)
-    if x_col != "flug_qty": mask &= (df_raw['flug_qty'] == sb_flug)
-    if x_col != "ipug_qty": mask &= (df_raw['ipug_qty'] == sb_ipug)
+#     # Filter the "Other" students (Fixed Baselines)
+#     if x_col != "mqt_qty": mask &= (df_raw['mqt_qty'] == sb_mqt)
+#     if x_col != "flug_qty": mask &= (df_raw['flug_qty'] == sb_flug)
+#     if x_col != "ipug_qty": mask &= (df_raw['ipug_qty'] == sb_ipug)
     
-    # We DO NOT filter by x_col, because that's what we want to see vary!
+#     # We DO NOT filter by x_col, because that's what we want to see vary!
     
-    return df_raw[mask].copy()
+#     return df_raw[mask].copy()
 
-def get_ai_trend():
-    # Sweep X from 0 to 15
-    sweep_range = range(0, 16)
+# def get_ai_trend():
+#     # Sweep X from 0 to 15
+#     sweep_range = range(0, 16)
     
-    # Create Base Frame
-    df_sweep = pd.DataFrame({
-        'paa': sb_paa, 'ute': sb_ute, 'total_pilots': sb_pilots,
-        'ip_qty': sb_ips, 'exp_ratio': sb_exp,
-        'mqt_qty': sb_mqt, 'flug_qty': sb_flug, 'ipug_qty': sb_ipug
-    }, index=sweep_range)
+#     # Create Base Frame
+#     df_sweep = pd.DataFrame({
+#         'paa': sb_paa, 'ute': sb_ute, 'total_pilots': sb_pilots,
+#         'ip_qty': sb_ips, 'exp_ratio': sb_exp,
+#         'mqt_qty': sb_mqt, 'flug_qty': sb_flug, 'ipug_qty': sb_ipug
+#     }, index=sweep_range)
     
-    # Overwrite the X-Column with the sweep
-    df_sweep[x_col] = sweep_range
+#     # Overwrite the X-Column with the sweep
+#     df_sweep[x_col] = sweep_range
     
-    # Feature Engineering
-    df_sweep['total_students'] = df_sweep['mqt_qty'] + df_sweep['flug_qty'] + df_sweep['ipug_qty']
-    df_sweep['ip_ratio'] = df_sweep['ip_qty'] / df_sweep['total_pilots'].replace(0, 1)
-    df_sweep['ip_to_stud_ratio'] = df_sweep['ip_qty'] / df_sweep['total_students'].replace(0, 0.1)
+#     # Feature Engineering
+#     df_sweep['total_students'] = df_sweep['mqt_qty'] + df_sweep['flug_qty'] + df_sweep['ipug_qty']
+#     df_sweep['ip_ratio'] = df_sweep['ip_qty'] / df_sweep['total_pilots'].replace(0, 1)
+#     df_sweep['ip_to_stud_ratio'] = df_sweep['ip_qty'] / df_sweep['total_students'].replace(0, 0.1)
     
-    features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty', 'ip_ratio', 'ip_to_stud_ratio']
+#     features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty', 'ip_ratio', 'ip_to_stud_ratio']
     
-    if inspect_metric in brain:
-        return df_sweep[x_col], brain[inspect_metric].predict(df_sweep[features])
-    return [], []
+#     if inspect_metric in brain:
+#         return df_sweep[x_col], brain[inspect_metric].predict(df_sweep[features])
+#     return [], []
 
-# --- 4. VISUALIZE ---
-df_trend = get_trend_data()
-x_ai, y_ai = get_ai_trend()
+# # --- 4. VISUALIZE ---
+# df_trend = get_trend_data()
+# x_ai, y_ai = get_ai_trend()
 
-fig = go.Figure()
+# fig = go.Figure()
 
-# Layer 1: Raw Data (Blue Scatter)
-if not df_trend.empty:
-    fig.add_trace(go.Scatter(
-        x=df_trend[x_col],
-        y=df_trend[inspect_metric],
-        mode='markers',
-        name='Raw Simulation',
-        marker=dict(size=10, color='#636EFA', opacity=0.6, line=dict(width=1, color='white')),
-        hovertemplate="<b>Raw Run</b><br>Students: %{x}<br>Sorties: %{y:.2f}<extra></extra>"
-    ))
-else:
-    st.warning("⚠️ No raw data found for this specific combination of Pilot/IP/Baselines.")
+# # Layer 1: Raw Data (Blue Scatter)
+# if not df_trend.empty:
+#     fig.add_trace(go.Scatter(
+#         x=df_trend[x_col],
+#         y=df_trend[inspect_metric],
+#         mode='markers',
+#         name='Raw Simulation',
+#         marker=dict(size=10, color='#636EFA', opacity=0.6, line=dict(width=1, color='white')),
+#         hovertemplate="<b>Raw Run</b><br>Students: %{x}<br>Sorties: %{y:.2f}<extra></extra>"
+#     ))
+# else:
+#     st.warning("⚠️ No raw data found for this specific combination of Pilot/IP/Baselines.")
 
-# Layer 2: AI Prediction (Red Line)
-fig.add_trace(go.Scatter(
-    x=x_ai,
-    y=y_ai,
-    mode='lines',
-    name='AI Prediction',
-    line=dict(color='#EF553B', width=4)
-))
+# # Layer 2: AI Prediction (Red Line)
+# fig.add_trace(go.Scatter(
+#     x=x_ai,
+#     y=y_ai,
+#     mode='lines',
+#     name='AI Prediction',
+#     line=dict(color='#EF553B', width=4)
+# ))
 
-fig.update_layout(
-    title=f"Trend Analysis: {inspect_metric} vs {x_axis_label}",
-    xaxis_title=x_axis_label,
-    yaxis_title="Sorties / Month",
-    height=600,
-    template="plotly_dark",
-    legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99)
-)
+# fig.update_layout(
+#     title=f"Trend Analysis: {inspect_metric} vs {x_axis_label}",
+#     xaxis_title=x_axis_label,
+#     yaxis_title="Sorties / Month",
+#     height=600,
+#     template="plotly_dark",
+#     legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99)
+# )
 
-st.plotly_chart(fig, use_container_width=True)
+# st.plotly_chart(fig, use_container_width=True)
