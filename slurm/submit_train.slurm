@@ -12,7 +12,7 @@
 ## Optional Slurm Directives --------------------------------------
 #SBATCH --job-name=train_brain
 #SBATCH --export=ALL
-#SBATCH --output=logs/sweep%j.out
+#SBATCH --output=logs/sweep_%j.out
 #SBATCH --error=logs/sweep_%j.err
 #
 ## Execution Block ----------------------------------------------
