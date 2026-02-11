@@ -254,253 +254,179 @@ with col_summary:
         st.info("No exact match for these filters.")
 
 # ==============================================================================
-# 🕵️‍♂️ TRUTH INSPECTOR (Raw Data vs. ML Brain)
+# 🎯 SINGLE SCENARIO INSPECTOR (Pinpoint Accuracy)
 # ==============================================================================
 st.set_page_config(layout="wide")
-st.title("⚖️ The Moment of Truth: Physics vs. AI")
+st.title("🎯 Single Scenario Inspector")
 st.markdown("""
-**Compare & Contrast:** * **Dots** ⚫ match your inputs in the **Raw Simulation Data** (Historical).
-* **Lines** ➖ are the **ML Brain's Predictions** (theoretical).
-* *If the dots are far from the lines, the model might be over-smoothing the chaos.*
+**Precision Mode:** This tool isolates a **single specific scenario** to compare the raw simulation noise against the AI's prediction.
+* **Blue Dots:** Actual simulation runs (Raw Data). Ideally, you want to see a tight cluster.
+* **Red Line:** The AI's prediction. It should cut right through the center of the dots.
 """)
 
 # --- 1. LOAD RESOURCES ---
 @st.cache_resource
 def load_resources():
-    # 1. Load Brain
     brain_path = "brains/hpc_sortie_brain_lite.pkl"
-    model = None
-    if os.path.exists(brain_path):
-        model = joblib.load(brain_path)
+    data_path = "outputs/simulation_results.parquet"
     
-    # 2. Load Raw Data (Parquet)
-    # Update this path to where your aggregated parquet lives
-    data_path = "outputs/simulation_results.parquet" 
-    df = None
-    if os.path.exists(data_path):
-        df = pd.read_parquet(data_path)
+    model = joblib.load(brain_path) if os.path.exists(brain_path) else None
+    df = pd.read_parquet(data_path) if os.path.exists(data_path) else None
         
     return model, df
 
 brain, df_raw = load_resources()
 
 if brain is None or df_raw is None:
-    st.error("⚠️ Missing Files! Ensure `hpc_sortie_brain_lite.pkl` and `outputs/simulation_results.parquet` are in the folder.")
+    st.error("⚠️ Missing Files! Check your outputs folder.")
     st.stop()
 
-# --- 2. CONTROLS ---
+# --- 2. PRECISE CONTROLS ---
 with st.container():
-    st.subheader("1. Scenario Settings")
-    col1, col2, col3, col4, col5 = st.columns(5)
+    st.subheader("1. Define Exact Scenario")
     
-    with col1:
-        # PAA (Discrete in Raw Data)
+    # Row 1: The "Big Movers"
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        # PAA (Discrete)
         valid_paas = sorted(df_raw['paa'].unique())
         sb_paa = st.selectbox("PAA", valid_paas, index=0)
-        
-    with col2:
-        # UTE (Discrete in Raw Data)
+    with c2:
+        # UTE (Discrete)
         valid_utes = sorted(df_raw['ute'].unique())
-        default_ute = 10.0 if 10.0 in valid_utes else valid_utes[0]
-        sb_ute = st.selectbox("UTE Rate", valid_utes, index=valid_utes.index(default_ute))
-        
-    with col3:
-        sb_pilots = st.slider("Line Pilots", 20, 80, 40)
-        
-    with col4:
-        sb_ips = st.slider("Active IPs", 2, 20, 6)
+        sb_ute = st.selectbox("UTE Rate", valid_utes, index=0)
+    with c3:
+        # Pilots (Exact)
+        min_p, max_p = int(df_raw['total_pilots'].min()), int(df_raw['total_pilots'].max())
+        sb_pilots = st.slider("Total Pilots", min_p, max_p, 40)
+    with c4:
+        # IPs (Exact)
+        min_ip, max_ip = int(df_raw['ip_qty'].min()), int(df_raw['ip_qty'].max())
+        sb_ips = st.slider("Active IPs", min_ip, max_ip, 6)
+    with c5:
+        # Exp Ratio (Approximate due to float precision)
+        sb_exp = st.slider("Exp Ratio", 0.2, 0.8, 0.45, step=0.01)
 
-    with col5:
-        sb_exp = st.slider("Exp Ratio", 0.2, 0.8, 0.45)
+    # Row 2: The Student Loads (Exact Sliders)
+    st.caption("Student Load Configuration")
+    s1, s2, s3, s4 = st.columns([1, 1, 1, 2])
+    with s1:
+        sb_mqt = st.number_input("MQT Students", 0, 15, 2)
+    with s2:
+        sb_flug = st.number_input("FLUG Students", 0, 15, 0)
+    with s3:
+        sb_ipug = st.number_input("IPUG Students", 0, 15, 0)
+    with s4:
+        # Target Metric
+        inspect_metric = st.selectbox(
+            "Metric to Inspect", 
+            ["wg_monthly", "fl_monthly", "ip_monthly", "wg_blue_monthly"],
+            format_func=lambda x: x.replace("_monthly", " Sorties").replace("_", " ").title()
+        )
 
-    st.subheader("2. Comparison Controls")
-    c_col1, c_col2 = st.columns(2)
-    with c_col1:
-        # The variable to sweep on X-axis
-        upgrade_type = st.radio("Vary Student Load:", ["MQT", "FLUG", "IPUG"], horizontal=True)
-        col_map = {"MQT": "mqt_qty", "FLUG": "flug_qty", "IPUG": "ipug_qty"}
-        target_col = col_map[upgrade_type]
-        
-    with c_col2:
-        # Tolerance for Raw Data Search
-        st.caption("🔍 Raw Data Search Window")
-        tol_pilots = st.slider("Pilot Tolerance (+/-)", 0, 5, 2, help="Widen to find more raw data points.")
-        tol_ips = st.slider("IP Tolerance (+/-)", 0, 3, 1)
+# --- 3. GET DATA ---
 
-# --- 3. ENGINE: GET DATA ---
-
-# A. RAW DATA LOOKUP
-def get_raw_data():
-    # Exact match on PAA/UTE (Physics constraints)
+def get_exact_match():
+    # 1. Start with Dataframe
     mask = (df_raw['paa'] == sb_paa) & (df_raw['ute'] == sb_ute)
     
-    # Fuzzy match on Pilots/IPs/Exp (Because exact matches are rare)
-    mask &= df_raw['total_pilots'].between(sb_pilots - tol_pilots, sb_pilots + tol_pilots)
-    mask &= df_raw['ip_qty'].between(sb_ips - tol_ips, sb_ips + tol_ips)
+    # 2. Exact Integer Matches
+    mask &= (df_raw['total_pilots'] == sb_pilots)
+    mask &= (df_raw['ip_qty'] == sb_ips)
+    mask &= (df_raw['mqt_qty'] == sb_mqt)
+    mask &= (df_raw['flug_qty'] == sb_flug)
+    mask &= (df_raw['ipug_qty'] == sb_ipug)
     
-    # We don't filter Exp Ratio strictly, but we color/size by it maybe? 
-    # Or just filter loosely to keep the data relevant
-    mask &= df_raw['exp_ratio'].between(sb_exp - 0.1, sb_exp + 0.1)
+    # 3. Float Match (Exp Ratio needs a tiny epsilon for float errors)
+    # We allow +/- 0.01 just to catch "0.4500001" vs "0.45"
+    mask &= df_raw['exp_ratio'].between(sb_exp - 0.01, sb_exp + 0.01)
     
     return df_raw[mask].copy()
 
-# B. BRAIN PREDICTION
-def get_brain_prediction(x_range):
-    # Create scenario frame
-    scen = pd.DataFrame({
-        'paa': sb_paa, 'ute': sb_ute, 'total_pilots': sb_pilots,
-        'ip_qty': sb_ips, 'exp_ratio': sb_exp,
-        'mqt_qty': 0, 'flug_qty': 0, 'ipug_qty': 0
-    }, index=range(len(x_range)))
-    
-    # Apply sweep
-    scen[target_col] = x_range
+def get_ai_point():
+    # Construct Single Row DataFrame
+    row = pd.DataFrame({
+        'paa': [sb_paa], 'ute': [sb_ute], 'total_pilots': [sb_pilots],
+        'ip_qty': [sb_ips], 'exp_ratio': [sb_exp],
+        'mqt_qty': [sb_mqt], 'flug_qty': [sb_flug], 'ipug_qty': [sb_ipug]
+    })
     
     # Calc Features
-    scen['total_students'] = scen['mqt_qty'] + scen['flug_qty'] + scen['ipug_qty']
-    scen['ip_ratio'] = scen['ip_qty'] / scen['total_pilots'].replace(0, 1)
-    scen['ip_to_stud_ratio'] = scen['ip_qty'] / scen['total_students'].replace(0, 0.1)
+    row['total_students'] = row['mqt_qty'] + row['flug_qty'] + row['ipug_qty']
+    row['ip_ratio'] = row['ip_qty'] / row['total_pilots'].replace(0, 1)
+    row['ip_to_stud_ratio'] = row['ip_qty'] / row['total_students'].replace(0, 0.1)
     
-    # Predict
     features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty', 'ip_ratio', 'ip_to_stud_ratio']
     
-    preds = scen[[target_col]].copy()
-    targets = ['wg_monthly', 'fl_monthly', 'ip_monthly']
-    
-    for t in targets:
-        if t in brain:
-            preds[t] = brain[t].predict(scen[features])
-            
-    return preds
+    if inspect_metric in brain:
+        return brain[inspect_metric].predict(row[features])[0]
+    return 0.0
 
-# --- 4. DEEP DIVE INSPECTION ---
+# --- 4. VISUALIZE ---
+df_match = get_exact_match()
+ai_val = get_ai_point()
+
 st.divider()
-st.subheader("3. Deep Dive Inspector")
-st.markdown("Isolate one metric and **color the raw data** to see which variables are causing the spread.")
 
-# A. Controls for Deep Dive
-dd_col1, dd_col2 = st.columns(2)
-with dd_col1:
-    inspect_metric = st.selectbox(
-        "Metric to Inspect", 
-        ["wg_monthly", "fl_monthly", "ip_monthly", "wg_blue_monthly"],
-        format_func=lambda x: x.replace("_monthly", " Sorties").replace("_", " ").title()
-    )
-
-with dd_col2:
-    color_by = st.selectbox(
-        "Color Raw Dots By...",
-        ["total_pilots", "ip_qty", "ute", "exp_ratio"],
-        format_func=lambda x: x.replace("_", " ").title()
-    )
-
-# B. Get Data
-df_lookup = get_raw_data()
-df_pred = get_brain_prediction(range(0, 16))
-
-# C. Build the Chart
-fig = go.Figure()
-
-# LAYER 1: RAW DATA (Colored Scatter)
-if not df_lookup.empty:
-    fig.add_trace(go.Scatter(
-        x=df_lookup[target_col],
-        y=df_lookup[inspect_metric],
-        mode='markers',
-        name='Raw Simulation',
-        marker=dict(
-            size=10,
-            color=df_lookup[color_by], # Dynamic Coloring
-            colorscale='Viridis',      # Blue -> Green -> Yellow
-            showscale=True,
-            colorbar=dict(title=color_by.replace("_", " ").title()),
-            line=dict(width=1, color='DarkSlateGrey') # Border for visibility
-        ),
-        text=[
-            f"Pilots: {p}<br>IPs: {i}<br>Exp: {e:.2f}" 
-            for p, i, e in zip(df_lookup['total_pilots'], df_lookup['ip_qty'], df_lookup['exp_ratio'])
-        ],
-        hovertemplate="<b>Raw Data Point</b><br>Sorties: %{y:.2f}<br>%{text}<extra></extra>"
-    ))
+if df_match.empty:
+    st.warning(f"⚠️ No exact match found in simulation data for this combination.")
+    st.info("💡 Tip: Try adjusting the 'Total Pilots' or 'Exp Ratio' slightly to find recorded runs.")
 else:
-    st.warning("⚠️ No Raw Data found. Widen the Tolerance sliders above.")
+    # Calculate Stats
+    raw_mean = df_match[inspect_metric].mean()
+    raw_std = df_match[inspect_metric].std()
+    count = len(df_match)
+    
+    # Display Stats
+    st.metric(
+        label=f"AI Prediction vs Raw Mean (N={count})",
+        value=f"{ai_val:.2f}",
+        delta=f"{ai_val - raw_mean:.2f} difference",
+        delta_color="off"
+    )
 
-# LAYER 2: ML PREDICTION (The "Truth" Line)
-fig.add_trace(go.Scatter(
-    x=df_pred[target_col],
-    y=df_pred[inspect_metric],
-    mode='lines',
-    name='AI Prediction',
-    line=dict(color='red', width=4, dash='solid'),
-    hovertemplate="<b>AI Prediction</b><br>Sorties: %{y:.2f}<extra></extra>"
-))
+    # Build Strip Plot
+    fig = go.Figure()
 
-# Layout Updates
-fig.update_layout(
-    title=f"Inspecting {inspect_metric}: Colored by {color_by}",
-    xaxis_title=f"Number of {upgrade_type} Students",
-    yaxis_title="Sorties per Month",
-    height=600,
-    template="plotly_dark",
-    legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
-)
+    # Layer 1: Raw Data (Jittered Dots)
+    fig.add_trace(go.Box(
+        y=df_match[inspect_metric],
+        name="Raw Simulation",
+        boxpoints='all', # Show all points
+        jitter=0.5,      # Spread them out horizontally
+        pointpos=0,      # Center them
+        fillcolor='rgba(0,0,0,0)', # Invisible box
+        line=dict(width=0),        # Invisible lines
+        marker=dict(size=12, color='#636EFA', opacity=0.6),
+        hoverinfo='y'
+    ))
 
-st.plotly_chart(fig, use_container_width=True)
+    # Layer 2: AI Prediction Line
+    fig.add_hline(
+        y=ai_val, 
+        line_color="#EF553B", 
+        line_width=4, 
+        annotation_text="AI Prediction", 
+        annotation_position="top left"
+    )
+    
+    # Layer 3: Raw Mean Line (Dashed)
+    fig.add_hline(
+        y=raw_mean, 
+        line_color="#636EFA", 
+        line_width=2, 
+        line_dash="dot",
+        annotation_text="Raw Mean", 
+        annotation_position="bottom left"
+    )
 
-# # --- 4. EXECUTE & PLOT ---
-# df_lookup = get_raw_data()
-# df_pred = get_brain_prediction(range(0, 16)) # Sweep 0-15 students
-
-# # Colors
-# colors = {"wg_monthly": "#636EFA", "fl_monthly": "#EF553B", "ip_monthly": "#00CC96"}
-# names = {"wg_monthly": "Wingman", "fl_monthly": "Flt Lead", "ip_monthly": "Instructor"}
-
-# fig = go.Figure()
-
-# # LAYER 1: RAW DATA (Dots)
-# if not df_lookup.empty:
-#     for metric in colors.keys():
-#         fig.add_trace(go.Box(
-#             x=df_lookup[target_col],
-#             y=df_lookup[metric],
-#             name=f"{names[metric]} (Raw)",
-#             marker_color=colors[metric],
-#             boxpoints='all', # Show all dots
-#             jitter=0.3,      # Spread them out so they don't overlap
-#             pointpos=0,      # Center them
-#             fillcolor='rgba(0,0,0,0)', # Transparent box
-#             line=dict(width=0), # Hide box lines, just show dots
-#             showlegend=False,
-#             hoverinfo='y'
-#         ))
-# else:
-#     st.warning("⚠️ No Raw Data found for these settings. Try widening the Pilot/IP Tolerance.")
-
-# # LAYER 2: BRAIN (Lines)
-# for metric in colors.keys():
-#     fig.add_trace(go.Scatter(
-#         x=df_pred[target_col],
-#         y=df_pred[metric],
-#         mode='lines',
-#         name=f"{names[metric]} (AI)",
-#         line=dict(color=colors[metric], width=4),
-#     ))
-
-# # LAYOUT
-# fig.update_layout(
-#     title=f"Sortie Rates: Raw Data vs. AI Prediction ({upgrade_type} Sweep)",
-#     xaxis_title=f"Number of {upgrade_type} Students",
-#     yaxis_title="Sorties / Month",
-#     height=600,
-#     hovermode="x unified",
-#     template="plotly_dark"
-# )
-
-# st.plotly_chart(fig, use_container_width=True)
-
-# # --- 5. DEBUGGING TABLE ---
-# with st.expander("See Underlying Data"):
-#     st.write("First 5 rows of matched Raw Data:")
-#     st.dataframe(df_lookup.head())
-#     st.write("AI Predictions:")
-#     st.dataframe(df_pred.head())
+    fig.update_layout(
+        title=f"Distribution of {inspect_metric}",
+        yaxis_title="Sorties / Month",
+        xaxis=dict(showticklabels=False, title="Simulation Runs"), # Hide X axis labels
+        height=500,
+        template="plotly_dark",
+        showlegend=False
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
