@@ -94,18 +94,23 @@ def run_long_term_sweep():
     
     brain = load_ai_brain(os.path.join(BRAIN_PATH, "hpc_sortie_brain_lite.pkl"))
 
+    count = 0
     while os.path.exists(os.path.join(OUTPUT_DIR, f"long_term_batch_{count:04d}.parquet"))
         count += 1
+
+    if count > 0:
+        last_file = os.path.join(OUTPUT_DIR, f"long_term_batch_{count-1:04d}.parquet")
+        print(f'Removing potentially incomplete last batch: {last_file}')
+        os.remove(last_file)
+        count -=1
 
     configs_to_skip = CHUNK_SIZE * count
     print(f'Skipping {configs_to_skip} configurations (found {count} existing batches).')
 
     remaining_gen = itertools.islice(valid_gen, configs_to_skip, None)
-
     gen_with_brain = (params + (brain,) for params in valid_gen)
 
     buffer = []
-    count = 0
 
     with ProcessPoolExecutor() as executor:
         for result in executor.map(process_single_config, gen_with_brain, chunksize=10):
