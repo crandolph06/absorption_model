@@ -29,10 +29,10 @@ def train_hpc_brain():
 
     for i, f in enumerate(files):
         if i % 50 == 0: 
-            print (f"   Processing file {i}/{len(files)}...", end='\r')
+            print(f"   Processing file {i}/{len(files)}...", end='\r')
         
         df_chunk = pd.read_parquet(f)
-        total_rows_seen += len (df_chunk)
+        total_rows_seen += len(df_chunk)
 
         if SAMPLE_FRAC < 1.0:
             df_chunk = df_chunk.sample(frac=SAMPLE_FRAC, random_state=RANDOM_SEED)
@@ -61,7 +61,7 @@ def train_hpc_brain():
     df['total_students'] = df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']
 
     df['ip_ratio'] = df['ip_qty'] / df['total_pilots'].replace(0, 1)
-    df ['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
+    df['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
 
     df.replace([np.inf, -np.inf], 0, inplace=True)
 
