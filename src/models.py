@@ -321,21 +321,18 @@ class SquadronConfig:
             )
     
     def predict_aging_rate(self, brain: dict) -> AgingRate:
-        """
-        Args:
-            brain: Dictionary containing the trained sklearn models 
-                   (wg_monthly, fl_monthly, ip_monthly, etc.)
-        """
-        # 1. CALCULATE INPUTS (Must match training order EXACTLY)
         # Features: ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
         
-        # Ensure we are using Line Pilots (Cockpit Strength)
-        line_pilots = len([p for p in self.pilots if p.current_assignment == Assignment.LINE])
+        # line_pilots = len([p for p in self.pilots if p.current_assignment == Assignment.LINE])
+        total_students = self.mqt_students + self.flug_students + self.ipug_students
+        ip_ratio = self.ip_qty / self.line_pilots if self.line_pilots > 0 else 0
+        ip_to_stud_ratio = self.ip_qty / total_students if total_students > 0 else 0
+
+        feature_names = [
+            'paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 
+            'flug_qty', 'ipug_qty', 'ip_qty', 'ip_ratio',
+            'ip_to_stud_ratio']
         
-        # Construct Input Vector (2D Array for sklearn)
-        feature_names = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
-        
-        # 3. Construct Input Vector
         input_data = pd.DataFrame([[
             self.paa,
             self.ute,
@@ -344,7 +341,9 @@ class SquadronConfig:
             self.mqt_students,
             self.flug_students,
             self.ipug_students,
-            self.ip_qty
+            self.ip_qty,
+            ip_ratio,
+            ip_to_stud_ratio
         ]], columns=feature_names)
 
         # 2. GET PREDICTIONS (Monthly Rates)
