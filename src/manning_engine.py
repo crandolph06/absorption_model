@@ -196,7 +196,7 @@ class CAFSimulation:
     def check_stability(self, phases_per_year=3, years=2, pop_threshold=100.0):
         num_phases = phases_per_year * years
         if len(self.history) < num_phases:
-            return False, None
+            return False, None, None
         
         df = pd.DataFrame(self.history)
 
@@ -220,7 +220,9 @@ class CAFSimulation:
         if is_stable_at_end:
             for i in range(len(pop_series) - num_phases):
                 window = pop_series['total_pilots'].iloc[i : i + num_phases]
-                if window.std() < pop_threshold:
+                stable, _ = is_window_stable(window, pop_threshold)
+
+                if stable:
                     row = pop_series.iloc[i]
                     equilibrium_point = (int(row['year']), int(row['phase']))
                     break
