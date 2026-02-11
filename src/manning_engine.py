@@ -204,8 +204,17 @@ class CAFSimulation:
         pop_series = df.groupby(['year', 'phase'])['total_pilots'].sum().reset_index()
 
         # Check End of Simulation Stability
-        recent_std = pop_series['total_pilots'].tail(num_phases).std()
-        is_stable_at_end = recent_std < pop_threshold
+        def is_window_stable(window_series, threshold):
+            std_dev = window_series.std()
+            is_smooth = std_dev < threshold
+
+            drift = abs(window_series.iloc[-1] - window_series.iloc[0])
+            is_flat = drift < threshold
+
+            return is_smooth and is_flat, (std_dev, drift)
+        
+        recent_window = pop_series['total_pilots'].tail(num_phases)
+        is_stable_at_end, (recent_std, recent_drift) = is_window_stable(recent_window, pop_threshold)
 
         equilibrium_point = None
         if is_stable_at_end:
@@ -216,7 +225,7 @@ class CAFSimulation:
                     equilibrium_point = (int(row['year']), int(row['phase']))
                     break
 
-        return is_stable_at_end, recent_std, equilibrium_point
+        return is_stable_at_end, (recent_std, recent_drift), equilibrium_point
 
     def get_simulation_grade_card(self, phases_per_year=3, stable_years=2, pop_threshold =100.0):
         if not self.history:
@@ -236,12 +245,13 @@ class CAFSimulation:
         avg_total_pilots = recent_history['total_pilots'].mean()
         avg_staff_pilots = avg_total_pilots - avg_line_pilots
 
-        is_stable_at_end, recent_std, equilbrium_point = self.check_stability(phases_per_year, stable_years, pop_threshold)
+        is_stable_at_end, (recent_std, recent_drift), equilbrium_point = self.check_stability(phases_per_year, stable_years, pop_threshold)
 
         return {
             "is_stable": is_stable_at_end,
             "when_stable": equilbrium_point,
-            "total_pop_std": round(recent_std, 2) if recent_std is not None else 0.0,
+            "series_end_std": round(recent_std, 2) if recent_std is not None else 0.0,
+            "series_end_drift": round(recent_drift, 2) if recent_drift is not None else 0.0,
             "avg_wg_shortfall": round(avg_wg_delta, 2),
             "avg_wg_blue_shortfall": round(avg_wg_blue_delta, 2),
             "avg_fl_shortfall": round(avg_fl_delta, 2),
