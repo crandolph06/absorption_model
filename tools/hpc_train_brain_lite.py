@@ -7,7 +7,8 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.model_selection import train_test_split
 
 # 1. LOAD DATA
-INPUT_DIR = "outputs/single_phase/parquet"
+# INPUT_DIR = "outputs/single_phase/parquet" # For HPC
+INPUT_DIR = "outputs/hpc" # For Debugging 
 OUTPUT_MODEL = "hpc_sortie_brain_lite.pkl"
 SAMPLE_FRAC = 0.10 # Consider more than 10%... we'll see if this works...
 RANDOM_SEED = 42
