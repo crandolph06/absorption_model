@@ -95,7 +95,7 @@ def run_long_term_sweep():
     brain = load_ai_brain(os.path.join(BRAIN_PATH, "hpc_sortie_brain_lite.pkl"))
 
     count = 0
-    while os.path.exists(os.path.join(OUTPUT_DIR, f"long_term_batch_{count:04d}.parquet"))
+    while os.path.exists(os.path.join(OUTPUT_DIR, f"long_term_batch_{count:04d}.parquet")):
         count += 1
 
     if count > 0:
@@ -108,7 +108,7 @@ def run_long_term_sweep():
     print(f'Skipping {configs_to_skip} configurations (found {count} existing batches).')
 
     remaining_gen = itertools.islice(valid_gen, configs_to_skip, None)
-    gen_with_brain = (params + (brain,) for params in valid_gen)
+    gen_with_brain = (params + (brain,) for params in remaining_gen)
 
     buffer = []
 
@@ -129,7 +129,7 @@ def run_long_term_sweep():
         if buffer:
             pd.DataFrame(buffer).to_parquet(f"{OUTPUT_DIR}/final_long_term_batch.parquet", index=False)
 
-        with open("SWEEP_COMPLETE.txt", "W") as f:
+        with open("SWEEP_COMPLETE.txt", "w") as f:
             f.write("done")
 
     print("✅ Long-term sweep complete.")
