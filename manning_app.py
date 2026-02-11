@@ -78,7 +78,7 @@ def load_ai_brain():
         st.error("🚨 'sortie_brain.pkl' not found! Please run 'train_brain_lite.py'.")
         st.stop()
 
-    return joblib.load("sortie_brain.pkl")        
+    return joblib.load("brains/sortie_brain.pkl")        
 
 cached_brain = load_ai_brain()
 
