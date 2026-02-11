@@ -34,4 +34,12 @@ python --version
 export PYTHONUNBUFFERED=1
 #
 python -u hpc_single_phase_sweeper.py
+#
 
+#if [ -f SWEEP_COMPLETE.txt ]; then
+#    echo "✅ Sweep finished. Cleaning up and exiting."
+#    rm SWEEP_COMPLETE.txt
+#else
+#    echo "🔄 Sweep not finished. Resubmitting..."
+#    sbatch $0
+#fi
