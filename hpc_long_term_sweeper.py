@@ -15,31 +15,30 @@ BRAIN_PATH = "outputs/short_term/brains"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-def get_long_term_configs():
+def is_valid_upg_logic(flug_start, ipug_start, asd):
+    return (flug_start * asd) < ipug_start
+
+def get_valid_long_term_configs():
     annual_intake = range(100, 370, 10)
     retention_rate = np.linspace(0.4, 0.7, 7).round(2)
     max_manning = range(50, 150, 10)
     staff_logic = [PriorityMode.RANDOM, PriorityMode.IP_FIRST, PriorityMode.FL_FIRST]
     ute_val = range(6, 21)
-    # round_robin = True # Assumes we're efficient about placing wingmen in most experienced squadrons
-    # include_upgrades = True # Always accounts for upgrade bottlenecks (i.e. uses trained AI brain)
     flug_start = range(50, 300, 10)
     ipug_start = range (100, 450, 50)
 
     keys = ['intake', 'retention', 'max_man', 'staff_logic', 'ute', 'flug_start_sorties', 'ipug_start_hours']
     values = [annual_intake, retention_rate, max_manning, staff_logic, ute_val, flug_start, ipug_start]
 
-    return keys, itertools.product(*values)
+    param_generator = itertools.product(*values)
 
-def is_valid_upg_logic(flug_start, ipug_start, asd):
-    if flug_start * asd >= ipug_start:
-        return False
-    else:
-        return True
+    valid_generator = (
+        params for params in param_generator
+        if is_valid_upg_logic(params[5], params[6], 1.3)
+    )
+
+    return keys, valid_generator
     
-def validate_configs():
-    return None # Need to combine get_long_term_configs and is_valid_upg_logic here:
-
 def load_ai_brain(brain_path):
     if os.path.exists(brain_path):
         return joblib.load(brain_path)
@@ -47,9 +46,8 @@ def load_ai_brain(brain_path):
         print(f'Brain not found at {brain_path}. Check path and try again.') 
         return None     
 
-def process_single_config(args, BRAIN_PATH):
-    annual_intake, retention_rate, max_manning, staff_logic, ute_val, flug_start_sorties, ipug_start_hours = args
-    brain = load_ai_brain(BRAIN_PATH)
+def process_single_config(args):
+    annual_intake, retention_rate, max_manning, staff_logic, ute_val, flug_start_sorties, ipug_start_hours, brain = args
 
     try:
         sim, squadrons = setup_simulation(
@@ -79,7 +77,7 @@ def process_single_config(args, BRAIN_PATH):
             "input_intake": annual_intake,
             "input_retention": retention_rate,
             "inpute_max_man": max_manning,
-            "input_staff_mode": staff_logic,
+            "input_staff_mode": staff_logic.value,
             "input_ute": ute_val,
             "input_flug_start": flug_start_sorties,
             "input_ipug_start": ipug_start_hours
@@ -92,16 +90,16 @@ def process_single_config(args, BRAIN_PATH):
 
 def run_long_term_sweep():
     print("🚀 Launching Long-Term Equilibrium Sweep...")
-    keys, param_generator = get_long_term_configs()
-
-    #TODO validate long_term_configs with is_valid_upg function
-    valid_keys, valid_param_generator = None #FIX
+    keys, valid_gen = get_valid_long_term_configs()
     
+    brain = load_ai_brain(os.path.join(BRAIN_PATH, "hpc_sortie_brain_lite.pkl"))
+    gen_with_brain = (params + (brain,) for params in valid_gen)
+
     buffer = []
     count = 0
 
     with ProcessPoolExecutor() as executor:
-        for result in executor.map(process_single_config, valid_param_generator, chunksize=10):
+        for result in executor.map(process_single_config, gen_with_brain, chunksize=10):
             if result:
                 buffer.append(result)
 
