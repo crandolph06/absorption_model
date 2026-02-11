@@ -121,7 +121,7 @@ def process_single_config(args):
 def run_parallel_sweep():
     
     print("Generating parameter space...")
-    _, param_generator = get_sweep_configs()
+    keys, param_generator = get_sweep_configs()
 
     completed_batches = {
         int(f.split('_')[1].split('.')[0]) 
@@ -133,33 +133,45 @@ def run_parallel_sweep():
         last_batch = max(completed_batches)
         last_file = os.path.join(OUTPUT_DIR, f"batch_{last_batch:04d}.parquet")
         print(f"Clean-up: Removing potentially partial file {last_file}")
-        os.remove(last_file)
+        if os.path.exists(last_file): 
+            os.remove(last_file)
         completed_batches.remove(last_batch)
 
     num_completed = len(completed_batches)
     rows_to_skip = num_completed * CHUNK_SIZE
-    
-    batch_index = num_completed
-    count = num_completed * CHUNK_SIZE
-    buffer = []
 
+    skipped_count = 0
     if rows_to_skip > 0:
-        print(f"⏩ Fast-forwarding: Skipping {rows_to_skip:,} configurations...")
-        for _ in range(rows_to_skip):
-            next(param_generator) 
+        print(f"⏩ Fast-forwarding: Skipping {rows_to_skip:,} VALID configurations...")
+        for c in param_generator:
+            if is_valid_config(c[7], c[2], c[1], c[4], c[5]):
+                skipped_count += 1
+            if skipped_count >= rows_to_skip:
+                break
+
+        print(f"⏩ Fast-forward complete. Ready to generate Batch {num_completed + 1}")
+
+    print("🎯 Pre-filtering valid configurations...")
+    valid_configs = (
+        c for c in param_generator 
+        if is_valid_config(c[7], c[2], c[1], c[4], c[5])
+        )
 
     print(f"🚀 Launching Parallel Sweep on {os.cpu_count()} cores...")
+
+    batch_index = num_completed
+    count = rows_to_skip
+    buffer = []
+
     print(f"Writing batches to: {OUTPUT_DIR}") 
 
     with ProcessPoolExecutor() as executor:
-        # chunksize=500 gives good granularity for load balancing
-        for result in executor.map(process_single_config, param_generator, chunksize=500):
+        for result in executor.map(process_single_config, valid_configs, chunksize=2000):
             if result:
                 buffer.append(result)
 
             if len(buffer) >= CHUNK_SIZE:
                 batch_index += 1
-
                 batch_file = os.path.join(OUTPUT_DIR, f"batch_{batch_index:04d}.parquet")
                 
                 # Convert buffer to DataFrame and save to Parquet
