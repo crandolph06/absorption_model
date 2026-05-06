@@ -92,20 +92,19 @@ state_labels_dict = {
 # ==============================================================================
 with st.sidebar:
     st.header("⚙️ System Inputs")
-    st.caption("Adjust variables to predict system outcomes.")
     
     inputs = {}
-    inputs['paa'] = st.slider("PAA (Aircraft)", 12, 30, 18, 1)
-    inputs['ute'] = st.slider("UTE Rate", 6.0, 24.0, 10.0, 0.5)
-    inputs['total_pilots'] = st.slider("Total Pilots", 20, 80, 40, 1)
-    inputs['exp_ratio'] = st.slider("Experience Ratio", 0.20, 0.80, 0.45, 0.01)
-    inputs['ip_qty'] = st.slider("Active IPs", 2, 20, 6, 1)
+    inputs['paa'] = st.slider("PAA (Aircraft)", 18, 24, 21, 1)
+    inputs['ute'] = st.slider("UTE Rate", 6.0, 21.0, 10.0, 0.5)
+    inputs['total_pilots'] = st.slider("Total Pilots", 25, 50, 30, 1)
+    inputs['exp_ratio'] = st.slider("Experience Ratio", 0.0, 1.0, 0.45, 0.01)
+    inputs['ip_qty'] = st.slider("Active IPs", 3, 10, 5, 1)
     
     st.divider()
     st.subheader("Student Load")
-    inputs['mqt_qty'] = st.number_input("MQT Students", 0, 20, 2)
-    inputs['flug_qty'] = st.number_input("FLUG Students", 0, 20, 2)
-    inputs['ipug_qty'] = st.number_input("IPUG Students", 0, 20, 1)
+    inputs['mqt_qty'] = st.number_input("MQT Students", 0, 15, 4)
+    inputs['flug_qty'] = st.number_input("FLUG Students", 0, 15, 4)
+    inputs['ipug_qty'] = st.number_input("IPUG Students", 0, 15, 2)
 
 # Ranges for 1D Sweeps
 sweep_ranges = {
@@ -130,8 +129,8 @@ def generate_1d_sweep(x_var):
 # ==============================================================================
 # 5. MAIN UI & CHARTS
 # ==============================================================================
-st.title("✈️ Predictive Supply Chain Analytics")
-st.caption("Interactive Dashboard powered by HPC ML Brain -- Interpolating the Simulation Surface")
+st.title("✈️ Pilot Supply Chain Analytics")
+st.caption("Interactive Dashboard for RAP Equity and Sortie Composition — 120 Day Training Phase Snapshot")
 
 col_main, col_summary = st.columns([3, 1])
 
@@ -150,12 +149,19 @@ with col_main:
     for col in ['wg_monthly', 'fl_monthly', 'ip_monthly']:
         fig_equity.add_trace(go.Scatter(
             x=df_equity[x_var_equity], y=df_equity[col], name=names[col], 
-            line=dict(color=colors_total[col], width=3), mode='lines'
+            line=dict(color=colors_total[col], width=3, shape='spline'), mode='lines',
+            hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'
         ))
         
     fig_equity.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
     fig_equity.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
     fig_equity.update_layout(xaxis_title=x_var_equity.upper(), yaxis_title='Monthly Sorties', hovermode="x unified", margin=dict(l=20, r=20, t=30, b=20), height=350)
+    
+    exact_min = df_equity[x_var_equity].iloc[0] #TODO Fix this - not working
+    exact_max = df_equity[x_var_equity].iloc[-1] #TODO Fix this - not working
+
+    fig_equity.update_xaxes(range=[exact_min, exact_max], autorange=False)
+    
     st.plotly_chart(fig_equity, width='stretch')
 
     # --- CHART 2: COMPOSITION (1D Sweep) ---
@@ -174,10 +180,10 @@ with col_main:
     colors = {'wg': ('#3b82f6', '#93c5fd'), 'fl': ('#8b5cf6', '#c4b5fd'), 'ip': ('#10b981', '#6ee7b7')}
     
     for role in ['wg', 'fl', 'ip']:
-        fig_comp.add_trace(go.Bar(x=df_comp[x_var_comp], y=df_comp[f'{role}_blue_monthly'], name=f"{role.upper()} Blue", marker_color=colors[role][0], offsetgroup=role))
-        fig_comp.add_trace(go.Bar(x=df_comp[x_var_comp], y=df_comp[f'{role}_red_monthly'], name=f"{role.upper()} Red", marker_color=colors[role][1], offsetgroup=role, base=df_comp[f'{role}_blue_monthly']))
+        fig_comp.add_trace(go.Bar(x=df_comp[x_var_comp], y=df_comp[f'{role}_blue_monthly'], name=f"{role.upper()} Blue", marker_color=colors[role][0], offsetgroup=role, hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'))
+        fig_comp.add_trace(go.Bar(x=df_comp[x_var_comp], y=df_comp[f'{role}_red_monthly'], name=f"{role.upper()} Red", marker_color=colors[role][1], offsetgroup=role, base=df_comp[f'{role}_blue_monthly'], hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'))
         if show_trends:
-            fig_comp.add_trace(go.Scatter(x=df_comp[x_var_comp], y=df_comp[f'{role}_monthly'], name=f"{role.upper()} Total Trend", line=dict(color=colors[role][0], width=2), mode='lines'))
+            fig_comp.add_trace(go.Scatter(x=df_comp[x_var_comp], y=df_comp[f'{role}_monthly'], name=f"{role.upper()} Total Trend", line=dict(color=colors[role][0], width=2, shape='spline'), mode='lines', hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'))
             
     fig_comp.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
     fig_comp.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
