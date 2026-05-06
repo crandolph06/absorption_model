@@ -33,7 +33,7 @@ python --version
 #
 export PYTHONUNBUFFERED=1
 #
-python -u hpc_single_phase_sweeper.py
+timeout 14100s python -u hpc_single_phase_sweeper.py || true
 #
 
 if [ -f SWEEP_COMPLETE.txt ]; then
