@@ -1,8 +1,8 @@
 import pandas as pd
 import os
 
-PATH="outputs/long_term"
-FILE_NAME="final_long_term_batch"
+PATH="outputs/hpc"
+FILE_NAME="batch_0450"
 
 df = pd.read_parquet(os.path.join(PATH, f'{FILE_NAME}.parquet'))
 

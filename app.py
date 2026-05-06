@@ -1,14 +1,17 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+import itertools
 import os
 import joblib
 
-# 1. PAGE CONFIG MUST BE FIRST
+# ==============================================================================
+# 1. PAGE CONFIG & STYLING
+# ==============================================================================
 st.set_page_config(page_title="Pilot Supply Chain Analytics", layout="wide")
 
-# 2. MODERN STYLING
 st.markdown("""
     <style>
     .main { background-color: #f8fafc; }
@@ -16,154 +19,207 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. SINGLE DATA LOADING FUNCTION
-# DEFAULT_DATA_PATH = "outputs/research_data.csv"
-DEFAULT_DATA_PATH = "outputs/simulation_results.parquet"
+# ==============================================================================
+# 2. ML ENGINE SETUP
+# ==============================================================================
+@st.cache_resource
+def load_brain():
+    model_path = "brains/hpc_sortie_brain_lite.pkl"
+    if os.path.exists(model_path):
+        return joblib.load(model_path)
+    st.error(f"⚠️ Brain file not found at {model_path}")
+    st.stop()
 
-@st.cache_data
-def load_data(uploaded_file):
-    # Priority 1: User Upload
-    if uploaded_file is not None:
-        if uploaded_file.endswith('.parquet'):
-            return pd.read_parquet(uploaded_file)
-        return pd.read_csv(uploaded_file)
-    
-    # Priority 2: Automated Path in Repo
-    if os.path.exists(DEFAULT_DATA_PATH):
-        if DEFAULT_DATA_PATH.endswith('.parquet'):
-            return pd.read_parquet(DEFAULT_DATA_PATH)
-        return pd.read_csv(DEFAULT_DATA_PATH)
-    
-    # Priority 3: Mock Data Fallback (Only if file is missing)
-    st.warning("Default file not found. Loading mock data.")
-    data = [[18, 10, 180, 0.3, 3, 30, 2, 2, 2, 1, "WG Shortfall", 1, "WG Shortfall", 4.0, 4.62, 14.0, 14.0, 3.78, 11.31, 13.08, 0.84, 2.69, 0.92, 0.18, 0.19, 0.06]]
-    cols = ["paa", "ute", "total_capacity", "exp_ratio", "ip_qty", "total_pilots", "mqt_qty", "flug_qty", "ipug_qty", "rap_state_code", "rap_state_label", "blue_rap_state_code", "blue_rap_state_label", "mqt_monthly", "wg_monthly", "fl_monthly", "ip_monthly", "wg_blue_monthly", "fl_blue_monthly", "ip_blue_monthly", "wg_red_monthly", "fl_red_monthly", "ip_red_monthly", "wg_red_pct", "fl_red_pct", "ip_red_pct"]
-    return pd.DataFrame(data, columns=cols)
+brain = load_brain()
 
-# 4. SIDEBAR - ONLY ONE FILE UPLOADER
+def predict_metrics(df_inputs):
+    """Takes a dataframe of inputs, calculates features, and returns predictions."""
+    df = df_inputs.copy()
+    
+    # Feature Engineering (Matching Training Data)
+    df['total_students'] = df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']
+    df['ip_ratio'] = df['ip_qty'] / df['total_pilots'].replace(0, 1)
+    df['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
+    
+    features = [
+        'paa', 'ute', 'exp_ratio', 'total_pilots', 
+        'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty', 
+        'ip_ratio', 'ip_to_stud_ratio'
+    ]
+    
+    targets = [
+        'wg_monthly', 'fl_monthly', 'ip_monthly', 
+        'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
+    ]
+    
+    # Predict
+    for t in targets:
+        if t in brain:
+            df[t] = brain[t].predict(df[features])
+            
+    # Calculate Red Air
+    df['wg_red_monthly'] = df['wg_monthly'] - df['wg_blue_monthly']
+    df['fl_red_monthly'] = df['fl_monthly'] - df['fl_blue_monthly']
+    df['ip_red_monthly'] = df['ip_monthly'] - df['ip_blue_monthly']
+    
+    # Red Air Percentages (Safe Division)
+    df['wg_red_pct'] = df['wg_red_monthly'] / df['wg_monthly'].replace(0, 1)
+    df['fl_red_pct'] = df['fl_red_monthly'] / df['fl_monthly'].replace(0, 1)
+    df['ip_red_pct'] = df['ip_red_monthly'] / df['ip_monthly'].replace(0, 1)
+    
+    return df
+
+def calculate_rap_code(row, is_blue=False):
+    """Calculates RAP status mask. 1=WG, 2=FL, 4=IP"""
+    suffix = "_blue_monthly" if is_blue else "_monthly"
+    wg = row.get(f'wg{suffix}', 0)
+    fl = row.get(f'fl{suffix}', 0)
+    ip = row.get(f'ip{suffix}', 0)
+    
+    code = 0
+    if wg < 9: code += 1
+    if fl < 8: code += 2
+    if ip < 8: code += 4
+    return code
+
+state_labels_dict = {
+    0: "All Make RAP", 1: "WG Shortfall", 2: "FL Shortfall", 3: "WG+FL Shortfall",
+    4: "IP Shortfall", 5: "WG+IP Shortfall", 6: "FL+IP Shortfall", 7: "WG+FL+IP Shortfall"
+}
+
+# ==============================================================================
+# 3. SIDEBAR & CONSTANTS
+# ==============================================================================
 with st.sidebar:
-    st.header("📊 Data Settings")
-    uploaded_file = st.file_uploader("Upload data", type=["csv", "parquet"])
+    st.header("⚙️ System Inputs")
     
-    # Load the data once
-    with st.spinner('Loading data...'):
-        df = load_data(uploaded_file)
-    
-    if df is not None:
-        st.success(f"Loaded {len(df):,} rows")
-
-    # 5. SIDEBAR FILTERS
-    st.header("Scenario Filters")
     inputs = {}
-    filter_cols = ['paa', 'ute', 'total_pilots', 'exp_ratio', 'ip_qty', 'mqt_qty', 'flug_qty', 'ipug_qty']
+    inputs['paa'] = st.slider("PAA (Aircraft)", 18, 24, 21, 1)
+    inputs['ute'] = st.slider("UTE Rate", 6.0, 21.0, 10.0, 0.5)
+    inputs['total_pilots'] = st.slider("Total Pilots", 25, 50, 30, 1)
+    inputs['exp_ratio'] = st.slider("Experience Ratio", 0.0, 1.0, 0.45, 0.01)
+    inputs['ip_qty'] = st.slider("Active IPs", 3, 10, 5, 1)
     
-    # Pre-processing columns to avoid UI errors
-    if 'exp_ratio' in df.columns:
-        df['exp_ratio'] = df['exp_ratio'].round(2)
-    if 'ute' in df.columns:
-        df['ute'] = df['ute'].round(1)
+    st.divider()
+    st.subheader("Student Load")
+    inputs['mqt_qty'] = st.number_input("MQT Students", 0, 15, 4)
+    inputs['flug_qty'] = st.number_input("FLUG Students", 0, 15, 4)
+    inputs['ipug_qty'] = st.number_input("IPUG Students", 0, 15, 2)
 
-    for col in filter_cols:
-        if col in df.columns:
-            options = sorted(df[col].unique())
-            inputs[col] = st.selectbox(f"Select {col.replace('_', ' ').upper()}", options, index=0)
+# Ranges for 1D Sweeps
+sweep_ranges = {
+    'ute': np.arange(6.0, 24.1, 0.5),
+    'paa': np.arange(12, 31, 1),
+    'total_pilots': np.arange(20, 81, 1),
+    'exp_ratio': np.arange(0.20, 0.81, 0.02),
+    'ip_qty': np.arange(2, 21, 1),
+    'mqt_qty': np.arange(0, 21, 1)
+}
 
-# --- UI HEADER ---
+# ==============================================================================
+# 4. DATA GENERATION HELPERS
+# ==============================================================================
+def generate_1d_sweep(x_var):
+    """Creates a synthetic dataframe varying only the x_var."""
+    x_vals = sweep_ranges.get(x_var, np.arange(0, 10))
+    df_sweep = pd.DataFrame([inputs] * len(x_vals))
+    df_sweep[x_var] = x_vals
+    return predict_metrics(df_sweep)
+
+# ==============================================================================
+# 5. MAIN UI & CHARTS
+# ==============================================================================
 st.title("✈️ Pilot Supply Chain Analytics")
-st.caption("Interactive Dashboard for RAP Equity and Sortie Composition -- 120 Day Training Phase Snapshot")
+st.caption("Interactive Dashboard for RAP Equity and Sortie Composition — 120 Day Training Phase Snapshot")
 
-# --- DATA PROCESSING LOGIC ---
-def get_filtered_data(target_x):
-    mask = pd.Series([True] * len(df))
-    for col, val in inputs.items():
-        if col != target_x:
-            mask &= (df[col] == val)
-    
-    filtered = df[mask].copy()
-    if filtered.empty: return filtered
-
-    agg = filtered.groupby(target_x).mean(numeric_only=True).reset_index()
-    if 'wg_red_monthly' not in agg.columns:
-        agg['wg_red_monthly'] = agg['wg_monthly'] - agg['wg_blue_monthly']
-        agg['fl_red_monthly'] = agg['fl_monthly'] - agg['fl_blue_monthly']
-        agg['ip_red_monthly'] = agg['ip_monthly'] - agg['ip_blue_monthly']
-    return agg
-
-# --- MAIN LAYOUT ---
 col_main, col_summary = st.columns([3, 1])
 
 with col_main:
-    # CHART 1: EQUITY # TODO update X axis title based on selectbox
+    # --- CHART 1: EQUITY (1D Sweep) ---
     st.subheader("📊 Sortie Equity (Total Monthly)")
-    x_options = [c for c in ['ute', 'paa', 'total_pilots', 'exp_ratio'] if c in df.columns]
-    ix_equity = x_options.index('ute') if 'ute' in x_options else 0
-    x_var_equity = st.selectbox("X-Axis Variable", x_options, index=ix_equity, key="equity_x")
-    equity_data = get_filtered_data(x_var_equity)
+    x_options = list(sweep_ranges.keys())
+    x_var_equity = st.selectbox("X-Axis Variable", x_options, index=0, key="equity_x")
+    
+    df_equity = generate_1d_sweep(x_var_equity)
+    
+    fig_equity = go.Figure()
+    colors_total = {'wg_monthly': '#3b82f6', 'fl_monthly': '#8b5cf6', 'ip_monthly': '#10b981'}
+    names = {'wg_monthly': 'Wingman', 'fl_monthly': 'Flight Lead', 'ip_monthly': 'Instructor'}
+    
+    for col in ['wg_monthly', 'fl_monthly', 'ip_monthly']:
+        fig_equity.add_trace(go.Scatter(
+            x=df_equity[x_var_equity], y=df_equity[col], name=names[col], 
+            line=dict(color=colors_total[col], width=3, shape='spline'), mode='lines',
+            hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'
+        ))
+        
+    fig_equity.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
+    fig_equity.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
+    fig_equity.update_layout(xaxis_title=x_var_equity.upper(), yaxis_title='Monthly Sorties', hovermode="x unified", margin=dict(l=20, r=20, t=30, b=20), height=350)
+    
+    exact_min = df_equity[x_var_equity].iloc[0] #TODO Fix this - not working
+    exact_max = df_equity[x_var_equity].iloc[-1] #TODO Fix this - not working
 
-    if not equity_data.empty:
-        fig_equity = go.Figure()
-        colors_total = {'wg_monthly': '#3b82f6', 'fl_monthly': '#8b5cf6', 'ip_monthly': '#10b981'}
-        names = {'wg_monthly': 'Wingman', 'fl_monthly': 'Flight Lead', 'ip_monthly': 'Instructor'}
-        for col in ['wg_monthly', 'fl_monthly', 'ip_monthly']:
-            fig_equity.add_trace(go.Scatter(x=equity_data[x_var_equity], y=equity_data[col], name=names[col], 
-                                          line=dict(color=colors_total[col], width=3), mode='lines+markers'))
-        fig_equity.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
-        fig_equity.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
-        fig_equity.update_layout(xaxis_title='UTE', yaxis_title='Monthly Sorties', hovermode="x unified", margin=dict(l=20, r=20, t=30, b=20), height=350)
-        st.plotly_chart(fig_equity, width='stretch')
+    fig_equity.update_xaxes(range=[exact_min, exact_max], autorange=False)
+    
+    st.plotly_chart(fig_equity, width='stretch')
 
-    # CHART 2: COMPOSITION # TODO update X axis title based on selectbox
+    # --- CHART 2: COMPOSITION (1D Sweep) ---
     st.write("---")
     st.subheader("🧱 Sortie Composition")
     col_comp_1, col_comp_2 = st.columns([2, 1])
     with col_comp_1:
-        ix_comp = x_options.index('exp_ratio') if 'exp_ratio' in x_options else 0
-        x_var_comp = st.selectbox("X-Axis Variable", x_options, index=ix_comp, key="comp_x")
+        x_var_comp = st.selectbox("X-Axis Variable", x_options, index=3, key="comp_x") # Default exp_ratio
     with col_comp_2:
-        st.write("") # Spacer
+        st.write("") 
         show_trends = st.toggle("Show Total Trendlines", value=False)
     
-    comp_data = get_filtered_data(x_var_comp)
-    if not comp_data.empty:
-        fig_comp = go.Figure()
-        colors = {'wg': ('#3b82f6', '#93c5fd'), 'fl': ('#8b5cf6', '#c4b5fd'), 'ip': ('#10b981', '#6ee7b7')}
-        for role in ['wg', 'fl', 'ip']:
-            fig_comp.add_trace(go.Bar(x=comp_data[x_var_comp], y=comp_data[f'{role}_blue_monthly'], name=f"{role.upper()} Blue", marker_color=colors[role][0], offsetgroup=role))
-            fig_comp.add_trace(go.Bar(x=comp_data[x_var_comp], y=comp_data[f'{role}_red_monthly'], name=f"{role.upper()} Red", marker_color=colors[role][1], offsetgroup=role, base=comp_data[f'{role}_blue_monthly']))
-            if show_trends:
-                fig_comp.add_trace(go.Scatter(x=comp_data[x_var_comp], y=comp_data[f'{role}_monthly'], name=f"{role.upper()} Total Trend", line=dict(color=colors[role][0], width=2), mode='lines+markers'))
-        fig_comp.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
-        fig_comp.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
-        fig_comp.update_layout(xaxis_title='Experience Ratio', yaxis_title='Monthly Sorties', barmode='group', height=450, margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-        st.plotly_chart(fig_comp, width='stretch')
+    df_comp = generate_1d_sweep(x_var_comp)
+    
+    fig_comp = go.Figure()
+    colors = {'wg': ('#3b82f6', '#93c5fd'), 'fl': ('#8b5cf6', '#c4b5fd'), 'ip': ('#10b981', '#6ee7b7')}
+    
+    for role in ['wg', 'fl', 'ip']:
+        fig_comp.add_trace(go.Bar(x=df_comp[x_var_comp], y=df_comp[f'{role}_blue_monthly'], name=f"{role.upper()} Blue", marker_color=colors[role][0], offsetgroup=role, hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'))
+        fig_comp.add_trace(go.Bar(x=df_comp[x_var_comp], y=df_comp[f'{role}_red_monthly'], name=f"{role.upper()} Red", marker_color=colors[role][1], offsetgroup=role, base=df_comp[f'{role}_blue_monthly'], hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'))
+        if show_trends:
+            fig_comp.add_trace(go.Scatter(x=df_comp[x_var_comp], y=df_comp[f'{role}_monthly'], name=f"{role.upper()} Total Trend", line=dict(color=colors[role][0], width=2, shape='spline'), mode='lines', hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'))
+            
+    fig_comp.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
+    fig_comp.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
+    fig_comp.update_layout(xaxis_title=x_var_comp.upper(), yaxis_title='Monthly Sorties', barmode='group', height=450, margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    st.plotly_chart(fig_comp, width='stretch')
 
-    # CHART 3: HEATMAP
+    # --- CHART 3: HEATMAP (2D Sweep) ---
     st.write("---")
     st.subheader("🗺️ RAP State Heatmap")
     is_blue = st.toggle("Show Only Blue RAP Counters", value=False)
-    code_col = "blue_rap_state_code" if is_blue else "rap_state_code"
-    label_col = "blue_rap_state_label" if is_blue else "rap_state_label"
 
+    # Generate 2D Grid
+    ute_vals = sweep_ranges['ute']
+    exp_vals = sweep_ranges['exp_ratio']
+    grid = list(itertools.product(ute_vals, exp_vals))
+    df_heat_base = pd.DataFrame(grid, columns=['ute', 'exp_ratio'])
     
-    heat_mask = pd.Series([True] * len(df))
-    for col, val in inputs.items():
-        # We do NOT filter by UTE or EXP_RATIO here because they are the X and Y axes of the map
-        if col not in ['ute', 'exp_ratio']:
-            heat_mask &= (df[col] == val)
+    # Fill remaining constants
+    for k, v in inputs.items():
+        if k not in ['ute', 'exp_ratio']:
+            df_heat_base[k] = v
+            
+    # Predict Grid
+    df_heat_preds = predict_metrics(df_heat_base)
+    
+    # Calculate Status
+    df_heat_preds['rap_code'] = df_heat_preds.apply(lambda r: calculate_rap_code(r, is_blue), axis=1)
+    df_heat_preds['rap_label'] = df_heat_preds['rap_code'].map(state_labels_dict)
 
-    df_heat_filtered = df[heat_mask].copy()
-
-    if not df_heat_filtered.empty:
-        # 3. Pivot using the FILTERED data
-        heat_df = df_heat_filtered.pivot_table(index='ute', columns='exp_ratio', values=code_col, aggfunc='first').sort_index(ascending=False)
-        label_df = df_heat_filtered.pivot_table(index='ute', columns='exp_ratio', values=label_col, aggfunc='first').sort_index(ascending=False)
-
-    else:
-        heat_df = df.pivot_table(index='ute', columns='exp_ratio', values=code_col, aggfunc='first').sort_index(ascending=False)
-        label_df = df.pivot_table(index='ute', columns='exp_ratio', values=label_col, aggfunc='first').sort_index(ascending=False)
-
+    # Pivot for Plotly
+    heat_z = df_heat_preds.pivot(index='ute', columns='exp_ratio', values='rap_code').sort_index(ascending=False)
+    heat_labels = df_heat_preds.pivot(index='ute', columns='exp_ratio', values='rap_label').sort_index(ascending=False)
     
     color_map = {0: "#22c55e", 1: "#fef08a", 2: "#fde047", 3: "#fdba74", 4: "#eab308", 5: "#f97316", 6: "#ea580c", 7: "#ef4444"}
+    
+    # Custom discrete color mapping
     max_val = 7
     discrete_colorscale = []
     for val, hex_color in sorted(color_map.items()):
@@ -177,41 +233,37 @@ with col_main:
             discrete_colorscale.append([1.0, hex_color])
 
     fig_heat = go.Figure(data=go.Heatmap(
-        z=heat_df.values, x=heat_df.columns, y=heat_df.index, customdata=label_df.values,
+        z=heat_z.values, x=heat_z.columns, y=heat_z.index, customdata=heat_labels.values,
         colorscale=discrete_colorscale, showscale=False, zmin=0, zmax=max_val, xgap=1, ygap=1,
         hovertemplate="<b>Status: %{customdata}</b><br>Exp Ratio: %{x:.0%}<br>UTE: %{y}<extra></extra>"
     ))
     
-    state_labels_dict = {0: "All Make RAP", 1: "WG Shortfall", 2: "FL Shortfall", 3: "WG+FL Shortfall", 4: "IP Shortfall", 5: "WG+IP Shortfall", 6: "FL+IP Shortfall", 7: "WG+FL+IP Shortfall"}
     for code, color in color_map.items():
         fig_heat.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=12, symbol='square', color=color), showlegend=True, name=state_labels_dict.get(code)))
 
     fig_heat.update_layout(xaxis_title="Experience Ratio", yaxis_title="UTE", height=500)
-    # fig_heat.update_layout(xaxis_title="Experience Ratio", yaxis_title="UTE", height=500, xaxis=dict(tickformat=".0%"))
     st.plotly_chart(fig_heat, width='stretch')
 
-# --- SUMMARY SIDEBAR ---
+# ==============================================================================
+# 6. SUMMARY SIDEBAR (Single Point Prediction)
+# ==============================================================================
 with col_summary:
     st.subheader("Status Overview")
     
-    mask = pd.Series([True] * len(df))
-    for col, val in inputs.items():
-        mask &= (df[col] == val)
-    current_match = df[mask]
+    # Predict exactly the point defined in the sidebar
+    df_single = pd.DataFrame([inputs])
+    row = predict_metrics(df_single).iloc[0]
+    
+    current_code = calculate_rap_code(row, is_blue=False)
+    label = state_labels_dict.get(current_code, "Unknown")
+    
+    wg_t, fl_t, ip_t = f"{row['wg_monthly']:.1f}", f"{row['fl_monthly']:.1f}", f"{row['ip_monthly']:.1f}"
+    wg_b, fl_b, ip_b = f"{row['wg_blue_monthly']:.1f}", f"{row['fl_blue_monthly']:.1f}", f"{row['ip_blue_monthly']:.1f}"
+    wg_r, fl_r, ip_r = f"{row['wg_red_monthly']:.1f}", f"{row['fl_red_monthly']:.1f}", f"{row['ip_red_monthly']:.1f}"
 
-    if not current_match.empty:
-        row = current_match.mean(numeric_only=True)
-        label = current_match.iloc[0]['rap_state_label']
-        
-        # Pre-formatting variables makes the HTML string cleaner/easier to debug
-        wg_t, fl_t, ip_t = f"{row['wg_monthly']:.1f}", f"{row['fl_monthly']:.1f}", f"{row['ip_monthly']:.1f}"
-        wg_b, fl_b, ip_b = f"{row['wg_blue_monthly']:.1f}", f"{row['fl_blue_monthly']:.1f}", f"{row['ip_blue_monthly']:.1f}"
-        wg_r, fl_r, ip_r = f"{row['wg_red_monthly']:.1f}", f"{row['fl_red_monthly']:.1f}", f"{row['ip_red_monthly']:.1f}"
-
-        # NOTE: Indentation removed inside the string to prevent Markdown Code Block triggering
-        st.markdown(f"""
+    st.markdown(f"""
 <div style="background-color:#0f172a; padding:20px; border-radius:15px; color:white; margin-bottom:20px;">
-<p style="font-size:0.7rem; color:#94a3b8; margin-bottom:2px; letter-spacing: 0.05em;">OVERALL STATUS</p>
+<p style="font-size:0.7rem; color:#94a3b8; margin-bottom:2px; letter-spacing: 0.05em;">PREDICTED STATUS</p>
 <h2 style="margin:0; font-size:1.3rem; color: #f8fafc;">{label}</h2>
 <hr style="border-color:#1e293b; margin:15px 0;">
 <div style="display:flex; justify-content:space-between; text-align:center; margin-bottom:10px;">
@@ -241,174 +293,12 @@ with col_summary:
 </div>
 """, unsafe_allow_html=True)
 
-        st.write("---")
-        st.subheader("Red Air Exposure")
-        burden_df = pd.DataFrame({
-            'Role': ['WG', 'FL', 'IP'],
-            'Red Pct': [row['wg_red_pct'], row['fl_red_pct'], row['ip_red_pct']]
-        })
-        fig_burden = px.bar(burden_df, y='Role', x='Red Pct', orientation='h', color_discrete_sequence=['#f43f5e'])
-        fig_burden.update_layout(xaxis_tickformat='.0%', height=250, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Red Air %")
-        st.plotly_chart(fig_burden, width='stretch')
-    else:
-        st.info("No exact match for these filters.")
-
-# # ==============================================================================
-# # 📈 AI Brain Inspector
-# # ==============================================================================
-# st.set_page_config(layout="wide")
-# st.title("📈 Scenario Trend Inspector")
-# st.markdown("""
-# **Trend Validation:** This chart sweeps **one variable** along the X-Axis while holding everything else constant.
-# * **Blue Dots:** Actual simulation runs found for each X-value. (Vertical spread = Simulation Chaos).
-# * **Red Line:** The AI's prediction. It should trace the center of gravity of the blue dots.
-# """)
-
-# # --- 1. LOAD RESOURCES ---
-# @st.cache_resource
-# def load_resources():
-#     brain_path = "brains/hpc_sortie_brain_lite.pkl"
-#     data_path = "outputs/simulation_results.parquet"
-    
-#     model = joblib.load(brain_path) if os.path.exists(brain_path) else None
-#     df = pd.read_parquet(data_path) if os.path.exists(data_path) else None
-        
-#     return model, df
-
-# brain, df_raw = load_resources()
-
-# if brain is None or df_raw is None:
-#     st.error("⚠️ Missing Files! Check your outputs folder.")
-#     st.stop()
-
-# # --- 2. CONTROLS ---
-# with st.container():
-#     # A. The X-Axis Selector
-#     col_x, col_y = st.columns(2)
-#     with col_x:
-#         x_axis_label = st.radio("Select X-Axis Variable:", ["MQT Students", "FLUG Students", "IPUG Students"], horizontal=True)
-#         # Map label to column name
-#         x_col_map = {"MQT Students": "mqt_qty", "FLUG Students": "flug_qty", "IPUG Students": "ipug_qty"}
-#         x_col = x_col_map[x_axis_label]
-        
-#     with col_y:
-#         inspect_metric = st.selectbox(
-#             "Y-Axis Metric", 
-#             ["wg_monthly", "fl_monthly", "ip_monthly", "wg_blue_monthly"],
-#             format_func=lambda x: x.replace("_monthly", " Sorties").replace("_", " ").title()
-#         )
-
-#     st.divider()
-#     st.subheader("Define Fixed Constants")
-#     st.caption(f"All variables below are LOCKED. Only {x_axis_label} will change.")
-
-#     # B. The Fixed Constants
-#     c1, c2, c3, c4, c5 = st.columns(5)
-#     with c1:
-#         valid_paas = sorted(df_raw['paa'].unique())
-#         sb_paa = st.selectbox("PAA", valid_paas, index=0)
-#     with c2:
-#         valid_utes = sorted(df_raw['ute'].unique())
-#         sb_ute = st.selectbox("UTE Rate", valid_utes, index=0)
-#     with c3:
-#         min_p, max_p = int(df_raw['total_pilots'].min()), int(df_raw['total_pilots'].max())
-#         sb_pilots = st.slider("Total Pilots", min_p, max_p, 40)
-#     with c4:
-#         min_ip, max_ip = int(df_raw['ip_qty'].min()), int(df_raw['ip_qty'].max())
-#         sb_ips = st.slider("Active IPs", min_ip, max_ip, 6)
-#     with c5:
-#         sb_exp = st.slider("Exp Ratio", 0.2, 0.8, 0.45, step=0.01)
-
-#     # C. The "Other" Student Loads (Must be fixed to 0 or specific value)
-#     s1, s2, s3 = st.columns(3)
-    
-#     # We dynamically disable the slider for the variable currently selected as X-Axis
-#     with s1:
-#         sb_mqt = st.number_input("MQT Baseline", 0, 15, 0, disabled=(x_col == "mqt_qty"))
-#     with s2:
-#         sb_flug = st.number_input("FLUG Baseline", 0, 15, 0, disabled=(x_col == "flug_qty"))
-#     with s3:
-#         sb_ipug = st.number_input("IPUG Baseline", 0, 15, 0, disabled=(x_col == "ipug_qty"))
-
-# # --- 3. DATA ENGINE ---
-
-# def get_trend_data():
-#     # 1. Filter Raw Data
-#     mask = (df_raw['paa'] == sb_paa) & (df_raw['ute'] == sb_ute)
-#     mask &= (df_raw['total_pilots'] == sb_pilots)
-#     mask &= (df_raw['ip_qty'] == sb_ips)
-#     # Float tolerance for Exp Ratio
-#     mask &= df_raw['exp_ratio'].between(sb_exp - 0.01, sb_exp + 0.01)
-    
-#     # Filter the "Other" students (Fixed Baselines)
-#     if x_col != "mqt_qty": mask &= (df_raw['mqt_qty'] == sb_mqt)
-#     if x_col != "flug_qty": mask &= (df_raw['flug_qty'] == sb_flug)
-#     if x_col != "ipug_qty": mask &= (df_raw['ipug_qty'] == sb_ipug)
-    
-#     # We DO NOT filter by x_col, because that's what we want to see vary!
-    
-#     return df_raw[mask].copy()
-
-# def get_ai_trend():
-#     # Sweep X from 0 to 15
-#     sweep_range = range(0, 16)
-    
-#     # Create Base Frame
-#     df_sweep = pd.DataFrame({
-#         'paa': sb_paa, 'ute': sb_ute, 'total_pilots': sb_pilots,
-#         'ip_qty': sb_ips, 'exp_ratio': sb_exp,
-#         'mqt_qty': sb_mqt, 'flug_qty': sb_flug, 'ipug_qty': sb_ipug
-#     }, index=sweep_range)
-    
-#     # Overwrite the X-Column with the sweep
-#     df_sweep[x_col] = sweep_range
-    
-#     # Feature Engineering
-#     df_sweep['total_students'] = df_sweep['mqt_qty'] + df_sweep['flug_qty'] + df_sweep['ipug_qty']
-#     df_sweep['ip_ratio'] = df_sweep['ip_qty'] / df_sweep['total_pilots'].replace(0, 1)
-#     df_sweep['ip_to_stud_ratio'] = df_sweep['ip_qty'] / df_sweep['total_students'].replace(0, 0.1)
-    
-#     features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty', 'ip_ratio', 'ip_to_stud_ratio']
-    
-#     if inspect_metric in brain:
-#         return df_sweep[x_col], brain[inspect_metric].predict(df_sweep[features])
-#     return [], []
-
-# # --- 4. VISUALIZE ---
-# df_trend = get_trend_data()
-# x_ai, y_ai = get_ai_trend()
-
-# fig = go.Figure()
-
-# # Layer 1: Raw Data (Blue Scatter)
-# if not df_trend.empty:
-#     fig.add_trace(go.Scatter(
-#         x=df_trend[x_col],
-#         y=df_trend[inspect_metric],
-#         mode='markers',
-#         name='Raw Simulation',
-#         marker=dict(size=10, color='#636EFA', opacity=0.6, line=dict(width=1, color='white')),
-#         hovertemplate="<b>Raw Run</b><br>Students: %{x}<br>Sorties: %{y:.2f}<extra></extra>"
-#     ))
-# else:
-#     st.warning("⚠️ No raw data found for this specific combination of Pilot/IP/Baselines.")
-
-# # Layer 2: AI Prediction (Red Line)
-# fig.add_trace(go.Scatter(
-#     x=x_ai,
-#     y=y_ai,
-#     mode='lines',
-#     name='AI Prediction',
-#     line=dict(color='#EF553B', width=4)
-# ))
-
-# fig.update_layout(
-#     title=f"Trend Analysis: {inspect_metric} vs {x_axis_label}",
-#     xaxis_title=x_axis_label,
-#     yaxis_title="Sorties / Month",
-#     height=600,
-#     template="plotly_dark",
-#     legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99)
-# )
-
-# st.plotly_chart(fig, use_container_width=True)
+    st.write("---")
+    st.subheader("Red Air Exposure")
+    burden_df = pd.DataFrame({
+        'Role': ['WG', 'FL', 'IP'],
+        'Red Pct': [row['wg_red_pct'], row['fl_red_pct'], row['ip_red_pct']]
+    })
+    fig_burden = px.bar(burden_df, y='Role', x='Red Pct', orientation='h', color_discrete_sequence=['#f43f5e'])
+    fig_burden.update_layout(xaxis_tickformat='.0%', height=250, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Red Air %")
+    st.plotly_chart(fig_burden, width='stretch')

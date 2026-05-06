@@ -2,8 +2,8 @@ import itertools
 from concurrent.futures import ProcessPoolExecutor
 import os
 import joblib
-import numpy as np
 import pandas as pd
+import numpy as np
 from src.manning_main import setup_simulation
 from src.models import PriorityMode
 
@@ -11,8 +11,8 @@ from src.models import PriorityMode
 YEARS_TO_RUN = 20
 OUTPUT_DIR = "outputs/long_term"
 CHUNK_SIZE = 1000
-# BRAIN_PATH = "outputs/short_term/brains" # For HPC
-BRAIN_PATH = "brains"
+BRAIN_PATH = "outputs/short_term/brains" # For HPC
+# BRAIN_PATH = "brains"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -20,20 +20,20 @@ def is_valid_upg_logic(flug_start, ipug_start, asd):
     return (flug_start * asd) < ipug_start
 
 def get_valid_long_term_configs():
-    annual_intake = range(100, 120, 10)
-    retention_rate = [0.4]
-    max_manning = [50]
-    staff_logic = [PriorityMode.RANDOM]
-    ute_val = [10]
-    flug_start = [250]
-    ipug_start = [400]
-    # annual_intake = range(100, 370, 10)
-    # retention_rate = np.linspace(0.4, 0.7, 7).round(2)
-    # max_manning = range(50, 150, 10)
-    # staff_logic = [PriorityMode.RANDOM, PriorityMode.IP_FIRST, PriorityMode.FL_FIRST]
-    # ute_val = range(6, 21)
-    # flug_start = range(50, 300, 10)
-    # ipug_start = range (100, 450, 50)
+    # annual_intake = range(100, 120, 10)
+    # retention_rate = [0.4]
+    # max_manning = [100]
+    # staff_logic = [PriorityMode.RANDOM]
+    # ute_val = [10]
+    # flug_start = [250]
+    # ipug_start = [400]
+    annual_intake = range(100, 370, 10)
+    retention_rate = np.linspace(0.4, 0.7, 7).round(2)
+    max_manning = range(50, 150, 10)
+    staff_logic = [PriorityMode.RANDOM, PriorityMode.IP_FIRST, PriorityMode.FL_FIRST]
+    ute_val = range(6, 21)
+    flug_start = range(50, 300, 10)
+    ipug_start = range (100, 450, 50)
 
     keys = ['intake', 'retention', 'max_man', 'staff_logic', 'ute', 'flug_start_sorties', 'ipug_start_hours']
     values = [annual_intake, retention_rate, max_manning, staff_logic, ute_val, flug_start, ipug_start]

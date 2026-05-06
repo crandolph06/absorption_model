@@ -8,7 +8,7 @@ import joblib
 class CAFSimulation:
     def __init__(self, sim_upgrades: bool, round_robin: bool, brain = None, flug_window_start: int = 250, ipug_window_start: int = 400, max_manning_pct: int = 150, staff_priority_mode: PriorityMode = PriorityMode.RANDOM):
         self.history = []
-        self.current_year = 2025
+        self.current_year = 2026
         self.squadrons: List[SquadronConfig] = []
         self.flug_window_start = flug_window_start # Sorties for FLUG auto-start
         self.ipug_window_start = ipug_window_start # Hours for IPUG auto-start
@@ -196,7 +196,7 @@ class CAFSimulation:
     def check_stability(self, phases_per_year=3, years=2, pop_threshold=100.0):
         num_phases = phases_per_year * years
         if len(self.history) < num_phases:
-            return False, None
+            return False, None, None
         
         df = pd.DataFrame(self.history)
 
@@ -204,19 +204,30 @@ class CAFSimulation:
         pop_series = df.groupby(['year', 'phase'])['total_pilots'].sum().reset_index()
 
         # Check End of Simulation Stability
-        recent_std = pop_series['total_pilots'].tail(num_phases).std()
-        is_stable_at_end = recent_std < pop_threshold
+        def is_window_stable(window_series, threshold):
+            std_dev = window_series.std()
+            is_smooth = std_dev < threshold
+
+            drift = abs(window_series.iloc[-1] - window_series.iloc[0])
+            is_flat = drift < threshold
+
+            return is_smooth and is_flat, (std_dev, drift)
+        
+        recent_window = pop_series['total_pilots'].tail(num_phases)
+        is_stable_at_end, (recent_std, recent_drift) = is_window_stable(recent_window, pop_threshold)
 
         equilibrium_point = None
         if is_stable_at_end:
             for i in range(len(pop_series) - num_phases):
                 window = pop_series['total_pilots'].iloc[i : i + num_phases]
-                if window.std() < pop_threshold:
+                stable, _ = is_window_stable(window, pop_threshold)
+
+                if stable:
                     row = pop_series.iloc[i]
                     equilibrium_point = (int(row['year']), int(row['phase']))
                     break
 
-        return is_stable_at_end, recent_std, equilibrium_point
+        return is_stable_at_end, (recent_std, recent_drift), equilibrium_point
 
     def get_simulation_grade_card(self, phases_per_year=3, stable_years=2, pop_threshold =100.0):
         if not self.history:
@@ -224,24 +235,43 @@ class CAFSimulation:
         
         df = pd.DataFrame(self.history)
 
-        recent_history = df[df['year'] > (df['year'].max() - stable_years)]
-        avg_wg_delta = recent_history['wg_rap_shortfall'].mean()
-        avg_wg_blue_delta = recent_history['wg_blue_shortfall'].mean()
-        avg_fl_delta = recent_history['fl_rap_shortfall'].mean()
-        avg_fl_blue_delta = recent_history['fl_blue_shortfall'].mean()
-        avg_ip_delta = recent_history['ip_rap_shortfall'].mean()
-        avg_ip_blue_delta = recent_history['ip_blue_shortfall'].mean()
-        avg_exp_ratio = recent_history['exp_rat'].mean()
-        avg_line_pilots = recent_history['line_pilots'].mean()
-        avg_total_pilots = recent_history['total_pilots'].mean()
-        avg_staff_pilots = avg_total_pilots - avg_line_pilots
+        max_year = df['year'].max()
+        max_phase = df[df['year'] == max_year]['phase'].max()
 
-        is_stable_at_end, recent_std, equilbrium_point = self.check_stability(phases_per_year, stable_years, pop_threshold)
+        final_snapshot = df[(df['year'] == max_year) & (df['phase'] ==max_phase)]
+        recent_history = df[df['year'] > (max_year - stable_years)]
+        
+        total_line_pilots = final_snapshot['line_pilots'].sum()
+        total_pilots = final_snapshot['total_pilots'].sum()
+        total_staff_pilots = total_pilots - total_line_pilots
+
+        # Aggregate across squadrons
+        aggregated_recent_history = recent_history.groupby(['year', 'phase']).agg({
+            'wg_rap_shortfall': 'mean',
+            'wg_blue_shortfall': 'mean',
+            'fl_rap_shortfall': 'mean',
+            'fl_blue_shortfall': 'mean',
+            'ip_rap_shortfall': 'mean',
+            'ip_blue_shortfall': 'mean',
+            'exp_rat': 'mean'
+        }).reset_index()
+
+        # Mean for last 2 years
+        avg_wg_delta = aggregated_recent_history['wg_rap_shortfall'].mean()
+        avg_wg_blue_delta = aggregated_recent_history['wg_blue_shortfall'].mean()
+        avg_fl_delta = aggregated_recent_history['fl_rap_shortfall'].mean()
+        avg_fl_blue_delta = aggregated_recent_history['fl_blue_shortfall'].mean()
+        avg_ip_delta = aggregated_recent_history['ip_rap_shortfall'].mean()
+        avg_ip_blue_delta = aggregated_recent_history['ip_blue_shortfall'].mean()
+        avg_exp_ratio = aggregated_recent_history['exp_rat'].mean()
+
+        is_stable_at_end, (recent_std, recent_drift), equilbrium_point = self.check_stability(phases_per_year, stable_years, pop_threshold)
 
         return {
             "is_stable": is_stable_at_end,
             "when_stable": equilbrium_point,
-            "total_pop_std": round(recent_std, 2) if recent_std is not None else 0.0,
+            "series_end_std": round(recent_std, 2) if recent_std is not None else 0.0,
+            "series_end_drift": round(recent_drift, 2) if recent_drift is not None else 0.0,
             "avg_wg_shortfall": round(avg_wg_delta, 2),
             "avg_wg_blue_shortfall": round(avg_wg_blue_delta, 2),
             "avg_fl_shortfall": round(avg_fl_delta, 2),
@@ -249,7 +279,7 @@ class CAFSimulation:
             "avg_ip_shortfall": round(avg_ip_delta, 2),
             "avg_ip_blue_shortfall": round(avg_ip_blue_delta, 2),
             "final_exp_ratio": round(avg_exp_ratio, 2),
-            "final_line_pilots": round(avg_line_pilots),
-            "final_total_pilots": round(avg_total_pilots),
-            "final_staff_pilots": round(avg_staff_pilots)
+            "final_line_pilots": round(total_line_pilots),
+            "final_total_pilots": round(total_pilots),
+            "final_staff_pilots": round(total_staff_pilots)
         }
