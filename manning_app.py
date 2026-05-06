@@ -74,10 +74,12 @@ def load_ai_brain():
     This object is passed to the simulation engine to prevent reloading.
     """
     # Check for brain
+    # if not os.path.exists("brains/hpc_sortie_brain_lite.pkl"):
     if not os.path.exists("brains/sortie_brain.pkl"):
         st.error("🚨 'sortie_brain.pkl' not found! Please run 'train_brain_lite.py'.")
         st.stop()
 
+    # return joblib.load("brains/hpc_sortie_brain_lite.pkl")        
     return joblib.load("brains/sortie_brain.pkl")        
 
 cached_brain = load_ai_brain()
