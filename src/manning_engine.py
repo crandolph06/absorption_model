@@ -13,6 +13,7 @@ class CAFSimulation:
                  use_upgrade_quotas: bool = False):
         self.history = []
         self.current_year = 2026
+        self.current_phase = 1
         self.squadrons: List[SquadronConfig] = []
         self.flug_window_start = flug_window_start # Sorties for FLUG auto-start
         self.ipug_window_start = ipug_window_start # Hours for IPUG auto-start
@@ -422,3 +423,7 @@ class CAFSimulation:
             current_stats = sq.store_stats(self.current_year, self.current_phase, rates)
             self.process_end_of_phase(sq, self.current_year, self.current_phase, self.retention_rate, current_stats) 
             
+            self.current_phase += 1
+            if self.current_phase > 3:
+                self.current_phase = 1
+                self.current_year += 1
