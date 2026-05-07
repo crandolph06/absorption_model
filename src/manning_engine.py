@@ -116,8 +116,25 @@ class CAFSimulation:
                     sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
 
                 if self.sim_upgrades:
-                    batch_data = [sq.get_feature_vector() for sq in self.squadrons]
-                    df_batch = pd.DataFrame(batch_data, columns=FEATURE_NAMES)
+                    FEATURE_NAMES_EXPANDED = [
+                                    'paa', 'ute', 'exp_ratio', 'total_pilots', 
+                                    'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty',
+                                    'ip_ratio', 'ip_to_stud_ratio'
+                                ]
+
+                    batch_data = []
+
+                    for sq in self.squadrons:
+                        vec = sq.get_feature_vector()
+
+                        total_students = sq.mqt_students + sq.flug_students + sq.ipug_students
+                        ip_ratio = sq.ip_qty / max(sq.total_pilots, 1)
+                        ip_to_stud_ratio = sq.ip_qty / (total_students if total_students > 0 else 0.1)
+
+                        vec.extend([ip_ratio, ip_to_stud_ratio])
+                        batch_data.append(vec)
+
+                    df_batch = pd.DataFrame(batch_data, columns=FEATURE_NAMES_EXPANDED)
 
                     wg_rates = self.brain['wg_monthly'].predict(df_batch)
                     fl_rates = self.brain['fl_monthly'].predict(df_batch)
