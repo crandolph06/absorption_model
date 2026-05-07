@@ -93,8 +93,9 @@ if submitted:
                                           flug_window_start=flug_start, ipug_window_start=ipug_start,
                                           max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode)
         df = sim.run_simulation(
-            years_to_run=years, annual_intake=intake, 
-            retention_rate=retention, squadron_configs=squadrons, ute=ute_val) 
+            years_to_run=years, retention_rate=retention, 
+            squadron_configs=squadrons, ute=ute_val
+            ) 
 
         st.write("### 🔍 Debugging Tools")
         csv = df.to_csv(index=False).encode('utf-8')
@@ -399,7 +400,6 @@ if submitted:
 
             t_df = t_sim.run_simulation(
                 years_to_run=20, 
-                annual_intake=val, 
                 retention_rate=retention, 
                 squadron_configs=t_sqs, 
                 ute=ute_val 
