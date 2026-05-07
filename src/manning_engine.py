@@ -6,7 +6,7 @@ import joblib
 
 
 class CAFSimulation:
-    def __init__(self, sim_upgrades: bool, round_robin: bool, brain = None, flug_window_start: int = 250, ipug_window_start: int = 400, max_manning_pct: int = 150, staff_priority_mode: PriorityMode = PriorityMode.RANDOM):
+    def __init__(self, sim_upgrades: bool, annual_intake: int, round_robin: bool, brain = None, flug_window_start: int = 250, ipug_window_start: int = 400, max_manning_pct: int = 150, staff_priority_mode: PriorityMode = PriorityMode.RANDOM):
         self.history = []
         self.current_year = 2026
         self.squadrons: List[SquadronConfig] = []
@@ -14,6 +14,8 @@ class CAFSimulation:
         self.ipug_window_start = ipug_window_start # Hours for IPUG auto-start
         self.max_manning = max_manning_pct/100
         self.staff_priority = staff_priority_mode
+        self.annual_intake = annual_intake
+        self.phase_intake = phase_intake = self.annual_intake // 3 # APPROXIMATE
 
         if brain:
             self.brain = brain
@@ -126,7 +128,7 @@ class CAFSimulation:
             target_sq.update_stats()
 
         
-    def run_simulation(self, years_to_run: int, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0):
+    def run_simulation(self, years_to_run: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0):
         """
         squadron_configs: list -> [Config(id=1, paa=12...), Config(id=2, paa=24...)]
         """
@@ -140,11 +142,10 @@ class CAFSimulation:
             sq.manning_pct = self.max_manning
 
         for year in range(self.current_year, self.current_year + years_to_run):
-            phase_intake = annual_intake // 3
-            remainder = annual_intake % 3
+            remainder = self.annual_intake % 3
 
             for phase_num in range(1, 4): 
-                current_batch = phase_intake + (remainder if phase_num == 3 else 0)
+                current_batch = self.phase_intake + (remainder if phase_num == 3 else 0)
                 self.add_new_bcourse_graduates(year, current_batch, self.round_robin) 
 
 
