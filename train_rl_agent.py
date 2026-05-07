@@ -12,7 +12,7 @@ def load_ai_brain():
         print("Warning: HPC Brain models not found. Check file path for HPC sortie brain.")
     return joblib.load("brains/hpc_sortie_brain_lite.pkl")      
 
-cached_brain = load_ai_brain()
+brain = load_ai_brain()
       
 def main():
     sim_upgrades = True
@@ -21,7 +21,7 @@ def main():
         annual_intake=200,
         retention_rate=0.40,
         round_robin=False,
-        brain=cached_brain,
+        brain=brain,
         flug_window_start=250, # Likely needs to change to reality - ~150
         ipug_window_start=400, # Likely needs to change to reality - ~300
         max_manning_pct=125,
