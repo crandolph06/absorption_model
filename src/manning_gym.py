@@ -114,7 +114,7 @@ class ManningEnv(gym.Env):
             
             return observation, reward, terminated, truncated, {}
     
-    def _calculate_reward(self): # NOT FINISHED
+    def _calculate_reward(self): 
         current_total = self.sim.total_active_pilot_count
         line_count = self.sim.total_line_pilot_count
         staff_count = self.sim.total_staff_pilot_count
@@ -192,6 +192,42 @@ class ManningEnv(gym.Env):
 
         return reward
 
-    def _get_obs(self): # NOT FINISHED
-        total_paa = sum(sq.paa for sq in self.sim.squadrons)
-        total_pilots = sum(len(sq.pilots) for sq in self.sim.squadrons)
+    def _get_obs(self):
+            total_paa = sum(sq.paa for sq in self.sim.squadrons)
+            avg_ute = sum(sq.ute for sq in self.sim.squadrons) / max(len(self.sim.squadrons), 1)
+            
+            total_pilots = self.sim.total_active_pilot_count
+            staff_pilots = self.sim.total_staff_pilot_count
+            line_pilots = self.sim.total_line_pilot_count
+            total_ips = self.sim.total_ip_qty
+            total_fls = self.sim.total_fl_qty
+            total_wg = self.sim.total_wg_qty
+            exp_ratio = self.sim.experience_ratio
+            
+            num_sq = len(self.sim.squadrons)
+            if len(self.sim.history) >= num_sq:
+                latest_stats = self.sim.history[-num_sq:]
+                total_shortfall = sum(
+                    max(0, s.get('wg_rap_shortfall', 0)) + 
+                    max(0, s.get('fl_rap_shortfall', 0)) + 
+                    max(0, s.get('ip_rap_shortfall', 0)) 
+                    for s in latest_stats
+                )
+                avg_shortfall = total_shortfall / (num_sq * 3)
+            else:
+                avg_shortfall = 0.0
+
+            current_intake = self.sim.annual_intake
+
+            return np.array([
+                total_paa,
+                avg_ute,
+                total_pilots,
+                staff_pilots,
+                total_ips,
+                total_fls,
+                total_wg,
+                exp_ratio,
+                avg_shortfall,
+                current_intake
+            ], dtype=np.float32)
