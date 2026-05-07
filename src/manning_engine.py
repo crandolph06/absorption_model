@@ -23,11 +23,11 @@ class CAFSimulation:
         self.retention_rate = retention_rate
         self.use_upgrade_quotas = use_upgrade_quotas 
         if self.use_upgrade_quotas == False:
-            self.phase_flug_intake = 999
-            self.phase_ipug_intake = 999
+            self.sq_phase_flug_intake = 999
+            self.sq_phase_ipug_intake = 999
         else:
-            self.phase_flug_intake = 90 # 3 per squadron for 30 squadrons
-            self.phase_ipug_intake = 60 # 2 per squadron for 30 squadrons
+            self.sq_phase_flug_intake = 3 
+            self.sq_phase_ipug_intake = 2 
 
         if brain:
             self.brain = brain
