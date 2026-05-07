@@ -266,19 +266,37 @@ class SquadronConfig:
         if self.mqt_students > 0 or self.flug_students > 0 or self.ipug_students > 0:
             raise AssertionError(f'Graduation logic not functioning properly.')
 
-    def new_phase_upgrades(self, flug_window_start:int, ipug_window_start:int):
+    def new_phase_upgrades(self, flug_window_start:int, ipug_window_start:int,
+                           use_rl_quotas: bool = False, flug_quota: int = 999,
+                           ipug_quota: int = 999):
         flug_eligible = [
             p for p in self.pilots if p.qual == Qual.WG and p.upgrade == Upgrade.NONE 
             and flug_window_start <= p.sorties_flown 
         ]
-        for p in flug_eligible:
+
+        if use_rl_quotas:
+            flug_eligible.sort(key=lambda x: x.sorties_flown, reverse=True)
+            flug_limit = flug_quota
+        else:
+            flug_limit = len(flug_eligible)
+
+        for i in range(min(len(flug_eligible), flug_limit)):
+            p = flug_eligible[i]
             p.upgrade = Upgrade.FLUG
 
         ipug_eligible = [
             p for p in self.pilots if p.qual == Qual.FL and p.upgrade == Upgrade.NONE 
             and ipug_window_start <= p.hours_flown 
         ]
-        for p in ipug_eligible:
+        
+        if use_rl_quotas:
+            ipug_eligible.sort(key=lambda x: x.hours_flown, reverse=True)
+            ipug_limit = ipug_quota
+        else:
+            ipug_limit = len(ipug_eligible)
+
+        for i in range(min(len(ipug_eligible), ipug_limit)):
+            p = ipug_eligible[i]
             p.upgrade = Upgrade.IPUG
 
         self.update_stats()
