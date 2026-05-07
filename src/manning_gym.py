@@ -65,6 +65,8 @@ class ManningEnv(gym.Env):
             max_ute = 20
         elif run_mode == "pragmatic":
             max_ute = 15
+        else: max_ute = 30
+
         if ute_act == 0:
             self.sim.ute = max(1, self.sim.ute - 1)
         elif ute_act == 2:
@@ -75,6 +77,8 @@ class ManningEnv(gym.Env):
             max_retention = .65
         elif run_mode == "pragmatic":
             max_retention = .50
+        else: max_retention = 1.0
+
         if ret_act == 0:
             self.sim.retention = max(.1, self.sim.retention - 0.05)
         elif ret_act == 2:
@@ -83,6 +87,7 @@ class ManningEnv(gym.Env):
         # PAA 
         if run_mode == "optimistic":
             max_paa = 30
+        else: max_paa == 48
         for sq in self.sim.squadrons:
             if paa_act == 0:
                 sq.paa = max(1, sq.paa - 1)
@@ -141,7 +146,7 @@ class ManningEnv(gym.Env):
 
             if wg_short > 0 or fl_short > 0 or ip_short > 0:
                 reward -= wg_short * 40
-                reward -= (sum(fl_short, ip_short) * 20)
+                reward -= (fl_short + ip_short) * 20
 
         return reward
     
@@ -150,7 +155,7 @@ class ManningEnv(gym.Env):
 
         if sum(wg_short, fl_short, ip_short) > 0.5:
             reward -= wg_short * 50.0
-            reward -= sum(fl_short, ip_short) * 25.0
+            reward -= (fl_short + ip_short) * 25.0
         else:
             reward += 100.0
             reward += (current_total * 0.1)
@@ -172,7 +177,7 @@ class ManningEnv(gym.Env):
 
         if sum(wg_short, fl_short, ip_short) > 0.5:
             reward -= wg_short * 50.0
-            reward -= sum(fl_short, ip_short) * 25.0
+            reward -= (fl_short + ip_short) * 25.0
             return reward
         
         reward += 100.0
