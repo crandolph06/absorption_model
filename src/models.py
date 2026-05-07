@@ -267,14 +267,14 @@ class SquadronConfig:
             raise AssertionError(f'Graduation logic not functioning properly.')
 
     def new_phase_upgrades(self, flug_window_start:int, ipug_window_start:int,
-                           use_rl_quotas: bool = False, flug_quota: int = 999,
+                           use_upgrade_quotas: bool = False, flug_quota: int = 999,
                            ipug_quota: int = 999):
         flug_eligible = [
             p for p in self.pilots if p.qual == Qual.WG and p.upgrade == Upgrade.NONE 
             and flug_window_start <= p.sorties_flown 
         ]
 
-        if use_rl_quotas:
+        if use_upgrade_quotas:
             flug_eligible.sort(key=lambda x: x.sorties_flown, reverse=True)
             flug_limit = flug_quota
         else:
@@ -289,7 +289,7 @@ class SquadronConfig:
             and ipug_window_start <= p.hours_flown 
         ]
         
-        if use_rl_quotas:
+        if use_upgrade_quotas:
             ipug_eligible.sort(key=lambda x: x.hours_flown, reverse=True)
             ipug_limit = ipug_quota
         else:
