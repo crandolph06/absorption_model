@@ -9,7 +9,7 @@ def setup_simulation(round_robin: bool, annual_intake: int,
                      ai_brain, sim_upgrades: bool = False, 
                      existing_sim: Optional[CAFSimulation] = None, 
                      flug_window_start: int = 250, ipug_window_start: int = 400, 
-                     max_manning_pct: int = 150, 
+                     max_manning_pct: int = 150, retention_rate: float = .4,
                      staff_priority_mode: PriorityMode = PriorityMode.RANDOM):
     if existing_sim:
         sim = copy.deepcopy(existing_sim)
@@ -23,6 +23,7 @@ def setup_simulation(round_robin: bool, annual_intake: int,
         sim.ipug_window_start = ipug_window_start
         sim.max_manning = max_manning_pct / 100
         sim.staff_priority = staff_priority_mode
+        sim.retention_rate = retention_rate
 
         sim.brain = ai_brain
 
@@ -33,7 +34,8 @@ def setup_simulation(round_robin: bool, annual_intake: int,
         sim = CAFSimulation(sim_upgrades=sim_upgrades, round_robin=round_robin,
                             brain = ai_brain, flug_window_start=flug_window_start, 
                             ipug_window_start=ipug_window_start, max_manning_pct=max_manning_pct, 
-                            staff_priority_mode=staff_priority_mode, annual_intake=annual_intake)
+                            staff_priority_mode=staff_priority_mode, annual_intake=annual_intake,
+                            retention_rate=retention_rate)
 
     # Used 1.5 CCR for all units
     # Used 50% of exp pilots as starting IP value 
@@ -48,10 +50,9 @@ def setup_simulation(round_robin: bool, annual_intake: int,
 # if __name__ == "__main__":
 #     brain = joblib.load('outputs/single_phase/brains') # For HPC
 #     # brain = joblib.load('brains/hpc_sortie_brain_lite.pkl') # For local
-#     sim, squadrons = setup_simulation(round_robin=False, ai_brain=brain, annual_intake=150, sim_upgrades=True)
+#     sim, squadrons = setup_simulation(round_robin=False, ai_brain=brain, annual_intake=150, retention_rate = .4, sim_upgrades=True)
 
 #     results_df = sim.run_simulation(
-#         years_to_run=10,  
-#         retention_rate=0.5, 
+#         years_to_run=10,   
 #         squadron_configs=squadrons,
 #     )
