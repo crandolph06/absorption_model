@@ -42,8 +42,6 @@ def train_hpc_multi_brain():
     df['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
     
     df = df.replace([np.inf, -np.inf], 0)
-    X = df[features]
-    
     features = base_features + ['ip_ratio', 'ip_to_stud_ratio']
     
     targets = [
