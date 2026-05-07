@@ -3,8 +3,6 @@ from gymnasium import spaces
 import numpy as np
 from src.manning_config import get_initial_squadrons
 
-# TODO Add Manning percentage variable
-
 class ManningEnv(gym.Env):
     def __init__(self, sim_engine, run_mode="ideal", reward_mode="quantity_first"):
         super(ManningEnv, self).__init__()
@@ -12,24 +10,25 @@ class ManningEnv(gym.Env):
         self.run_mode = run_mode
         self.reward_mode = reward_mode
         self.initial_intake = sim_engine.annual_intake
+        self.initial_retention = sim_engine.retention_rate
 
         if run_mode == "ideal":
-            # [B-Course, FLUG, IPUG, UTE, retention, PAA] -> increase, maintain, decrease for each
-            self.action_space = spaces.MultiDiscrete([3, 3, 3, 3, 3, 3])
+            # [B-Course, FLUG, IPUG, max manning, UTE, retention, PAA] -> increase, maintain, decrease for each
+            self.action_space = spaces.MultiDiscrete([3, 3, 3, 3, 3, 3, 3])
 
         elif run_mode == "optimistic":
-            # [B-Course, FLUG, IPUG, UTE, retention, PAA] -> increase, maintain, decrease for each
-            self.action_space = spaces.MultiDiscrete([3, 3, 3, 3, 3, 3])
+            # [B-Course, FLUG, IPUG, max manning, UTE, retention, PAA] -> increase, maintain, decrease for each
+            self.action_space = spaces.MultiDiscrete([3, 3, 3, 3, 3, 3, 3])
             # PAA per sq capped to 30, retention capped at 65%
 
         elif run_mode == "pragmatic":
-            # [B-Course, FLUG, IPUG, UTE, retention] -> increase, maintain, decrease for each
-            self.action_space = spaces.MultiDiscrete([3, 3, 3, 3, 3])
+            # [B-Course, FLUG, IPUG, max manning, UTE, retention] -> increase, maintain, decrease for each
+            self.action_space = spaces.MultiDiscrete([3, 3, 3, 3, 3, 3])
             # UTE capped to 15, retention capped at 50%
 
         elif run_mode == "current":
-            # [B-Course, FLUG, IPUG] -> increase, maintain, decrease for each
-            self.action_space = spaces.MultiDiscrete([3, 3, 3])
+            # [B-Course, FLUG, IPUG, max manning] -> increase, maintain, decrease for each
+            self.action_space = spaces.MultiDiscrete([3, 3, 3, 3])
 
         self.observation_space = spaces.Box(
             low=0, high=np.inf, shape=(13,), dtype=np.float32 
@@ -39,9 +38,10 @@ class ManningEnv(gym.Env):
         intake_act = action[0]
         flug_act = action[1]
         ipug_act = action [2]
-        ute_act = action [3] if len(action) > 3 else 1
-        ret_act = action [4] if len(action) > 4 else 1
-        paa_act = action [5] if len(action) > 5 else 1
+        man_pct_act = action[3]
+        ute_act = action [4] if len(action) > 4 else 1
+        ret_act = action [5] if len(action) > 5 else 1
+        paa_act = action [6] if len(action) > 6 else 1
 
         # B-Course Intake (Phase) 
         if intake_act == 0: 
@@ -60,6 +60,12 @@ class ManningEnv(gym.Env):
             self.sim.sq_phase_ipug_intake = max(0, self.sim.sq_phase_ipug_intake - 1)
         elif ipug_act ==2: 
             self.sim.sq_phase_ipug_intake = min(10, self.sim.sq_phase_ipug_intake + 1)
+
+        # Manning Percentage 
+        if man_pct_act == 0:
+            self.sim.max_manning = max(0, self.sim.max_manning - 0.05)
+        elif man_pct_act == 2:
+            self.sim.max_manning = min(1.5, self.sim.max_manning + 0.05)
 
         # UTE 
         if run_mode == "optimistic":
@@ -97,12 +103,15 @@ class ManningEnv(gym.Env):
             elif paa_act == 2:
                 sq.paa = min(max_paa, sq.paa + 1)
 
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None):
         super().reset(seed=seed)
 
         self.sim.annual_intake = self.initial_intake
+        self.sim.retention_rate = self.initial_retention
         self.sim.ute = self.initial_ute
+
         self.sim.current_year = 2026
+        self.sim.current_phase = 1
 
         self.sim.squadrons = get_initial_squadrons(self.sim.current_year)
 
