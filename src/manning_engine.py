@@ -32,12 +32,12 @@ class CAFSimulation:
 
         if brain:
             self.brain = brain
-        elif os.path.exists("sortie_brain.pkl"):
+        elif os.path.exists("brains/hpc_sortie_brain_lite.pkl"):
             print(f"🧠 Loading Sortie Brain from disk...")
-            self.brain = joblib.load("sortie_brain.pkl")
+            self.brain = joblib.load("brains/hpc_sortie_brain_lite.pkl")
         else:
-            raise FileNotFoundError(f"Could not find sortie_brain.pkl. Please run train_brain.py first.")
-
+            raise FileNotFoundError(f"Could not find brains/hpc_sortie_brain_lite. Please confirm file path first.")
+            
         self.sim_upgrades = sim_upgrades
         self.round_robin = round_robin
 
@@ -111,9 +111,9 @@ class CAFSimulation:
             return 0.0
         return sum(max(0, s.get('ip_rap_shortfall', 0)) for s in self.history[-num_sq:]) / num_sq
 
-    def reset(self):
-        self.history = []
-        self.current_year = 2025
+    # def reset(self):
+    #     self.history = []
+    #     self.current_year = 2025
 
     def add_new_bcourse_graduates(self, year: int, count: int, round_robin: bool): 
         num_sq = len(self.squadrons)
@@ -423,7 +423,7 @@ class CAFSimulation:
             current_stats = sq.store_stats(self.current_year, self.current_phase, rates)
             self.process_end_of_phase(sq, self.current_year, self.current_phase, self.retention_rate, current_stats) 
             
-            self.current_phase += 1
-            if self.current_phase > 3:
-                self.current_phase = 1
-                self.current_year += 1
+        self.current_phase += 1
+        if self.current_phase > 3:
+            self.current_phase = 1
+            self.current_year += 1
