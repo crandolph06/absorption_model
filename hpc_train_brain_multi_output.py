@@ -9,7 +9,7 @@ from sklearn.multioutput import MultiOutputRegressor
 from sklearn.model_selection import train_test_split
 
 INPUT_DIR = "outputs/single_phase/repart_parquet"
-OUTPUT_MODEL = "outputs/single_phase/brains/hpc_sortie_brain_lite.pkl"
+OUTPUT_MODEL = "outputs/single_phase/brains/hpc_sortie_brain_multi_output.pkl"
 SAMPLE_FRAC = 0.10 
 RANDOM_SEED = 42
 
