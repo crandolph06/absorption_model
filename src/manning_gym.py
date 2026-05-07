@@ -31,7 +31,7 @@ class ManningEnv(gym.Env):
             self.action_space = spaces.MultiDiscrete([3, 3, 3])
 
         self.observation_space = spaces.Box(
-            low=0, high=np.inf, shape=(10,), dtype=np.float32
+            low=0, high=np.inf, shape=(13,), dtype=np.float32 
         )
 
     def _apply_current_logic(self, action, run_mode):
@@ -48,13 +48,13 @@ class ManningEnv(gym.Env):
         elif intake_act ==2: 
             self.sim.phase_intake = min(350, self.sim.phase_intake + 10)
 
-        # FLUG Intake (Phase) # TODO need to figure out how to encode this in sim
+        # FLUG Intake (Phase)
         if flug_act == 0: 
             self.sim.phase_flug_intake = max(0, self.sim.phase_flug_intake - 1)
         elif flug_act ==2: 
             self.sim.phase_flug_intake = min(10, self.sim.phase_flug_intake + 1)
 
-        # IPUG Intake (Phase) # TODO need to figure out how to encode this in sim
+        # IPUG Intake (Phase) 
         if ipug_act == 0: 
             self.sim.phase_ipug_intake = max(0, self.sim.phase_ipug_intake - 1)
         elif ipug_act ==2: 
@@ -122,45 +122,41 @@ class ManningEnv(gym.Env):
         num_sq = len(self.sim.squadrons)
         if len(self.sim.history) >= num_sq:
             latest_stats = self.sim.history[-num_sq:]
-
-            total_shortfall = sum(
-                max(0, s['wg_rap_shortfall']) +
-                max(0, s['fl_rap_shortfall']) +
-                max(0, s['ip_rap_shortfall'])
-                for s in latest_stats
-            )
-            avg_shortfall = total_shortfall / (num_sq * 3)
-        
+            wg_short = sum(max(0, s.get('wg_rap_shortfall', 0)) for s in latest_stats)
+            fl_short = sum(max(0, s.get('fl_rap_shortfall', 0)) for s in latest_stats)
+            ip_short = sum(max(0, s.get('ip_rap_shortfall', 0)) for s in latest_stats)
         else:
-            avg_shortfall = 0.0
+            wg_short, fl_short, ip_short = 0.0, 0.0, 0.0
 
         if self.reward_mode == "quantity_first":
             # Get to 3500 total pilots (line and staff) first, then focus on line RAP
-            return self._reward_quantity(current_total, avg_shortfall)
+            return self._reward_quantity(current_total, wg_short, fl_short, ip_short)
         elif self.reward_mode == "readiness_first":
             # Get to line pilot RAP first, then increase toward 3500 total pilots
-            return self._reward_readiness(current_total, avg_shortfall)
+            return self._reward_readiness(current_total, wg_short, fl_short, ip_short)
         elif self.reward_mode == "key_staff_first":
             # Get to 20% of staff pilot positions manned ((3500-line pilots) * .2), then focus on line RAP, then increase toward 3500 total pilots
-            return self._reward_key_staff(current_total, line_count, staff_count, avg_shortfall)
+            return self._reward_key_staff(current_total, line_count, staff_count, wg_short, fl_short, ip_short)
 
     
-    def _reward_quantity(self, current_total, avg_shortfall):
+    def _reward_quantity(self, current_total, wg_short, fl_short, ip_short):
         reward = current_total * 0.1
 
         if current_total >= 3500:
             reward += 100.0
 
-            if avg_shortfall > 0:
-                reward -= (avg_shortfall * 20)
+            if wg_short > 0 or fl_short > 0 or ip_short > 0:
+                reward -= wg_short * 40
+                reward -= (sum(fl_short, ip_short) * 20)
 
         return reward
     
-    def _reward_readiness(self, current_total, avg_shortfall):
+    def _reward_readiness(self, current_total, wg_short, fl_short, ip_short):
         reward = 0.0
 
-        if avg_shortfall > 0.5:
-            reward -= (avg_shortfall * 50.0)
+        if sum(wg_short, fl_short, ip_short) > 0.5:
+            reward -= wg_short * 50.0
+            reward -= sum(fl_short, ip_short) * 25.0
         else:
             reward += 100.0
             reward += (current_total * 0.1)
@@ -170,7 +166,7 @@ class ManningEnv(gym.Env):
 
         return reward
     
-    def _reward_key_staff(self, current_total, line_count, staff_count, avg_shortfall, key_staff_ratio=0.2):
+    def _reward_key_staff(self, current_total, line_count, staff_count, wg_short, fl_short, ip_short, key_staff_ratio=0.2):
         reward = 0.0
         target_staff = (3500 - line_count) * key_staff_ratio
 
@@ -180,13 +176,14 @@ class ManningEnv(gym.Env):
         
         reward += 50.0
 
-        if avg_shortfall > 0.5:
-            reward -= (avg_shortfall * 30.0)
+        if sum(wg_short, fl_short, ip_short) > 0.5:
+            reward -= wg_short * 50.0
+            reward -= sum(fl_short, ip_short) * 25.0
             return reward
         
         reward += 100.0
 
-        rewatd += (current_total * 0.1)
+        reward += (current_total * 0.1)
         if current_total >= 3500:
             reward += 200.0
 
@@ -207,15 +204,11 @@ class ManningEnv(gym.Env):
             num_sq = len(self.sim.squadrons)
             if len(self.sim.history) >= num_sq:
                 latest_stats = self.sim.history[-num_sq:]
-                total_shortfall = sum(
-                    max(0, s.get('wg_rap_shortfall', 0)) + 
-                    max(0, s.get('fl_rap_shortfall', 0)) + 
-                    max(0, s.get('ip_rap_shortfall', 0)) 
-                    for s in latest_stats
-                )
-                avg_shortfall = total_shortfall / (num_sq * 3)
+                wg_short = sum(max(0, s.get('wg_rap_shortfall', 0)) for s in latest_stats)
+                fl_short = sum(max(0, s.get('fl_rap_shortfall', 0)) for s in latest_stats)
+                ip_short = sum(max(0, s.get('ip_rap_shortfall', 0)) for s in latest_stats)
             else:
-                avg_shortfall = 0.0
+                wg_short, fl_short, ip_short = 0.0, 0.0, 0.0
 
             current_intake = self.sim.annual_intake
 
@@ -224,10 +217,13 @@ class ManningEnv(gym.Env):
                 avg_ute,
                 total_pilots,
                 staff_pilots,
+                line_pilots,
                 total_ips,
                 total_fls,
                 total_wg,
                 exp_ratio,
-                avg_shortfall,
+                wg_short,
+                fl_short,
+                ip_short,
                 current_intake
             ], dtype=np.float32)
