@@ -66,12 +66,12 @@ def process_single_config(args):
             ipug_window_start=ipug_start_hours,
             max_manning_pct=max_manning,
             staff_priority_mode=staff_logic,
-            annual_intake=annual_intake
+            annual_intake=annual_intake,
+            retention_rate=retention_rate
         )
 
         sim.run_simulation(
             years_to_run=YEARS_TO_RUN,
-            retention_rate=retention_rate,
             squadron_configs=squadrons, 
             ute=ute_val
         )
