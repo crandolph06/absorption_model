@@ -89,14 +89,14 @@ class ManningEnv(gym.Env):
         else: max_retention = 1.0
 
         if ret_act == 0:
-            self.sim.retention = max(.1, self.sim.retention - 0.05)
+            self.sim.retention_rate = max(.1, self.sim.retention_rate - 0.05)
         elif ret_act == 2:
-            self.sim.retention = min(max_retention, self.sim.retention + 0.05)
+            self.sim.retention_rate = min(max_retention, self.sim.retention_rate + 0.05)
 
         # PAA 
         if run_mode == "optimistic":
             max_paa = 30
-        else: max_paa == 48
+        else: max_paa = 48
         for sq in self.sim.squadrons:
             if paa_act == 0:
                 sq.paa = max(1, sq.paa - 1)
@@ -108,7 +108,6 @@ class ManningEnv(gym.Env):
 
         self.sim.annual_intake = self.initial_intake
         self.sim.retention_rate = self.initial_retention
-        self.sim.ute = self.initial_ute
 
         self.sim.current_year = 2026
         self.sim.current_phase = 1
@@ -165,7 +164,7 @@ class ManningEnv(gym.Env):
     def _reward_readiness(self, current_total, wg_short, fl_short, ip_short):
         reward = 0.0
 
-        if sum(wg_short, fl_short, ip_short) > 0.5:
+        if wg_short + fl_short + ip_short > 0.5:
             reward -= wg_short * 50.0
             reward -= (fl_short + ip_short) * 25.0
         else:
