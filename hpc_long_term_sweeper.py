@@ -70,7 +70,6 @@ def process_single_config(args):
 
         sim.run_simulation(
             years_to_run=YEARS_TO_RUN,
-            annual_intake=annual_intake,
             retention_rate=retention_rate,
             squadron_configs=squadrons, 
             ute=ute_val
