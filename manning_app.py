@@ -91,10 +91,10 @@ if submitted:
         # 1. Setup & Run
         sim, squadrons = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades, ai_brain=cached_brain,
                                           flug_window_start=flug_start, ipug_window_start=ipug_start, annual_intake=intake,
-                                          max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode)
+                                          max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode,
+                                          retention_rate=retention)
         df = sim.run_simulation(
-            years_to_run=years, retention_rate=retention, 
-            squadron_configs=squadrons, ute=ute_val
+            years_to_run=years, squadron_configs=squadrons, ute=ute_val
             ) 
 
         st.write("### 🔍 Debugging Tools")
@@ -385,7 +385,7 @@ if submitted:
         master_sim, _ = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades,
                                          ai_brain=cached_brain, flug_window_start=flug_start, annual_intake=intake,
                                          ipug_window_start= ipug_start, max_manning_pct=max_manning_pct,
-                                         staff_priority_mode=staff_priority_mode)
+                                         staff_priority_mode=staff_priority_mode, retention_rate=retention)
 
         # Loop with enumeration to update the bar
         for i, val in enumerate(test_range):
@@ -396,13 +396,11 @@ if submitted:
             t_sim, t_sqs = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades,
                                             ai_brain=cached_brain, existing_sim=master_sim, annual_intake=val,
                                             flug_window_start=flug_start, ipug_window_start=ipug_start,
-                                            max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode)
+                                            max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode,
+                                            retention_rate=retention)
 
             t_df = t_sim.run_simulation(
-                years_to_run=20, 
-                retention_rate=retention, 
-                squadron_configs=t_sqs, 
-                ute=ute_val 
+                years_to_run=20, squadron_configs=t_sqs, ute=ute_val 
             )
 
             start_year = t_df['year'].min()
