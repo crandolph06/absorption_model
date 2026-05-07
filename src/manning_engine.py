@@ -6,7 +6,7 @@ import joblib
 
 
 class CAFSimulation:
-    def __init__(self, sim_upgrades: bool, annual_intake: int, round_robin: bool, brain = None, flug_window_start: int = 250, ipug_window_start: int = 400, max_manning_pct: int = 150, staff_priority_mode: PriorityMode = PriorityMode.RANDOM):
+    def __init__(self, sim_upgrades: bool, annual_intake: int, retention_rate: float, round_robin: bool, brain = None, flug_window_start: int = 250, ipug_window_start: int = 400, max_manning_pct: int = 150, staff_priority_mode: PriorityMode = PriorityMode.RANDOM):
         self.history = []
         self.current_year = 2026
         self.squadrons: List[SquadronConfig] = []
@@ -16,6 +16,7 @@ class CAFSimulation:
         self.staff_priority = staff_priority_mode
         self.annual_intake = annual_intake
         self.phase_intake = annual_intake // 3 # APPROXIMATE +/- 2
+        self.retention_rate = retention_rate
 
         if brain:
             self.brain = brain
@@ -128,7 +129,7 @@ class CAFSimulation:
             target_sq.update_stats()
 
         
-    def run_simulation(self, years_to_run: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0):
+    def run_simulation(self, years_to_run: int, squadron_configs: List[SquadronConfig], ute: float = 10.0):
         """
         squadron_configs: list -> [Config(id=1, paa=12...), Config(id=2, paa=24...)]
         """
@@ -197,12 +198,12 @@ class CAFSimulation:
 
                     current_stats = sq.store_stats(year, phase_num, rates)
 
-                    self.process_end_of_phase(sq, year, phase_num, retention_rate, current_stats) 
+                    self.process_end_of_phase(sq, year, phase_num, self.retention_rate, current_stats) 
             
         return pd.DataFrame(self.history)
     
 
-    def process_end_of_phase(self, sq: SquadronConfig, year: int, phase_num: int, retention_rate: float, current_stats: dict):
+    def process_end_of_phase(self, sq: SquadronConfig, year: int, phase_num: int, current_stats: dict):
         
         staff_ips = 0
         staff_fls = 0
@@ -214,7 +215,7 @@ class CAFSimulation:
         sq.send_to_staff(priority_mode=self.staff_priority)
 
         for p in sq.pilots:
-            p.check_retention(year, phase_num, retention_rate)
+            p.check_retention(year, phase_num, self.retention_rate)
 
         for p in sq.pilots:
             if not p.active:
@@ -341,73 +342,73 @@ class CAFSimulation:
         }
 
     # WORKING
-    def run_phase(self, annual_intake: int, retention_rate: float, squadron_configs: List[SquadronConfig], ute: float = 10.0):
-        self.history = []
-        self.squadrons = squadron_configs
+    # def run_phase(self, squadron_configs: List[SquadronConfig], ute: float = 10.0):
+    #     self.history = []
+    #     self.squadrons = squadron_configs
 
-        FEATURE_NAMES = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
+    #     FEATURE_NAMES = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
 
-        for sq in self.squadrons:
-            sq.ute = ute # With current implementation all squadrons must have same UTE
-            sq.manning_pct = self.max_manning
+    #     for sq in self.squadrons:
+    #         sq.ute = ute # With current implementation all squadrons must have same UTE
+    #         sq.manning_pct = self.max_manning
 
-        for year in range(self.current_year, self.current_year + years_to_run):
-            phase_intake = annual_intake // 3
-            remainder = annual_intake % 3
+    #     for year in range(self.current_year, self.current_year + years_to_run):
+    #         phase_intake = annual_intake // 3
+    #         remainder = annual_intake % 3
 
-            for phase_num in range(1, 4): 
-                current_batch = phase_intake + (remainder if phase_num == 3 else 0)
-                self.add_new_bcourse_graduates(year, current_batch, self.round_robin) 
+    #         for phase_num in range(1, 4): 
+    #             current_batch = phase_intake + (remainder if phase_num == 3 else 0)
+    #             self.add_new_bcourse_graduates(year, current_batch, self.round_robin) 
 
 
-                for sq in self.squadrons:
-                    if sq.flug_students != 0 or sq.ipug_students != 0:
-                        raise AssertionError(f'Critical Data Mismatch in Squadron Pilots')
-                    sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
+    #             for sq in self.squadrons:
+    #                 if sq.flug_students != 0 or sq.ipug_students != 0:
+    #                     raise AssertionError(f'Critical Data Mismatch in Squadron Pilots')
+    #                 sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
 
-                if self.sim_upgrades:
-                    FEATURE_NAMES_EXPANDED = [
-                                    'paa', 'ute', 'exp_ratio', 'total_pilots', 
-                                    'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty',
-                                    'ip_ratio', 'ip_to_stud_ratio'
-                                ]
+    #             if self.sim_upgrades:
+    #                 FEATURE_NAMES_EXPANDED = [
+    #                                 'paa', 'ute', 'exp_ratio', 'total_pilots', 
+    #                                 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty',
+    #                                 'ip_ratio', 'ip_to_stud_ratio'
+    #                             ]
 
-                    batch_data = []
+    #                 batch_data = []
 
-                    for sq in self.squadrons:
-                        vec = sq.get_feature_vector()
+    #                 for sq in self.squadrons:
+    #                     vec = sq.get_feature_vector()
 
-                        total_students = sq.mqt_students + sq.flug_students + sq.ipug_students
-                        ip_ratio = sq.ip_qty / max(sq.total_pilots, 1)
-                        ip_to_stud_ratio = sq.ip_qty / (total_students if total_students > 0 else 0.1)
+    #                     total_students = sq.mqt_students + sq.flug_students + sq.ipug_students
+    #                     ip_ratio = sq.ip_qty / max(sq.total_pilots, 1)
+    #                     ip_to_stud_ratio = sq.ip_qty / (total_students if total_students > 0 else 0.1)
 
-                        vec.extend([ip_ratio, ip_to_stud_ratio])
-                        batch_data.append(vec)
+    #                     vec.extend([ip_ratio, ip_to_stud_ratio])
+    #                     batch_data.append(vec)
 
-                    df_batch = pd.DataFrame(batch_data, columns=FEATURE_NAMES_EXPANDED)
+    #                 df_batch = pd.DataFrame(batch_data, columns=FEATURE_NAMES_EXPANDED)
 
-                    wg_rates = self.brain['wg_monthly'].predict(df_batch)
-                    fl_rates = self.brain['fl_monthly'].predict(df_batch)
-                    ip_rates = self.brain['ip_monthly'].predict(df_batch)
+    #                 wg_rates = self.brain['wg_monthly'].predict(df_batch)
+    #                 fl_rates = self.brain['fl_monthly'].predict(df_batch)
+    #                 ip_rates = self.brain['ip_monthly'].predict(df_batch)
 
-                    wg_blue_rates = self.brain['wg_blue_monthly'].predict(df_batch)
-                    fl_blue_rates = self.brain['fl_blue_monthly'].predict(df_batch)
-                    ip_blue_rates = self.brain['ip_blue_monthly'].predict(df_batch)
+    #                 wg_blue_rates = self.brain['wg_blue_monthly'].predict(df_batch)
+    #                 fl_blue_rates = self.brain['fl_blue_monthly'].predict(df_batch)
+    #                 ip_blue_rates = self.brain['ip_blue_monthly'].predict(df_batch)
 
-                for i, sq in enumerate(self.squadrons):
-                    if self.sim_upgrades:
-                        monthly_rates = AgingRate(4.0, wg_rates[i], fl_rates[i], ip_rates[i],
-                                          4.0, wg_blue_rates[i], fl_blue_rates[i], 
-                                          ip_blue_rates[i])
-                        rates =  monthly_rates.monthly_to_phase(sq.phase_length_days)
+    #             for i, sq in enumerate(self.squadrons):
+    #                 if self.sim_upgrades:
+    #                     monthly_rates = AgingRate(4.0, wg_rates[i], fl_rates[i], ip_rates[i],
+    #                                       4.0, wg_blue_rates[i], fl_blue_rates[i], 
+    #                                       ip_blue_rates[i])
+    #                     rates =  monthly_rates.monthly_to_phase(sq.phase_length_days)
 
-                    else:
-                        rates = sq.calc_aging_rate(False)
+    #                 else:
+    #                     rates = sq.calc_aging_rate(False)
 
-                    sq.apply_phase_aging(rates)
+    #                 sq.apply_phase_aging(rates)
 
-                    current_stats = sq.store_stats(year, phase_num, rates)
+    #                 current_stats = sq.store_stats(year, phase_num, rates)
 
-                    self.process_end_of_phase(sq, year, phase_num, retention_rate, current_stats) 
+    #                 self.process_end_of_phase(sq, year, phase_num, retention_rate, current_stats) 
             
-        return pd.DataFrame(self.history)
+    #     return pd.DataFrame(self.history)
