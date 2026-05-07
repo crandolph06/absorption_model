@@ -15,7 +15,7 @@ class CAFSimulation:
         self.max_manning = max_manning_pct/100
         self.staff_priority = staff_priority_mode
         self.annual_intake = annual_intake
-        self.phase_intake = phase_intake = self.annual_intake // 3 # APPROXIMATE
+        self.phase_intake = annual_intake // 3 # APPROXIMATE +/- 2
 
         if brain:
             self.brain = brain
