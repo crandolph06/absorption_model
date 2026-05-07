@@ -203,7 +203,7 @@ class CAFSimulation:
         return pd.DataFrame(self.history)
     
 
-    def process_end_of_phase(self, sq: SquadronConfig, year: int, phase_num: int, current_stats: dict):
+    def process_end_of_phase(self, sq: SquadronConfig, year: int, phase_num: int, retention_rate, current_stats: dict):
         
         staff_ips = 0
         staff_fls = 0
@@ -215,7 +215,7 @@ class CAFSimulation:
         sq.send_to_staff(priority_mode=self.staff_priority)
 
         for p in sq.pilots:
-            p.check_retention(year, phase_num, self.retention_rate)
+            p.check_retention(year, phase_num, retention_rate)
 
         for p in sq.pilots:
             if not p.active:
@@ -409,6 +409,6 @@ class CAFSimulation:
 
     #                 current_stats = sq.store_stats(year, phase_num, rates)
 
-    #                 self.process_end_of_phase(sq, year, phase_num, retention_rate, current_stats) 
+    #                 self.process_end_of_phase(sq, year, phase_num, self.retention_rate, current_stats) 
             
     #     return pd.DataFrame(self.history)
