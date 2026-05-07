@@ -3,6 +3,8 @@ from gymnasium import spaces
 import numpy as np
 from src.manning_config import get_initial_squadrons
 
+# TODO Add Manning percentage variable
+
 class ManningEnv(gym.Env):
     def __init__(self, sim_engine, run_mode="ideal", reward_mode="quantity_first"):
         super(ManningEnv, self).__init__()
@@ -41,23 +43,23 @@ class ManningEnv(gym.Env):
         ret_act = action [4] if len(action) > 4 else 1
         paa_act = action [5] if len(action) > 5 else 1
 
-        # B-Course Intake (Phase) # TODO ensure engine divides annual intake by 3
+        # B-Course Intake (Phase) 
         if intake_act == 0: 
-            self.sim.phase_intake = max(10, self.sim.phase_intake - 10)
+            self.sim.annual_intake = max(10, self.sim.phase_intake - 10)
         elif intake_act ==2: 
-            self.sim.phase_intake = min(350, self.sim.phase_intake + 10)
+            self.sim.annual_intake = min(350, self.sim.phase_intake + 10)
 
         # FLUG Intake (Phase)
         if flug_act == 0: 
-            self.sim.phase_flug_intake = max(0, self.sim.phase_flug_intake - 1)
+            self.sim.sq_phase_flug_intake = max(0, self.sim.sq_phase_flug_intake - 1)
         elif flug_act ==2: 
-            self.sim.phase_flug_intake = min(10, self.sim.phase_flug_intake + 1)
+            self.sim.sq_phase_flug_intake = min(10, self.sim.sq_phase_flug_intake + 1)
 
         # IPUG Intake (Phase) 
         if ipug_act == 0: 
-            self.sim.phase_ipug_intake = max(0, self.sim.phase_ipug_intake - 1)
+            self.sim.sq_phase_ipug_intake = max(0, self.sim.sq_phase_ipug_intake - 1)
         elif ipug_act ==2: 
-            self.sim.phase_ipug_intake = min(10, self.sim.phase_ipug_intake + 1)
+            self.sim.sq_phase_ipug_intake = min(10, self.sim.sq_phase_ipug_intake + 1)
 
         # UTE 
         if run_mode == "optimistic":
