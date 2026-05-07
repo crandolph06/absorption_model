@@ -66,6 +66,7 @@ def process_single_config(args):
             ipug_window_start=ipug_start_hours,
             max_manning_pct=max_manning,
             staff_priority_mode=staff_logic,
+            annual_intake=annual_intake
         )
 
         sim.run_simulation(
