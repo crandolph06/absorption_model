@@ -118,15 +118,9 @@ class ManningEnv(gym.Env):
         current_total = self.sim.total_active_pilot_count
         line_count = self.sim.total_line_pilot_count
         staff_count = self.sim.total_staff_pilot_count
-
-        num_sq = len(self.sim.squadrons)
-        if len(self.sim.history) >= num_sq:
-            latest_stats = self.sim.history[-num_sq:]
-            wg_short = sum(max(0, s.get('wg_rap_shortfall', 0)) for s in latest_stats)
-            fl_short = sum(max(0, s.get('fl_rap_shortfall', 0)) for s in latest_stats)
-            ip_short = sum(max(0, s.get('ip_rap_shortfall', 0)) for s in latest_stats)
-        else:
-            wg_short, fl_short, ip_short = 0.0, 0.0, 0.0
+        wg_short = self.sim.current_wg_shortfall
+        fl_short = self.sim.current_fl_shortfall
+        ip_short = self.sim.current_ip_shortfall
 
         if self.reward_mode == "quantity_first":
             # Get to 3500 total pilots (line and staff) first, then focus on line RAP
@@ -200,16 +194,10 @@ class ManningEnv(gym.Env):
             total_fls = self.sim.total_fl_qty
             total_wg = self.sim.total_wg_qty
             exp_ratio = self.sim.experience_ratio
+            wg_short = self.sim.current_wg_shortfall
+            fl_short = self.sim.current_fl_shortfall
+            ip_short = self.sim.current_ip_shortfall
             
-            num_sq = len(self.sim.squadrons)
-            if len(self.sim.history) >= num_sq:
-                latest_stats = self.sim.history[-num_sq:]
-                wg_short = sum(max(0, s.get('wg_rap_shortfall', 0)) for s in latest_stats)
-                fl_short = sum(max(0, s.get('fl_rap_shortfall', 0)) for s in latest_stats)
-                ip_short = sum(max(0, s.get('ip_rap_shortfall', 0)) for s in latest_stats)
-            else:
-                wg_short, fl_short, ip_short = 0.0, 0.0, 0.0
-
             current_intake = self.sim.annual_intake
 
             return np.array([
