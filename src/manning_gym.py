@@ -10,7 +10,6 @@ class ManningEnv(gym.Env):
         self.run_mode = run_mode
         self.reward_mode = reward_mode
         self.initial_intake = sim_engine.annual_intake
-        self.initial_ute = sim_engine.ute
 
         if run_mode == "ideal":
             # [B-Course, FLUG, IPUG, UTE, retention, PAA] -> increase, maintain, decrease for each
@@ -68,9 +67,11 @@ class ManningEnv(gym.Env):
         else: max_ute = 30
 
         if ute_act == 0:
-            self.sim.ute = max(1, self.sim.ute - 1)
+            for sq in self.sim.squadrons:
+                sq.ute = max(1, sq.ute - 1)
         elif ute_act == 2:
-            self.sim.ute = min(max_ute, self.sim.ute + 1)
+            for sq in self.sim.squadrons:
+                sq.ute = min(max_ute, sq.ute + 1)
 
         # Retention
         if run_mode == "optimistic":
