@@ -33,5 +33,5 @@ python --version
 #
 export PYTHONUNBUFFERED=1
 #
-python -u verify_brain.py
+python -u verify_multi_brain.py
 #
