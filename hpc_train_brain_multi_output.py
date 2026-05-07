@@ -34,6 +34,21 @@ def train_hpc_multi_brain():
 
     # 2. FEATURE & TARGET SELECTION
     base_features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
+    for col in base_features:
+        if col not in df.columns: 
+            df[col] = 0
+    df['total_students'] = df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']
+    df['ip_ratio'] = df['ip_qty'] / df['total_pilots'].replace(0, 1)
+    df['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
+    
+    df = df.replace([np.inf, -np.inf], 0)
+    features = base_features + ['ip_ratio', 'ip_to_stud_ratio']
+    X = df[features]
+    targets = [
+        'wg_monthly', 'fl_monthly', 'ip_monthly', 
+        'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
+    ]
+    
     features = base_features + ['ip_ratio', 'ip_to_stud_ratio']
     
     targets = [
