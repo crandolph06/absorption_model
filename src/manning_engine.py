@@ -1,5 +1,5 @@
 import pandas as pd
-from typing import List, Optional
+from typing import List
 from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, PriorityMode, AgingRate
 import os
 import joblib
