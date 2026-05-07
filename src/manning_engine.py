@@ -58,6 +58,24 @@ class CAFSimulation:
     def total_staff_pilot_count(self):
         return len(self.staff_pilots)
     
+    @property
+    def total_wg_qty(self):
+        return sum(1 for sq in self.squadrons for p in sq.pilots if p.qual.name == 'WG')
+    
+    @property
+    def total_fl_qty(self):
+        return sum(1 for sq in self.squadrons for p in sq.pilots if p.qual.name == 'FL')
+    
+    @property
+    def total_ip_qty(self):
+        return sum(1 for sq in self.squadrons for p in sq.pilots if p.qual.name == 'IP')
+    
+    @property
+    def experience_ratio(self):
+        total_experienced = self.total_ip_qty + self.total_fl_qty
+        return total_experienced / max(self.total_line_pilot_count, 1)
+
+
     def reset(self):
         self.history = []
         self.current_year = 2025
