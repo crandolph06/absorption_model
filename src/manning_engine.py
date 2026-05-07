@@ -75,6 +75,26 @@ class CAFSimulation:
         total_experienced = self.total_ip_qty + self.total_fl_qty
         return total_experienced / max(self.total_line_pilot_count, 1)
 
+    @property
+    def current_wg_shortfall(self) -> float:
+        num_sq = len(self.squadrons)
+        if len(self.history) < num_sq: 
+            return 0.0
+        return sum(max(0, s.get('wg_rap_shortfall', 0)) for s in self.history[-num_sq:]) / num_sq
+
+    @property
+    def current_fl_shortfall(self) -> float:
+        num_sq = len(self.squadrons)
+        if len(self.history) < num_sq: 
+            return 0.0
+        return sum(max(0, s.get('fl_rap_shortfall', 0)) for s in self.history[-num_sq:]) / num_sq
+
+    @property
+    def current_ip_shortfall(self) -> float:
+        num_sq = len(self.squadrons)
+        if len(self.history) < num_sq: 
+            return 0.0
+        return sum(max(0, s.get('ip_rap_shortfall', 0)) for s in self.history[-num_sq:]) / num_sq
 
     def reset(self):
         self.history = []
