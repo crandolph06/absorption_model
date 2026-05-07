@@ -27,7 +27,7 @@ priority_options = {
 st.sidebar.header("Simulation Parameters")
 
 with st.sidebar.form("sim_params"):
-    years = st.slider("Years to Run", 5, 20, 10)
+    years = st.slider("Years to Run", 5, 20, 20)
     intake = st.slider("Annual B-Course Intake", 10, 350, 200)
     retention = st.slider("Retention Rate (0.0 - 1.0)", 0.0, 1.0, 0.4)
     ute_val = st.slider("UTE", 6, 20, 10)
@@ -46,7 +46,7 @@ with st.sidebar.form("sim_params"):
     
     round_robin = st.checkbox(
         "Round Robin Assignment", 
-        value=True,
+        value=False,
         help="If Checked: Graduates are assigned equally (1, 2, 3...). If Unchecked: Healthiest squadrons get students first."
     )
 
