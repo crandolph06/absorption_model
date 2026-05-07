@@ -6,7 +6,11 @@ import joblib
 
 
 class CAFSimulation:
-    def __init__(self, sim_upgrades: bool, annual_intake: int, retention_rate: float, round_robin: bool, brain = None, flug_window_start: int = 250, ipug_window_start: int = 400, max_manning_pct: int = 150, staff_priority_mode: PriorityMode = PriorityMode.RANDOM):
+    def __init__(self, sim_upgrades: bool, annual_intake: int, retention_rate: float, 
+                 round_robin: bool, brain = None, flug_window_start: int = 250, 
+                 ipug_window_start: int = 400, max_manning_pct: int = 150, 
+                 staff_priority_mode: PriorityMode = PriorityMode.RANDOM,
+                 use_upgrade_quotas: bool = False):
         self.history = []
         self.current_year = 2026
         self.squadrons: List[SquadronConfig] = []
@@ -17,6 +21,13 @@ class CAFSimulation:
         self.annual_intake = annual_intake
         self.phase_intake = annual_intake // 3 # APPROXIMATE +/- 2
         self.retention_rate = retention_rate
+        self.use_upgrade_quotas = use_upgrade_quotas 
+        if self.use_upgrade_quotas == False:
+            self.phase_flug_intake = 999
+            self.phase_ipug_intake = 999
+        else:
+            self.phase_flug_intake = 90 # 3 per squadron for 30 squadrons
+            self.phase_ipug_intake = 60 # 2 per squadron for 30 squadrons
 
         if brain:
             self.brain = brain
