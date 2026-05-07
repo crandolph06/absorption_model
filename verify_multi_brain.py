@@ -58,3 +58,6 @@ def verify_model():
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
         
         print(f"{target:<20} | {y_true.mean():<12.2f} | ± {mae:<10.2f} | {rmse:<12.2f}")
+
+if __name__ == "__main__":
+    verify_model()
