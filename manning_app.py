@@ -90,11 +90,12 @@ if submitted:
     with st.spinner("Running Simulation..."):
         # 1. Setup & Run
         sim, squadrons = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades, ai_brain=cached_brain,
-                                          flug_window_start=flug_start, ipug_window_start=ipug_start,
+                                          flug_window_start=flug_start, ipug_window_start=ipug_start, annual_intake=intake,
                                           max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode)
         df = sim.run_simulation(
-            years_to_run=years, annual_intake=intake, 
-            retention_rate=retention, squadron_configs=squadrons, ute=ute_val) 
+            years_to_run=years, retention_rate=retention, 
+            squadron_configs=squadrons, ute=ute_val
+            ) 
 
         st.write("### 🔍 Debugging Tools")
         csv = df.to_csv(index=False).encode('utf-8')
@@ -382,7 +383,7 @@ if submitted:
         stability_data = []
 
         master_sim, _ = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades,
-                                         ai_brain=cached_brain, flug_window_start=flug_start, 
+                                         ai_brain=cached_brain, flug_window_start=flug_start, annual_intake=intake,
                                          ipug_window_start= ipug_start, max_manning_pct=max_manning_pct,
                                          staff_priority_mode=staff_priority_mode)
 
@@ -393,13 +394,12 @@ if submitted:
             sensitivity_progress.progress(pct_complete, text=f"Simulating Intake: {val} pilots/yr...")
 
             t_sim, t_sqs = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades,
-                                            ai_brain=cached_brain, existing_sim=master_sim,
+                                            ai_brain=cached_brain, existing_sim=master_sim, annual_intake=val,
                                             flug_window_start=flug_start, ipug_window_start=ipug_start,
                                             max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode)
 
             t_df = t_sim.run_simulation(
                 years_to_run=20, 
-                annual_intake=val, 
                 retention_rate=retention, 
                 squadron_configs=t_sqs, 
                 ute=ute_val 

@@ -5,7 +5,8 @@ from src.models import PriorityMode
 from src.manning_engine import CAFSimulation
 from src.manning_config import get_initial_squadrons
 
-def setup_simulation(round_robin: bool,ai_brain, sim_upgrades: bool = False, 
+def setup_simulation(round_robin: bool, annual_intake: int,
+                     ai_brain, sim_upgrades: bool = False, 
                      existing_sim: Optional[CAFSimulation] = None, 
                      flug_window_start: int = 250, ipug_window_start: int = 400, 
                      max_manning_pct: int = 150, 
@@ -14,6 +15,8 @@ def setup_simulation(round_robin: bool,ai_brain, sim_upgrades: bool = False,
         sim = copy.deepcopy(existing_sim)
         sim.reset()
 
+        sim.annual_intake = annual_intake
+        sim.phase_intake = annual_intake // 3 # APPROXIMATE +/- 2
         sim.sim_upgrades = sim_upgrades
         sim.round_robin = round_robin
         sim.flug_window_start = flug_window_start
@@ -30,7 +33,7 @@ def setup_simulation(round_robin: bool,ai_brain, sim_upgrades: bool = False,
         sim = CAFSimulation(sim_upgrades=sim_upgrades, round_robin=round_robin,
                             brain = ai_brain, flug_window_start=flug_window_start, 
                             ipug_window_start=ipug_window_start, max_manning_pct=max_manning_pct, 
-                            staff_priority_mode=staff_priority_mode)
+                            staff_priority_mode=staff_priority_mode, annual_intake=annual_intake)
 
     # Used 1.5 CCR for all units
     # Used 50% of exp pilots as starting IP value 
@@ -42,14 +45,13 @@ def setup_simulation(round_robin: bool,ai_brain, sim_upgrades: bool = False,
     
     return sim, squadrons
 
-if __name__ == "__main__":
-    brain = joblib.load('outputs/single_phase/brains') # For HPC
-    # brain = joblib.load('brains/hpc_sortie_brain_lite.pkl') # For local
-    sim, squadrons = setup_simulation(round_robin=False, ai_brain=brain, sim_upgrades=True)
+# if __name__ == "__main__":
+#     brain = joblib.load('outputs/single_phase/brains') # For HPC
+#     # brain = joblib.load('brains/hpc_sortie_brain_lite.pkl') # For local
+#     sim, squadrons = setup_simulation(round_robin=False, ai_brain=brain, annual_intake=150, sim_upgrades=True)
 
-    results_df = sim.run_simulation(
-        years_to_run=10, 
-        annual_intake=150, 
-        retention_rate=0.5, 
-        squadron_configs=squadrons,
-    )
+#     results_df = sim.run_simulation(
+#         years_to_run=10,  
+#         retention_rate=0.5, 
+#         squadron_configs=squadrons,
+#     )
