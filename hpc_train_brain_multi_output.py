@@ -69,7 +69,16 @@ def train_hpc_multi_brain():
     linear_model.fit(X_train, Y_train)
 
     Y_train_pred_lin = linear_model.predict(X_train)
+
+    print("🧮 Calculating Residuals...")
     residuals = Y_train - Y_train_pred_lin
+
+    if len(residuals.shape) == 1:
+        print("RESHAPE REQUIRED")
+        residuals = residuals.values.reshape(-1, 4)
+
+    print(f'DEBUG: X_train shape: {X_train.shape}')
+    print(f'DEBUG: Residuals shape: {residuals.shape}')
 
     booster_model = MultiOutputRegressor(
         HistGradientBoostingRegressor(
@@ -85,6 +94,7 @@ def train_hpc_multi_brain():
     booster_model.fit(X_test, residuals)
 
     # 5. EVALUATE
+    print("Models trained! Evaluating performance...")
     y_pred_lin_test = linear_model.predict(X_test)
     y_pred_res_test = booster_model.predict(X_test)
     y_pred_total = y_pred_lin_test + y_pred_res_test
