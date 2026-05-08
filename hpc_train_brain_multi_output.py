@@ -91,7 +91,7 @@ def train_hpc_multi_brain():
         )
     )
     print("🧠 Training Booster model...")
-    booster_model.fit(X_test, residuals)
+    booster_model.fit(X_train, residuals)
 
     # 5. EVALUATE
     print("Models trained! Evaluating performance...")
