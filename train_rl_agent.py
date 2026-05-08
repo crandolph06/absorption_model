@@ -40,6 +40,17 @@ def main():
 
     # 3. Wrap the Engine in the Gym Environment
     raw_env = ManningEnv(sim_engine, run_mode="pragmatic", reward_mode="readiness_first")
+    # raw_env = ManningEnv(sim_engine, run_mode="pragmatic", reward_mode="quantity_first")
+    # raw_env = ManningEnv(sim_engine, run_mode="pragmatic", reward_mode="key_staff_first")
+    # raw_env = ManningEnv(sim_engine, run_mode="optimistic", reward_mode="readiness_first")
+    # raw_env = ManningEnv(sim_engine, run_mode="optimistic", reward_mode="quantity_first")
+    # raw_env = ManningEnv(sim_engine, run_mode="optimistic", reward_mode="key_staff_first")
+    # raw_env = ManningEnv(sim_engine, run_mode="current", reward_mode="readiness_first")
+    # raw_env = ManningEnv(sim_engine, run_mode="current", reward_mode="quantity_first")
+    # raw_env = ManningEnv(sim_engine, run_mode="current", reward_mode="key_staff_first")
+    # raw_env = ManningEnv(sim_engine, run_mode="ideal", reward_mode="quantity_first")
+    # raw_env = ManningEnv(sim_engine, run_mode="ideal", reward_mode="readiness_first")
+    # raw_env = ManningEnv(sim_engine, run_mode="ideal", reward_mode="key_staff_first")
     
     # 4. Run the Stable-Baselines3 Environment Checker
     print("Running environment compliance check...")
@@ -60,7 +71,7 @@ def main():
 
     # 7. Save the Model
     os.makedirs("saved_models", exist_ok=True)
-    model_path = "saved_models/ppo_manning_agent"
+    model_path = f"saved_models/ppo_manning_agent_{reward_mode}_{run_mode}"
     model.save(model_path)
     print(f"Training complete. Model saved to {model_path}.zip")
 
