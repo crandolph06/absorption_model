@@ -37,7 +37,7 @@ def train_hpc_multi_brain():
     print(f"📊 Dataset loaded: {len(df):,} rows")
 
     # 2. FEATURE & TARGET SELECTION
-    base_features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
+    base_features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'wg_qty', 'fl_qty','ip_qty']
     for col in base_features:
         if col not in df.columns: 
             df[col] = 0
