@@ -29,7 +29,7 @@ def load_brain():
     #     return joblib.load(model_path)
     # st.error(f"⚠️ Brain file not found at {model_path}")
     # st.stop()
-    model_path = "brains/hpc_sortie_brain_multi_output.pkl"
+    model_path = "brains/hpc_sortie_brain_multi_output_hybrid.pkl"
     if os.path.exists(model_path):
         return joblib.load(model_path)
     st.error(f"Multi-Output Brain file not found at {model_path}")
@@ -62,7 +62,11 @@ def predict_metrics(df_inputs):
     #         df[t] = brain[t].predict(df[features])
 
     # Multi-output predictions
-    all_preds = brain.predict(df[features])
+    # all_preds = brain.predict(df[features])
+
+    lin_preds = brain['linear'].predict(df[features])
+    res_preds = brain['booster'].predict(df[features])
+    all_preds = lin_preds + res_preds
 
     for i, t in enumerate(targets):
         df[t] = all_preds[:,i]
