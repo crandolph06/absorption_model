@@ -24,6 +24,10 @@ class Regressor(Enum):
     HYB = 'HYB'
 
 def train_hpc_multi_brain(regressor: Regressor, raw_data:bool):
+    if regressor not in (Regressor.HYB, Regressor.MLP):    
+        print("❌ Error: Invalid regressor type.")
+        return
+
     print(f"🚀 Starting Multi-Output HPC Brain Training...")
     files = glob.glob(os.path.join(INPUT_DIR, "part.*.parquet"))
     

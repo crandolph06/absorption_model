@@ -3,15 +3,28 @@ import pandas as pd
 import numpy as np
 import joblib
 import glob
+from enum import Enum
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-MODEL_PATH = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_hybrid.pkl"
+class Regressor(Enum):
+    MLP = 'MLP'
+    HYB = 'HYB'
+
 DATA_DIR = "outputs/single_phase/repart_parquet"
 
-def verify_model():
+def verify_model(regressor: Regressor, raw_data: bool):
+    if regressor is Regressor.HYB:
+        MODEL_PATH = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_hybrid.pkl"
+    elif regressor is Regressor.MLP:
+        MODEL_PATH = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl"
+    else:
+        print("❌ Error: Invalid regressor type.")
+        return
+    
     print(f"🔍 Loading Multi-Output Model from {MODEL_PATH}...")
+
     try:
-        hybrid_brain = joblib.load(MODEL_PATH)
+        brain = joblib.load(MODEL_PATH)
     except FileNotFoundError:
         print(f"❌ Error: Model file not found at {MODEL_PATH}.")
         return    
@@ -29,13 +42,15 @@ def verify_model():
     for col in base_features:
         if col not in df.columns: 
             df[col] = 0
-    ips = df['ip_qty'].replace(0, 0.5)
+
+    ips = df['ip_qty'].replace(0, 1.0)
     fls = df['fl_qty'].replace(0, 1.0)
     wgs = df['wg_qty'].replace(0, 1.0)
 
-    df['mqt_load'] = df['mqt_qty'] / ips
-    df['flug_load'] = df['flug_qty'] / ips
-    df['ipug_load'] = df['ipug_qty'] / ips
+    if raw_data == True:
+        df['mqt_load'] = df['mqt_qty'] / ips
+        df['flug_load'] = df['flug_qty'] / ips
+        df['ipug_load'] = df['ipug_qty'] / ips
     
     df['fl_congestion'] = (df['ipug_qty'] + df['flug_qty']) / fls
     df['wg_crowding'] = (df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']) / wgs
@@ -48,11 +63,19 @@ def verify_model():
     df['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
     
     df = df.replace([np.inf, -np.inf], 0)
-    features = [
-        # 'paa', 'ute', 'mqt_load', 'flug_load', 'ipug_load', # Add next HPC run
-        'exp_ratio', 'ip_ratio', 'fl_congestion',
-        'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
-    ]
+    
+    if raw_data == True:
+        features = [
+            'paa', 'ute', 'mqt_load', 'flug_load', 'ipug_load', 
+            'exp_ratio', 'ip_ratio', 'fl_congestion',
+            'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
+        ]
+    
+    else:
+        features = [
+            'exp_ratio', 'ip_ratio', 'fl_congestion',
+            'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
+        ]
     
     targets = ['wg_monthly', 'fl_monthly', 'ip_monthly', 
                'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly']
@@ -60,9 +83,14 @@ def verify_model():
     X = df[features].fillna(0)
     
     print("🧠 Generating matrix predictions...")
-    lin_preds = hybrid_brain['linear'].predict(X)
-    res_preds = hybrid_brain['booster'].predict(X)
-    all_preds = lin_preds + res_preds
+
+    if regressor is Regressor.HYB:
+        lin_preds = brain['linear'].predict(X)
+        res_preds = brain['booster'].predict(X)
+        preds = lin_preds + res_preds
+
+    elif regressor is Regressor.MLP:
+        preds = brain.predict(X)
     
     print("\n📊 --- REALITY CHECK METRICS (Multi-Output) ---")
     print(f"{'Target':<20} | {'Mean Value':<12} | {'MAE (Error)':<12} | {'RMSE':<12}")
@@ -72,7 +100,7 @@ def verify_model():
         if target not in df.columns: continue
             
         y_true = df[target]
-        y_pred = all_preds[:, i] 
+        y_pred = preds[:, i] 
         
         mae = mean_absolute_error(y_true, y_pred)
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
@@ -80,4 +108,4 @@ def verify_model():
         print(f"{target:<20} | {y_true.mean():<12.2f} | ± {mae:<10.2f} | {rmse:<12.2f}")
 
 if __name__ == "__main__":
-    verify_model()
+    verify_model(regressor=Regressor.MLP, raw_data=False)
