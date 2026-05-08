@@ -5,13 +5,13 @@ import joblib
 import glob
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-MODEL_PATH = "outputs/single_phase/brains/hpc_sortie_brain_multi_output.pkl"
+MODEL_PATH = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_hybrid.pkl"
 DATA_DIR = "outputs/single_phase/repart_parquet"
 
 def verify_model():
     print(f"🔍 Loading Multi-Output Model from {MODEL_PATH}...")
     try:
-        combined_brain = joblib.load(MODEL_PATH)
+        hybrid_brain = joblib.load(MODEL_PATH)
     except FileNotFoundError:
         print(f"❌ Error: Model file not found at {MODEL_PATH}.")
         return    
@@ -22,7 +22,6 @@ def verify_model():
         print(f"❌ Error: No parquet files found in {DATA_DIR}")
         return
         
-    files = glob.glob(f"{DATA_DIR}/*.parquet")
     df = pd.read_parquet(files[0])
     
     # Pre-process exactly as we did in training
@@ -42,7 +41,9 @@ def verify_model():
     X = df[features].fillna(0)
     
     print("🧠 Generating matrix predictions...")
-    all_preds = combined_brain.predict(X) 
+    lin_preds = hybrid_brain['linear'].predict(X)
+    res_preds = hybrid_brain['booster'].predict(X)
+    all_preds = lin_preds + res_preds
     
     print("\n📊 --- REALITY CHECK METRICS (Multi-Output) ---")
     print(f"{'Target':<20} | {'Mean Value':<12} | {'MAE (Error)':<12} | {'RMSE':<12}")
@@ -52,7 +53,7 @@ def verify_model():
         if target not in df.columns: continue
             
         y_true = df[target]
-        y_pred = all_preds[:, i] # Slicing the specific column for this target
+        y_pred = all_preds[:, i] 
         
         mae = mean_absolute_error(y_true, y_pred)
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
