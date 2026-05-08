@@ -8,9 +8,29 @@ from src.manning_engine import CAFSimulation
 from src.models import PriorityMode
 from src.manning_gym import ManningEnv
 
-def make_env(rank, seed=0):
+def load_ai_brain():
+    pc_path = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
+    hpc_path = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl"
+
+    if os.path.exists(pc_path):
+        return joblib.load(pc_path)
+    if os.path.exists(hpc_path):
+        return joblib.load(hpc_path)
+
+    raise FileNotFoundError(
+        f"Could not find MLP multi-output brain at '{pc_path}' or '{hpc_path}'. "
+        "Run 'hpc_train_brain_multi_output.py' to generate it."
+    )
+
+def parse_mode_list(env_var_name, default_modes):
+    raw_value = os.getenv(env_var_name, "").strip()
+    if not raw_value:
+        return default_modes
+    return [mode.strip() for mode in raw_value.split(",") if mode.strip()]
+
+def make_env(rank, run_mode, reward_mode, seed=0):
     def _init():
-        brain = joblib.load("outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl")      
+        brain = load_ai_brain()
         sim_engine = CAFSimulation(
             sim_upgrades=True,
             annual_intake=200,
@@ -23,35 +43,42 @@ def make_env(rank, seed=0):
             staff_priority_mode=PriorityMode.RANDOM,
             use_upgrade_quotas=True,  
         )
-        env = ManningEnv(sim_engine, run_mode="pragmatic", reward_mode="readiness_first")
+        env = ManningEnv(sim_engine, run_mode=run_mode, reward_mode=reward_mode)
         check_env(env, warn=True)
         print("Environment check passed!")
 
         log_sub_dir = f"logs/env_{rank}"
         os.makedirs(log_sub_dir, exist_ok=True)
         return Monitor(env, log_sub_dir)
+    return _init
         
 def main():
+    run_modes = parse_mode_list("RUN_MODES", ["pragmatic", "optimistic", "current", "ideal"])
+    reward_modes = parse_mode_list("REWARD_MODES", ["readiness_first", "quantity_first", "key_staff_first"])
+
     n_procs = int(os.getenv('SLURM_NTASKS', 1))
     print(f"📡 Slurm allocated {n_procs} tasks. Launching parallel environments...")
+    timesteps = int(os.getenv("TIMESTEPS", 1_000_000))
 
-    env_functions = [make_env(i) for i in range(n_procs)]
+    for run_mode in run_modes:
+        for reward_mode in reward_modes:
+            print(f"🚀 Training combination: run_mode='{run_mode}', reward_mode='{reward_mode}'")
+            env_functions = [make_env(i, run_mode, reward_mode) for i in range(n_procs)]
+            env = SubprocVecEnv(env_functions)
 
-    env = SubprocVecEnv(env_functions)
+            model = PPO(
+                "MlpPolicy", env, n_steps=2048, batch_size=1024, verbose=1,
+                tensorboard_log=f"./ppo_manning_tensorboard/{run_mode}_{reward_mode}/"
+            )
 
-    model = PPO(
-        "MlpPolicy", env, n_steps=2048, batch_size=1024, verbose=1,
-        tensorboard_log="./ppo_manning_tensorboard/"
-    )
+            print("Starting Training Loop...")
+            model.learn(total_timesteps=timesteps, progress_bar=True)
 
-    print("Starting Training Loop...")
-    timesteps = 1_000_000 # Eventually change to 5M
-    model.learn(total_timesteps=timesteps, progress_bar=True)
-
-    os.makedirs("saved_models", exist_ok=True)
-    model_path = "saved_models/ppo_manning_agent_prag_ready"
-    model.save(model_path)
-    print(f"Training complete. Model saved to {model_path}.zip")
+            os.makedirs("saved_models", exist_ok=True)
+            model_path = f"saved_models/ppo_manning_agent_{reward_mode}_{run_mode}"
+            model.save(model_path)
+            print(f"Training complete. Model saved to {model_path}.zip")
+            env.close()
 
     # TODO Come back and plot 20-year run in each of the reward/run mode pairs
     # print("Running a quick evaluation phase...")

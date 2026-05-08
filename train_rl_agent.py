@@ -22,58 +22,54 @@ def load_ai_brain():
     )
 
 brain = load_ai_brain()
-      
+
+def parse_mode_list(env_var_name, default_modes):
+    raw_value = os.getenv(env_var_name, "").strip()
+    if not raw_value:
+        return default_modes
+    return [mode.strip() for mode in raw_value.split(",") if mode.strip()]
+
+
 def main():
-    sim_upgrades = True
-    sim_engine = CAFSimulation(
-        sim_upgrades=sim_upgrades,
-        annual_intake=200,
-        retention_rate=0.40,
-        round_robin=False,
-        brain=brain,
-        flug_window_start=250, # Likely needs to change to reality - ~150
-        ipug_window_start=400, # Likely needs to change to reality - ~300
-        max_manning_pct=125,
-        staff_priority_mode=PriorityMode.RANDOM,
-        use_upgrade_quotas=True,  
-    )
+    run_modes = parse_mode_list("RUN_MODES", ["pragmatic", "optimistic", "current", "ideal"])
+    reward_modes = parse_mode_list("REWARD_MODES", ["readiness_first", "quantity_first", "key_staff_first"])
+    timesteps = int(os.getenv("TIMESTEPS", 100_000))  # Eventually change to 1M, then 5M
 
-    # 3. Wrap the Engine in the Gym Environment
-    raw_env = ManningEnv(sim_engine, run_mode="pragmatic", reward_mode="readiness_first")
-    # raw_env = ManningEnv(sim_engine, run_mode="pragmatic", reward_mode="quantity_first")
-    # raw_env = ManningEnv(sim_engine, run_mode="pragmatic", reward_mode="key_staff_first")
-    # raw_env = ManningEnv(sim_engine, run_mode="optimistic", reward_mode="readiness_first")
-    # raw_env = ManningEnv(sim_engine, run_mode="optimistic", reward_mode="quantity_first")
-    # raw_env = ManningEnv(sim_engine, run_mode="optimistic", reward_mode="key_staff_first")
-    # raw_env = ManningEnv(sim_engine, run_mode="current", reward_mode="readiness_first")
-    # raw_env = ManningEnv(sim_engine, run_mode="current", reward_mode="quantity_first")
-    # raw_env = ManningEnv(sim_engine, run_mode="current", reward_mode="key_staff_first")
-    # raw_env = ManningEnv(sim_engine, run_mode="ideal", reward_mode="quantity_first")
-    # raw_env = ManningEnv(sim_engine, run_mode="ideal", reward_mode="readiness_first")
-    # raw_env = ManningEnv(sim_engine, run_mode="ideal", reward_mode="key_staff_first")
-    
-    # 4. Run the Stable-Baselines3 Environment Checker
-    print("Running environment compliance check...")
-    check_env(raw_env, warn=True)
-    print("Environment check passed!")
+    for run_mode in run_modes:
+        for reward_mode in reward_modes:
+            sim_engine = CAFSimulation(
+                sim_upgrades=True,
+                annual_intake=200,
+                retention_rate=0.40,
+                round_robin=False,
+                brain=brain,
+                flug_window_start=250,  # Likely needs to change to reality - ~150
+                ipug_window_start=400,  # Likely needs to change to reality - ~300
+                max_manning_pct=125,
+                staff_priority_mode=PriorityMode.RANDOM,
+                use_upgrade_quotas=True,
+            )
 
-    os.makedirs("logs", exist_ok=True)
-    env = Monitor(raw_env, "logs/")
+            raw_env = ManningEnv(sim_engine, run_mode=run_mode, reward_mode=reward_mode)
 
-    # 5. Initialize the PPO Agent
-    print("Building the Neural Network...")
-    model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./ppo_manning_tensorboard/")
+            print(f"Running environment compliance check for {run_mode}/{reward_mode}...")
+            check_env(raw_env, warn=True)
+            print("Environment check passed!")
 
-    # 6. Train the Agent
-    print("Starting Training Loop...")
-    timesteps = 100_000 # Eventually change to 1M, then 5M
-    model.learn(total_timesteps=timesteps, progress_bar=True)
+            os.makedirs("logs", exist_ok=True)
+            env = Monitor(raw_env, "logs/")
 
-    # 7. Save the Model
-    os.makedirs("saved_models", exist_ok=True)
-    model_path = f"saved_models/ppo_manning_agent_{reward_mode}_{run_mode}"
-    model.save(model_path)
-    print(f"Training complete. Model saved to {model_path}.zip")
+            print("Building the Neural Network...")
+            model = PPO("MlpPolicy", env, verbose=1, tensorboard_log=f"./ppo_manning_tensorboard/{run_mode}_{reward_mode}/")
+
+            print(f"Starting Training Loop for {run_mode}/{reward_mode}...")
+            model.learn(total_timesteps=timesteps, progress_bar=True)
+
+            os.makedirs("saved_models", exist_ok=True)
+            model_path = f"saved_models/ppo_manning_agent_{reward_mode}_{run_mode}"
+            model.save(model_path)
+            print(f"Training complete. Model saved to {model_path}.zip")
+            env.close()
 
     # TODO Come back and plot 20-year run in each of the reward/run mode pairs
     # print("Running a quick evaluation phase...")
