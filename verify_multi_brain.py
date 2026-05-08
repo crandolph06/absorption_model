@@ -51,7 +51,6 @@ def verify_model():
     features = [
         'exp_ratio', 'ip_ratio', 'fl_congestion',
         'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
-        # 'mqt_load', 'flug_load', 'ipug_load', 
     ]
     
     targets = ['wg_monthly', 'fl_monthly', 'ip_monthly', 
