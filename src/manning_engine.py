@@ -1,7 +1,8 @@
 import pandas as pd
 from typing import List
-from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, PriorityMode, AgingRate
+from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, PriorityMode, AgingRate, Regressor
 import os
+import numpy as np
 import joblib
 
 
@@ -365,29 +366,65 @@ class CAFSimulation:
 
         return new_year, new_phase
     
-    def predict_rates(self, df):
+    def predict_rates(self, df, raw_data: bool, regressor_type: Regressor):
+        base_features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'wg_qty', 'fl_qty','ip_qty']
+        for col in base_features:
+            if col not in df.columns: 
+                df[col] = 0
+
+        ips = df['ip_qty'].replace(0, 1.0)
+        fls = df['fl_qty'].replace(0, 1.0)
+        wgs = df['wg_qty'].replace(0, 1.0)
+
+        if raw_data:
+            df['mqt_load'] = df['mqt_qty'] / ips
+            df['flug_load'] = df['flug_qty'] / ips
+            df['ipug_load'] = df['ipug_qty'] / ips
         
+        df['fl_congestion'] = (df['ipug_qty'] + df['flug_qty']) / fls
+        df['wg_crowding'] = (df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']) / wgs
+
+        df['sorties_avail'] = df['paa'] * df['ute']
+        df['pilot_to_sortie'] = df['total_pilots'] / df['sorties_avail']
+
         df['total_students'] = df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']
         df['ip_ratio'] = df['ip_qty'] / df['total_pilots'].replace(0, 1)
         df['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
         
+        df = df.replace([np.inf, -np.inf], 0)
+        
+        if raw_data:
+            features = [
+                'paa', 'ute', 'mqt_load', 'flug_load', 'ipug_load', 
+                'exp_ratio', 'ip_ratio', 'fl_congestion',
+                'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
+            ]
+            
+        else:
+            features = [
+                'exp_ratio', 'ip_ratio', 'fl_congestion',
+                'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
+            ]
+    
         targets = [
         'wg_monthly', 'fl_monthly', 'ip_monthly', 
         'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
         ]
 
-        features = [
-                'paa', 'ute', 'exp_ratio', 'total_pilots', 
-                'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty',
-                'ip_ratio', 'ip_to_stud_ratio'
-            ]
-
         X = df[features].fillna(0)
 
-        all_preds = self.brain['linear'].predict(X) + self.brain['booster'].predict(X)
+        if regressor_type is Regressor.HYB:
+            preds = self.brain['linear'].predict(X) + self.brain['booster'].predict(X)
+        
+        elif regressor_type is Regressor.MLP:
+            preds = self.brain.predict(X)
+
+        else:
+            print("❌ Error: Invalid regressor type.")
+            return
         
         for i, t in enumerate(targets):
-            df[t] = all_preds[:,i]
+            df[t] = preds[:,i]
 
         return df
 
