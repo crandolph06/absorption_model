@@ -93,7 +93,7 @@ def train_hpc_multi_brain(regressor: Regressor, raw_data:bool):
     # 3. SPLIT
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=RANDOM_SEED)
 
-    if regressor.name == 'HYB':
+    if regressor is Regressor.HYB:
         OUTPUT_MODEL = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_hybrid.pkl" 
         
         # DEFINE MODEL
@@ -138,7 +138,7 @@ def train_hpc_multi_brain(regressor: Regressor, raw_data:bool):
         y_pred_res_test = booster_model.predict(X_test)
         y_pred = y_pred_lin_test + y_pred_res_test
 
-    elif regressor.name == 'MLP':
+    elif regressor is Regressor.MLP:
         OUTPUT_MODEL = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl" 
         
         # DEFINE MODEL
@@ -173,7 +173,7 @@ def train_hpc_multi_brain(regressor: Regressor, raw_data:bool):
     # SAVE
     os.makedirs(os.path.dirname(OUTPUT_MODEL), exist_ok=True)
     
-    if regressor.name == 'HYB':
+    if regressor is Regressor.HYB:
         hybrid_brain = {
             'linear': linear_model,
             'booster': booster_model
@@ -181,7 +181,7 @@ def train_hpc_multi_brain(regressor: Regressor, raw_data:bool):
         joblib.dump(hybrid_brain, OUTPUT_MODEL)
         print(f"💾 Hybrid brain saved to {OUTPUT_MODEL}")
 
-    elif regressor.name == 'MLP':
+    elif regressor is Regressor.MLP:
         joblib.dump(mlp_model, OUTPUT_MODEL)
         print(f"💾 MLP brain saved to {OUTPUT_MODEL}")
 
