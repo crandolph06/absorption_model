@@ -39,6 +39,11 @@ class PriorityMode(Enum):
     IP_FIRST = 'ip_first'
     RANDOM = 'random'
 
+class Regressor(Enum):
+    MLP = 'MLP'
+    HYB = 'HYB'
+
+
 @dataclass 
 class AgingRate:
     mqt_phase: float = 0.0
