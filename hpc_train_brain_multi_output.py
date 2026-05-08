@@ -55,14 +55,14 @@ def train_hpc_multi_brain():
     df['sorties_avail'] = df['paa'] * df['ute']
     df['pilot_to_sortie'] = df['total_pilots'] / df['sorties_avail']
 
-    # df['total_students'] = df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']
+    df['total_students'] = df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']
     df['ip_ratio'] = df['ip_qty'] / df['total_pilots'].replace(0, 1)
     df['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
     
     df = df.replace([np.inf, -np.inf], 0)
     features = [
         'exp_ratio', 'ip_ratio', 'mqt_load', 'flug_load', 'ipug_load', 'fl_congestion',
-        'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio' 
+        'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio', 'ute', 'paa'
     ]
     
     targets = [
