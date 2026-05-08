@@ -68,6 +68,9 @@ def train_hpc_multi_brain():
     print("🧠 Training Linear model...")
     linear_model.fit(X_train, Y_train)
 
+    coefs = linear_model.estimators_[2].named_steps['ridge'].coef_
+    print(f"IP Ridge Coefs: {coefs}")
+
     Y_train_pred_lin = linear_model.predict(X_train)
 
     print("🧮 Calculating Residuals...")
@@ -75,11 +78,11 @@ def train_hpc_multi_brain():
 
     booster_model = MultiOutputRegressor(
         HistGradientBoostingRegressor(
-        max_iter=200,
+        max_iter=150,
         learning_rate=0.03,     
-        max_leaf_nodes=15,      
-        min_samples_leaf=150,   
-        l2_regularization=10.0,  
+        max_leaf_nodes=10,      
+        min_samples_leaf=1000,   
+        l2_regularization=50.0,  
         random_state=RANDOM_SEED
         )
     )
