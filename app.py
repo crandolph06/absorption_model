@@ -23,29 +23,18 @@ st.markdown("""
 # ==============================================================================
 # 2. ML ENGINE SETUP
 # ==============================================================================
-brain_type = None
 
 @st.cache_resource
 def load_brain():
-    try:
-        model_path = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
-        if os.path.exists(model_path):
-            brain_type = Regressor.MLP
-            return joblib.load(model_path)
-    except:
-        st.error(f"MLP brain not found. Trying Hybrid brain.")
-        try:
-            model_path = "brains/hpc_sortie_brain_multi_output_hybrid.pkl" # Single-output regressor
-            if os.path.exists(model_path):
-                brain_type = Regressor.HYB
-                return joblib.load(model_path)
-        except:
-            st.error(f"⚠️ Brain file not found at {model_path}")
-            st.stop()
+    model_path = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
+    if os.path.exists(model_path):
+        return joblib.load(model_path)
+    st.error(f"⚠️ Brain file not found at {model_path}")
+    st.stop()
 
 brain = load_brain()
 
-def predict_metrics(df_inputs, regressor_type: Regressor):
+def predict_metrics(df_inputs):
     df = df_inputs.copy()
     
     # Feature Engineering (Matching Training Data)
@@ -74,50 +63,18 @@ def predict_metrics(df_inputs, regressor_type: Regressor):
     
     df = df.replace([np.inf, -np.inf], 0)
 
-    features = [ # TODO Once we decide on a brain, hard code this
-        'exp_ratio', 'ip_ratio', 'fl_congestion',
-        'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
-    ]
+    features = [
+                # 'paa', 'ute', 'mqt_load', 'flug_load', 'ipug_load', 
+                'exp_ratio', 'ip_ratio', 'fl_congestion',
+                'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
+            ]
     
     targets = [
         'wg_monthly', 'fl_monthly', 'ip_monthly', 
         'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
     ]
     
-    if brain_type == Regressor.MLP:
-        try:
-            preds = brain.predict(df[features])
-
-        except:
-            features = [
-                'paa', 'ute', 'mqt_load', 'flug_load', 'ipug_load', 
-                'exp_ratio', 'ip_ratio', 'fl_congestion',
-                'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
-            ]
-            try:
-                preds = brain.predict(df[features])
-            
-            except: 
-                st.error(f"Incorrect features passe for selected brain")
-    elif brain_type == Regressor.HYB:
-        try:
-            lin_preds = brain['linear'].predict(df[features])
-            res_preds = brain['booster'].predict(df[features])
-            preds = lin_preds + res_preds
-
-        except:
-            features = [
-                    'exp_ratio', 'ip_ratio', 'fl_congestion',
-                    'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
-                ]
-            try:
-                lin_preds = brain['linear'].predict(df[features])
-                res_preds = brain['booster'].predict(df[features])
-                preds = lin_preds + res_preds
-            
-            except:
-                st.error(f"Error with Hybrid Brain.")
-                st.stop()
+    preds = brain.predict(df[features])
 
 
     for i, t in enumerate(targets):
@@ -178,8 +135,14 @@ sweep_ranges = {
     'paa': np.arange(12, 31, 1),
     'total_pilots': np.arange(20, 81, 1),
     'exp_ratio': np.arange(0.20, 0.81, 0.02),
-    'ip_qty': np.arange(2, 21, 1),
-    'mqt_qty': np.arange(0, 21, 1)
+}
+
+# Defaults based on System Inputs slider bounds
+input_axis_bounds = {
+    'ute': (6.0, 21.0),
+    'paa': (18, 24),
+    'total_pilots': (25, 50),
+    'exp_ratio': (0.0, 1.0),
 }
 
 # ==============================================================================
@@ -190,7 +153,7 @@ def generate_1d_sweep(x_var):
     x_vals = sweep_ranges.get(x_var, np.arange(0, 10))
     df_sweep = pd.DataFrame([inputs] * len(x_vals))
     df_sweep[x_var] = x_vals
-    return predict_metrics(df_sweep, brain_type)
+    return predict_metrics(df_sweep)
 
 # ==============================================================================
 # 5. MAIN UI & CHARTS
@@ -205,8 +168,42 @@ with col_main:
     st.subheader("📊 Sortie Equity (Total Monthly)")
     x_options = list(sweep_ranges.keys())
     x_var_equity = st.selectbox("X-Axis Variable", x_options, index=0, key="equity_x")
-    
+
+    x_vals = sweep_ranges[x_var_equity]
+    sweep_min = float(np.min(x_vals))
+    sweep_max = float(np.max(x_vals))
+    default_min, default_max = input_axis_bounds.get(x_var_equity, (sweep_min, sweep_max))
+    default_min = max(sweep_min, float(default_min))
+    default_max = min(sweep_max, float(default_max))
+
+    if default_min > default_max:
+        default_min, default_max = sweep_min, sweep_max
+
+    if np.issubdtype(x_vals.dtype, np.integer):
+        x_display_min, x_display_max = st.slider(
+            "Displayed X-Axis Range",
+            min_value=int(sweep_min),
+            max_value=int(sweep_max),
+            value=(int(default_min), int(default_max)),
+            step=1,
+            key=f"equity_x_range_{x_var_equity}",
+        )
+    else:
+        step = 0.5 if x_var_equity == "ute" else 0.02
+        x_display_min, x_display_max = st.slider(
+            "Displayed X-Axis Range",
+            min_value=sweep_min,
+            max_value=sweep_max,
+            value=(default_min, default_max),
+            step=step,
+            key=f"equity_x_range_{x_var_equity}",
+        )
+
     df_equity = generate_1d_sweep(x_var_equity)
+    df_equity = df_equity[
+        (df_equity[x_var_equity] >= x_display_min) &
+        (df_equity[x_var_equity] <= x_display_max)
+    ]
     
     fig_equity = go.Figure()
     colors_total = {'wg_monthly': '#3b82f6', 'fl_monthly': '#8b5cf6', 'ip_monthly': '#10b981'}
@@ -223,10 +220,7 @@ with col_main:
     fig_equity.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
     fig_equity.update_layout(xaxis_title=x_var_equity.upper(), yaxis_title='Monthly Sorties', hovermode="x unified", margin=dict(l=20, r=20, t=30, b=20), height=350)
     
-    exact_min = df_equity[x_var_equity].iloc[0] #TODO Fix this - not working
-    exact_max = df_equity[x_var_equity].iloc[-1] #TODO Fix this - not working
-
-    fig_equity.update_xaxes(range=[exact_min, exact_max], autorange=False)
+    fig_equity.update_xaxes(range=[x_display_min, x_display_max], autorange=False)
     
     st.plotly_chart(fig_equity, width='stretch')
 
@@ -239,8 +233,42 @@ with col_main:
     with col_comp_2:
         st.write("") 
         show_trends = st.toggle("Show Total Trendlines", value=False)
-    
+
+    x_vals_comp = sweep_ranges[x_var_comp]
+    comp_sweep_min = float(np.min(x_vals_comp))
+    comp_sweep_max = float(np.max(x_vals_comp))
+    comp_default_min, comp_default_max = input_axis_bounds.get(x_var_comp, (comp_sweep_min, comp_sweep_max))
+    comp_default_min = max(comp_sweep_min, float(comp_default_min))
+    comp_default_max = min(comp_sweep_max, float(comp_default_max))
+
+    if comp_default_min > comp_default_max:
+        comp_default_min, comp_default_max = comp_sweep_min, comp_sweep_max
+
+    if np.issubdtype(x_vals_comp.dtype, np.integer):
+        x_comp_min, x_comp_max = st.slider(
+            "Displayed Composition X-Axis Range",
+            min_value=int(comp_sweep_min),
+            max_value=int(comp_sweep_max),
+            value=(int(comp_default_min), int(comp_default_max)),
+            step=1,
+            key=f"comp_x_range_{x_var_comp}",
+        )
+    else:
+        comp_step = 0.5 if x_var_comp == "ute" else 0.02
+        x_comp_min, x_comp_max = st.slider(
+            "Displayed Composition X-Axis Range",
+            min_value=comp_sweep_min,
+            max_value=comp_sweep_max,
+            value=(comp_default_min, comp_default_max),
+            step=comp_step,
+            key=f"comp_x_range_{x_var_comp}",
+        )
+
     df_comp = generate_1d_sweep(x_var_comp)
+    df_comp = df_comp[
+        (df_comp[x_var_comp] >= x_comp_min) &
+        (df_comp[x_var_comp] <= x_comp_max)
+    ]
     
     fig_comp = go.Figure()
     colors = {'wg': ('#3b82f6', '#93c5fd'), 'fl': ('#8b5cf6', '#c4b5fd'), 'ip': ('#10b981', '#6ee7b7')}
@@ -254,6 +282,7 @@ with col_main:
     fig_comp.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
     fig_comp.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
     fig_comp.update_layout(xaxis_title=x_var_comp.upper(), yaxis_title='Monthly Sorties', barmode='group', height=450, margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    fig_comp.update_xaxes(range=[x_comp_min, x_comp_max], autorange=False)
     st.plotly_chart(fig_comp, width='stretch')
 
     # --- CHART 3: HEATMAP (2D Sweep) ---
@@ -273,7 +302,7 @@ with col_main:
             df_heat_base[k] = v
             
     # Predict Grid
-    df_heat_preds = predict_metrics(df_heat_base, brain_type)
+    df_heat_preds = predict_metrics(df_heat_base)
     
     # Calculate Status
     df_heat_preds['rap_code'] = df_heat_preds.apply(lambda r: calculate_rap_code(r, is_blue), axis=1)
@@ -318,7 +347,7 @@ with col_summary:
     
     # Predict exactly the point defined in the sidebar
     df_single = pd.DataFrame([inputs])
-    row = predict_metrics(df_single, brain_type).iloc[0]
+    row = predict_metrics(df_single).iloc[0]
     
     current_code = calculate_rap_code(row, is_blue=False)
     label = state_labels_dict.get(current_code, "Unknown")
