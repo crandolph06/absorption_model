@@ -8,9 +8,18 @@ from src.models import PriorityMode
 from src.manning_gym import ManningEnv
 
 def load_ai_brain():
-    if not os.path.exists("brains/hpc_sortie_brain_lite.pkl"):
-        print("Warning: HPC Brain models not found. Check file path for HPC sortie brain.")
-    return joblib.load("brains/hpc_sortie_brain_lite.pkl")      
+    pc_path = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
+    hpc_path = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl"
+
+    if os.path.exists(pc_path):
+        return joblib.load(pc_path)
+    if os.path.exists(hpc_path):
+        return joblib.load(hpc_path)
+
+    raise FileNotFoundError(
+        f"Could not find MLP multi-output brain at '{pc_path}' or '{hpc_path}'. "
+        "Run 'hpc_train_brain_multi_output.py' to generate it."
+    )
 
 brain = load_ai_brain()
       
