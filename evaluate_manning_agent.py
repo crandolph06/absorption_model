@@ -9,8 +9,8 @@ import joblib
 def evaluate():
     # 1. Setup the Environment (Must match training config)
     print("🚀 Initializing Evaluation Engine...")
-    brain = joblib.load("brains/hpc_sortie_brain_multi_output.pkl") # For PC
-    # brain = joblib.load("outputs/single_phase/brains/hpc_sortie_brain_multi_output.pkl") # For HPC
+    brain = joblib.load("brains/hpc_sortie_brain_multi_output_mlp.pkl") # For PC
+    # brain = joblib.load("outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl") # For HPC
     
     sim_engine = CAFSimulation(
         sim_upgrades=True,

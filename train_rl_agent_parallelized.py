@@ -10,7 +10,7 @@ from src.manning_gym import ManningEnv
 
 def make_env(rank, seed=0):
     def _init():
-        brain = joblib.load("outputs/single_phase/brains/hpc_sortie_brain_multi_output.pkl")      
+        brain = joblib.load("outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl")      
         sim_engine = CAFSimulation(
             sim_upgrades=True,
             annual_intake=200,
