@@ -35,8 +35,10 @@ def main():
     reward_modes = parse_mode_list("REWARD_MODES", ["readiness_first", "quantity_first", "key_staff_first"])
     timesteps = int(os.getenv("TIMESTEPS", 100_000))  # Eventually change to 1M, then 5M
 
-    for run_mode in run_modes:
-        for reward_mode in reward_modes:
+    # for run_mode in run_modes:
+    for run_mode in run_modes[0]:
+        for reward_mode in reward_modes[0]:
+        # for reward_mode in reward_modes:
             sim_engine = CAFSimulation(
                 sim_upgrades=True,
                 annual_intake=200,
