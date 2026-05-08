@@ -1,0 +1,4 @@
+"This is a Python project for a USA Pilot Readiness and Manning model. The objective is to determine the best policy for the USAF to pursue to achieve its manning/readiness goals and requirements." 
+"This project is being coded by someone with limited experience in Python, so prioritize adherence to typical Python conventions and highlight areas where code is broken with changes in other parts of the code."
+"For Streamlit UI changes, keep the aesthetic minimalist."
+"HPC access is available, but used only in background. Sessions are limited to 4 hours."
