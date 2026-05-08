@@ -49,6 +49,7 @@ def verify_model():
     
     df = df.replace([np.inf, -np.inf], 0)
     features = [
+        # 'paa', 'ute', 'mqt_load', 'flug_load', 'ipug_load', # Add next HPC run
         'exp_ratio', 'ip_ratio', 'fl_congestion',
         'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
     ]
