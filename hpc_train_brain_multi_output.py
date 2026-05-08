@@ -4,12 +4,8 @@ import numpy as np
 import joblib
 import glob
 import os
-from enum import Enum
 
-from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.multioutput import MultiOutputRegressor
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import r2_score
@@ -19,15 +15,7 @@ INPUT_DIR = "outputs/single_phase/repart_parquet"
 SAMPLE_FRAC = 0.10 
 RANDOM_SEED = 42
 
-class Regressor(Enum):
-    MLP = 'MLP'
-    HYB = 'HYB'
-
-def train_hpc_multi_brain(regressor: Regressor, raw_data:bool):
-    if regressor not in (Regressor.HYB, Regressor.MLP):    
-        print("❌ Error: Invalid regressor type.")
-        return
-
+def train_hpc_multi_brain(raw_data: bool):
     print(f"🚀 Starting Multi-Output HPC Brain Training...")
     files = glob.glob(os.path.join(INPUT_DIR, "part.*.parquet"))
     
@@ -97,79 +85,33 @@ def train_hpc_multi_brain(regressor: Regressor, raw_data:bool):
     # 3. SPLIT
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=RANDOM_SEED)
 
-    if regressor is Regressor.HYB:
-        OUTPUT_MODEL = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_hybrid.pkl" 
-        
-        # DEFINE MODEL
-        base_model = Pipeline([
-            ('scaler', StandardScaler()),
-            ('ridge', Ridge(alpha=1.0))
-        ])
-        linear_model = MultiOutputRegressor(base_model)
-        print("🧠 Training Linear model...")
-        linear_model.fit(X_train, Y_train)
+    OUTPUT_MODEL = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl"
 
-        wg_coefs = linear_model.estimators_[0].named_steps['ridge'].coef_
-        print(f"WG Ridge Coefs: {wg_coefs}")    
-        fl_coefs = linear_model.estimators_[1].named_steps['ridge'].coef_
-        print(f"FL Ridge Coefs: {fl_coefs}")
-        ip_coefs = linear_model.estimators_[2].named_steps['ridge'].coef_
-        print(f"IP Ridge Coefs: {ip_coefs}")
+    # DEFINE MODEL
+    brain = MLPRegressor(
+        hidden_layer_sizes=(64, 64),
+        activation='relu',       # Critical for learning 'hinges' and floors
+        solver='adam',           # Standard optimizer for large datasets
+        alpha=0.001,             # L2 Regularization (prevents the 'wiggles')
+        batch_size=1024,         # Helps with the 50M row memory load
+        learning_rate_init=0.001,
+        max_iter=500,
+        early_stopping=True,     # Stops once it stops improving on the test set
+        random_state=42,
+        verbose=True
+    )
+    mlp_model = Pipeline([
+        ('scaler', StandardScaler()),
+        ('mlp', brain)
+    ])
 
-        Y_train_pred_lin = linear_model.predict(X_train)
+    # TRAIN
+    print("🧠 Training MLP Regressor model...")
+    mlp_model.fit(X_train, Y_train)
 
-        print("🧮 Calculating Residuals...")
-        residuals = Y_train - Y_train_pred_lin
-
-        booster_model = MultiOutputRegressor(
-            HistGradientBoostingRegressor(
-            max_iter=150,
-            learning_rate=0.03,     
-            max_leaf_nodes=10,      
-            min_samples_leaf=1000,   
-            l2_regularization=50.0,  
-            random_state=RANDOM_SEED
-            )
-        )
-
-        # TRAIN
-        print("🧠 Training Booster model...")
-        booster_model.fit(X_train, residuals)
-
-        # EVALUATE
-        print("Models trained! Evaluating performance...")
-        y_pred_lin_test = linear_model.predict(X_test)
-        y_pred_res_test = booster_model.predict(X_test)
-        y_pred = y_pred_lin_test + y_pred_res_test
-
-    elif regressor is Regressor.MLP:
-        OUTPUT_MODEL = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl" 
-        
-        # DEFINE MODEL
-        brain = MLPRegressor(
-            hidden_layer_sizes=(64, 64),
-            activation='relu',       # Critical for learning 'hinges' and floors
-            solver='adam',           # Standard optimizer for large datasets
-            alpha=0.001,             # L2 Regularization (prevents the 'wiggles')
-            batch_size=1024,         # Helps with the 50M row memory load
-            learning_rate_init=0.001,
-            max_iter=500,
-            early_stopping=True,     # Stops once it stops improving on the test set
-            random_state=42,
-            verbose=True
-        )
-        mlp_model = Pipeline([
-            ('scaler', StandardScaler()),
-            ('mlp', brain)
-        ])
-
-        # TRAIN
-        print("🧠 Training MLP Regressor model...")
-        mlp_model.fit(X_train, Y_train)
-
-        # EVALUATE
-        print("MLP Model trained! Evaluating performance...")
-        y_pred = mlp_model.predict(X_test)
+    # EVALUATE
+    print("MLP Model trained! Evaluating performance...")
+    y_pred = mlp_model.predict(X_test)
 
     # SCORE
     score = r2_score(Y_test, y_pred)
@@ -178,17 +120,8 @@ def train_hpc_multi_brain(regressor: Regressor, raw_data:bool):
     # SAVE
     os.makedirs(os.path.dirname(OUTPUT_MODEL), exist_ok=True)
     
-    if regressor is Regressor.HYB:
-        hybrid_brain = {
-            'linear': linear_model,
-            'booster': booster_model
-        }
-        joblib.dump(hybrid_brain, OUTPUT_MODEL)
-        print(f"💾 Hybrid brain saved to {OUTPUT_MODEL}")
-
-    elif regressor is Regressor.MLP:
-        joblib.dump(mlp_model, OUTPUT_MODEL)
-        print(f"💾 MLP brain saved to {OUTPUT_MODEL}")
+    joblib.dump(mlp_model, OUTPUT_MODEL)
+    print(f"💾 MLP brain saved to {OUTPUT_MODEL}")
 
 if __name__ == "__main__":
-    train_hpc_multi_brain(regressor=Regressor.MLP, raw_data=False)
+    train_hpc_multi_brain(raw_data=False)

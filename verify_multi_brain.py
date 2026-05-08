@@ -3,24 +3,13 @@ import pandas as pd
 import numpy as np
 import joblib
 import glob
-from enum import Enum
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-
-class Regressor(Enum):
-    MLP = 'MLP'
-    HYB = 'HYB'
 
 DATA_DIR = "outputs/single_phase/repart_parquet"
 
-def verify_model(regressor: Regressor, raw_data: bool):
-    if regressor is Regressor.HYB:
-        MODEL_PATH = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_hybrid.pkl"
-    elif regressor is Regressor.MLP:
-        MODEL_PATH = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl"
-    else:
-        print("❌ Error: Invalid regressor type.")
-        return
-    
+def verify_model(raw_data: bool):
+    MODEL_PATH = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl"
+
     print(f"🔍 Loading Multi-Output Model from {MODEL_PATH}...")
 
     try:
@@ -84,13 +73,7 @@ def verify_model(regressor: Regressor, raw_data: bool):
     
     print("🧠 Generating matrix predictions...")
 
-    if regressor is Regressor.HYB:
-        lin_preds = brain['linear'].predict(X)
-        res_preds = brain['booster'].predict(X)
-        preds = lin_preds + res_preds
-
-    elif regressor is Regressor.MLP:
-        preds = brain.predict(X)
+    preds = brain.predict(X)
     
     print("\n📊 --- REALITY CHECK METRICS (Multi-Output) ---")
     print(f"{'Target':<20} | {'Mean Value':<12} | {'MAE (Error)':<12} | {'RMSE':<12}")
@@ -108,4 +91,4 @@ def verify_model(regressor: Regressor, raw_data: bool):
         print(f"{target:<20} | {y_true.mean():<12.2f} | ± {mae:<10.2f} | {rmse:<12.2f}")
 
 if __name__ == "__main__":
-    verify_model(regressor=Regressor.MLP, raw_data=False)
+    verify_model(raw_data=False)

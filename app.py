@@ -6,7 +6,6 @@ import plotly.graph_objects as go
 import itertools
 import os
 import joblib
-from src.models import Regressor
 
 # ==============================================================================
 # 1. PAGE CONFIG & STYLING

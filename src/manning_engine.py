@@ -1,6 +1,6 @@
 import pandas as pd
 from typing import List
-from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, PriorityMode, AgingRate, Regressor
+from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, PriorityMode, AgingRate
 import os
 import numpy as np
 import joblib
@@ -33,17 +33,11 @@ class CAFSimulation:
 
         if brain:
             self.brain = brain
-        # elif os.path.exists("brains/hpc_sortie_brain_lite.pkl"):
-        #     print(f"🧠 Loading Sortie Brain from disk...")
-        #     self.brain = joblib.load("brains/hpc_sortie_brain_lite.pkl")
-        # else:
-        #     raise FileNotFoundError(f"Could not find brains/hpc_sortie_brain_lite. Please confirm file path first.")
-        # Multi-output brain
-        elif os.path.exists("brains/hpc_sortie_brain_multi_output.pkl"): # TODO add hybrid once complete
+        elif os.path.exists("brains/hpc_sortie_brain_multi_output_mlp.pkl"): # TODO add hybrid once complete
             print(f"🧠 Loading Sortie Brain from disk...")
-            self.brain = joblib.load("brains/hpc_sortie_brain_multi_output.pkl")
+            self.brain = joblib.load("brains/hpc_sortie_brain_multi_output_mlp.pkl")
         else:
-            raise FileNotFoundError(f"Could not find brains/hpc_sortie_brain_multi_output. Please confirm file path first.")
+            raise FileNotFoundError(f"Could not find brains/hpc_sortie_brain_multi_output_mlp. Please confirm file path first.")
         self.sim_upgrades = sim_upgrades
         self.round_robin = round_robin
 
@@ -117,9 +111,10 @@ class CAFSimulation:
             return 0.0
         return sum(max(0, s.get('ip_rap_shortfall', 0)) for s in self.history[-num_sq:]) / num_sq
 
-    # def reset(self):
-    #     self.history = []
-    #     self.current_year = 2025
+    def reset(self):
+        self.history = []
+        self.current_year = 2026
+        self.current_phase = 1
 
     def add_new_bcourse_graduates(self, year: int, count: int, round_robin: bool): 
         num_sq = len(self.squadrons)
@@ -154,8 +149,6 @@ class CAFSimulation:
         self.history = []
         self.squadrons = squadron_configs
 
-        FEATURE_NAMES = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
-
         for sq in self.squadrons:
             sq.ute = ute # With current implementation all squadrons must have same UTE
             sq.manning_pct = self.max_manning
@@ -174,39 +167,17 @@ class CAFSimulation:
                     sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
 
                 if self.sim_upgrades:
-                    FEATURE_NAMES_EXPANDED = [
-                                    'paa', 'ute', 'exp_ratio', 'total_pilots', 
-                                    'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty',
-                                    'ip_ratio', 'ip_to_stud_ratio'
-                                ]
-
-                    batch_data = []
-
-                    for sq in self.squadrons:
-                        vec = sq.get_feature_vector()
-
-                        total_students = sq.mqt_students + sq.flug_students + sq.ipug_students
-                        ip_ratio = sq.ip_qty / max(sq.total_pilots, 1)
-                        ip_to_stud_ratio = sq.ip_qty / (total_students if total_students > 0 else 0.1)
-
-                        vec.extend([ip_ratio, ip_to_stud_ratio])
-                        batch_data.append(vec)
-
-                    df_batch = pd.DataFrame(batch_data, columns=FEATURE_NAMES_EXPANDED)
-
-                    wg_rates = self.brain['wg_monthly'].predict(df_batch)
-                    fl_rates = self.brain['fl_monthly'].predict(df_batch)
-                    ip_rates = self.brain['ip_monthly'].predict(df_batch)
-
-                    wg_blue_rates = self.brain['wg_blue_monthly'].predict(df_batch)
-                    fl_blue_rates = self.brain['fl_blue_monthly'].predict(df_batch)
-                    ip_blue_rates = self.brain['ip_blue_monthly'].predict(df_batch)
+                    df_batch = self._build_batch_df()
+                    df_results = self.predict_rates(df_batch, raw_data=False)
 
                 for i, sq in enumerate(self.squadrons):
                     if self.sim_upgrades:
-                        monthly_rates = AgingRate(4.0, wg_rates[i], fl_rates[i], ip_rates[i],
-                                          4.0, wg_blue_rates[i], fl_blue_rates[i], 
-                                          ip_blue_rates[i])
+                        result = df_results.iloc[i]
+                        monthly_rates = AgingRate(
+                            4.0, result['wg_monthly'], result['fl_monthly'], result['ip_monthly'],
+                            4.0, result['wg_blue_monthly'], result['fl_blue_monthly'],
+                            result['ip_blue_monthly']
+                        )
                         rates =  monthly_rates.monthly_to_phase(sq.phase_length_days)
 
                     else:
@@ -366,7 +337,12 @@ class CAFSimulation:
 
         return new_year, new_phase
     
-    def predict_rates(self, df, raw_data: bool, regressor_type: Regressor):
+    def _build_batch_df(self) -> pd.DataFrame:
+        base_names = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
+        batch_data = [sq.get_feature_vector() for sq in self.squadrons]
+        return pd.DataFrame(batch_data, columns=base_names)
+
+    def predict_rates(self, df: pd.DataFrame, raw_data: bool = True) -> pd.DataFrame:
         base_features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'wg_qty', 'fl_qty','ip_qty']
         for col in base_features:
             if col not in df.columns: 
@@ -413,15 +389,7 @@ class CAFSimulation:
 
         X = df[features].fillna(0)
 
-        if regressor_type is Regressor.HYB:
-            preds = self.brain['linear'].predict(X) + self.brain['booster'].predict(X)
-        
-        elif regressor_type is Regressor.MLP:
-            preds = self.brain.predict(X)
-
-        else:
-            print("❌ Error: Invalid regressor type.")
-            return
+        preds = self.brain.predict(X)
         
         for i, t in enumerate(targets):
             df[t] = preds[:,i]
@@ -436,10 +404,8 @@ class CAFSimulation:
         self.add_new_bcourse_graduates(self.current_year, current_batch, self.round_robin) 
 
         if self.sim_upgrades:
-            batch_data = [sq.get_feature_vector() for sq in self.squadrons]
-            base_names = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
-            df_batch = pd.DataFrame(batch_data, columns=base_names)
-            df_results = self.predict_rates(df_batch)
+            df_batch = self._build_batch_df()
+            df_results = self.predict_rates(df_batch, raw_data=False)
 
         for i, sq in enumerate(self.squadrons):
             sq.manning_pct = self.max_manning
@@ -454,10 +420,10 @@ class CAFSimulation:
                                   ipug_quota=self.sq_phase_ipug_intake)
 
             if self.sim_upgrades:
-                res = df_results.iloc[i]
+                result = df_results.iloc[i]
                 monthly_rates = AgingRate(
-                    4.0, res['wg_monthly'], res['fl_monthly'], res['ip_monthly'],
-                    4.0, res['wg_blue_monthly'], res['fl_blue_monthly'], res['ip_blue_monthly']
+                    4.0, result['wg_monthly'], result['fl_monthly'], result['ip_monthly'],
+                    4.0, result['wg_blue_monthly'], result['fl_blue_monthly'], result['ip_blue_monthly']
                 )
                 rates =  monthly_rates.monthly_to_phase(sq.phase_length_days)
 
