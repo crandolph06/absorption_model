@@ -11,9 +11,11 @@ from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import r2_score
+from sklearn.neural_network import MLPRegressor
 
 INPUT_DIR = "outputs/single_phase/repart_parquet"
-OUTPUT_MODEL = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_hybrid.pkl" 
+# OUTPUT_MODEL = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_hybrid.pkl" 
+OUTPUT_MODEL = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl" 
 SAMPLE_FRAC = 0.10 
 RANDOM_SEED = 42
 
@@ -77,56 +79,82 @@ def train_hpc_multi_brain():
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=RANDOM_SEED)
 
     # # 4. DEFINE HYBRID MODEL
-    base_model = Pipeline([
-        ('scaler', StandardScaler()),
-        ('ridge', Ridge(alpha=1.0))
-    ])
-    linear_model = MultiOutputRegressor(base_model)
-    print("🧠 Training Linear model...")
-    linear_model.fit(X_train, Y_train)
+    # base_model = Pipeline([
+    #     ('scaler', StandardScaler()),
+    #     ('ridge', Ridge(alpha=1.0))
+    # ])
+    # linear_model = MultiOutputRegressor(base_model)
+    # print("🧠 Training Linear model...")
+    # linear_model.fit(X_train, Y_train)
 
-    wg_coefs = linear_model.estimators_[0].named_steps['ridge'].coef_
-    print(f"WG Ridge Coefs: {wg_coefs}")    
-    fl_coefs = linear_model.estimators_[1].named_steps['ridge'].coef_
-    print(f"FL Ridge Coefs: {fl_coefs}")
-    ip_coefs = linear_model.estimators_[2].named_steps['ridge'].coef_
-    print(f"IP Ridge Coefs: {ip_coefs}")
+    # wg_coefs = linear_model.estimators_[0].named_steps['ridge'].coef_
+    # print(f"WG Ridge Coefs: {wg_coefs}")    
+    # fl_coefs = linear_model.estimators_[1].named_steps['ridge'].coef_
+    # print(f"FL Ridge Coefs: {fl_coefs}")
+    # ip_coefs = linear_model.estimators_[2].named_steps['ridge'].coef_
+    # print(f"IP Ridge Coefs: {ip_coefs}")
 
-    Y_train_pred_lin = linear_model.predict(X_train)
+    # Y_train_pred_lin = linear_model.predict(X_train)
 
-    print("🧮 Calculating Residuals...")
-    residuals = Y_train - Y_train_pred_lin
+    # print("🧮 Calculating Residuals...")
+    # residuals = Y_train - Y_train_pred_lin
 
-    booster_model = MultiOutputRegressor(
-        HistGradientBoostingRegressor(
-        max_iter=150,
-        learning_rate=0.03,     
-        max_leaf_nodes=10,      
-        min_samples_leaf=1000,   
-        l2_regularization=50.0,  
-        random_state=RANDOM_SEED
-        )
+    # booster_model = MultiOutputRegressor(
+    #     HistGradientBoostingRegressor(
+    #     max_iter=150,
+    #     learning_rate=0.03,     
+    #     max_leaf_nodes=10,      
+    #     min_samples_leaf=1000,   
+    #     l2_regularization=50.0,  
+    #     random_state=RANDOM_SEED
+    #     )
+    # )
+    # print("🧠 Training Booster model...")
+    # booster_model.fit(X_train, residuals)
+
+    # # 5. EVALUATE
+    # print("Models trained! Evaluating performance...")
+    # y_pred_lin_test = linear_model.predict(X_test)
+    # y_pred_res_test = booster_model.predict(X_test)
+    # y_pred_total = y_pred_lin_test + y_pred_res_test
+
+    brain = MLPRegressor(
+        hidden_layer_sizes=(64, 64),
+        activation='relu',       # Critical for learning 'hinges' and floors
+        solver='adam',           # Standard optimizer for large datasets
+        alpha=0.001,             # L2 Regularization (prevents the 'wiggles')
+        batch_size=1024,         # Helps with the 50M row memory load
+        learning_rate_init=0.001,
+        max_iter=500,
+        early_stopping=True,     # Stops once it stops improving on the test set
+        random_state=42
     )
-    print("🧠 Training Booster model...")
-    booster_model.fit(X_train, residuals)
+    mlp_model = Pipeline([
+        ('scaler', StandardScaler()),
+        ('mlp', brain)
+    ])
 
-    # 5. EVALUATE
-    print("Models trained! Evaluating performance...")
-    y_pred_lin_test = linear_model.predict(X_test)
-    y_pred_res_test = booster_model.predict(X_test)
-    y_pred_total = y_pred_lin_test + y_pred_res_test
+    print("🧠 Training MLP Regressor model...")
+    mlp_model.fit(X_train, Y_train)
+    print("MLP Model trained! Evaluating performance...")
+    y_pred = mlp_model.predict(X_test)
 
-    score = r2_score(Y_test, y_pred_total)
+
+    score = r2_score(Y_test, y_pred)
+    # score = r2_score(Y_test, y_pred_total)
     print(f"✅ Training Complete. Overall R² Score: {score:.4f}")
 
     # 6. SAVE
     os.makedirs(os.path.dirname(OUTPUT_MODEL), exist_ok=True)
-    hybrid_brain = {
-        'linear': linear_model,
-        'booster': booster_model
-    }
-    joblib.dump(hybrid_brain, OUTPUT_MODEL)
-    print(f"💾 Hybrid brain saved to {OUTPUT_MODEL}")
+    # hybrid_brain = {
+    #     'linear': linear_model,
+    #     'booster': booster_model
+    # }
+    # joblib.dump(hybrid_brain, OUTPUT_MODEL)
+    # print(f"💾 Hybrid brain saved to {OUTPUT_MODEL}")
+    MLP_brain = mlp_model
+    joblib.dump(mlp_model, OUTPUT_MODEL)
+    print(f"💾 MLP brain saved to {OUTPUT_MODEL}")
 
 if __name__ == "__main__":
     train_hpc_multi_brain()
