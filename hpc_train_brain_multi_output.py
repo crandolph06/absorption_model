@@ -73,13 +73,6 @@ def train_hpc_multi_brain():
     print("🧮 Calculating Residuals...")
     residuals = Y_train - Y_train_pred_lin
 
-    if len(residuals.shape) == 1:
-        print("RESHAPE REQUIRED")
-        residuals = residuals.values.reshape(-1, 4)
-
-    print(f'DEBUG: X_train shape: {X_train.shape}')
-    print(f'DEBUG: Residuals shape: {residuals.shape}')
-
     booster_model = MultiOutputRegressor(
         HistGradientBoostingRegressor(
         max_iter=200,
