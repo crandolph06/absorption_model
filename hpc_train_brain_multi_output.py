@@ -7,9 +7,13 @@ import os
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.model_selection import train_test_split
+from sklearn.linear_model import Ridge
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import r2_score
 
 INPUT_DIR = "outputs/single_phase/repart_parquet"
-OUTPUT_MODEL = "outputs/single_phase/brains/hpc_sortie_brain_multi_output.pkl"
+OUTPUT_MODEL = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_hybrid.pkl" 
 SAMPLE_FRAC = 0.10 
 RANDOM_SEED = 42
 
@@ -55,31 +59,47 @@ def train_hpc_multi_brain():
     # 3. SPLIT
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=RANDOM_SEED)
 
-    # 4. DEFINE SMOOTHED REGRESSOR
-    # We use HistGradientBoosting because it's much faster for large HPC datasets
-    base_model = HistGradientBoostingRegressor(
-        max_iter=300,
-        learning_rate=0.05,     # Lower learning rate = smoother fit
-        max_leaf_nodes=31,      # Limits complexity of individual trees
-        min_samples_leaf=100,   # Forces the model to generalize over larger groups
-        l2_regularization=1.5,  # Penalizes sharp "spikes" in the data
+    # # 4. DEFINE HYBRID MODEL
+    base_model = Pipeline([
+        ('scaler', StandardScaler()),
+        ('ridge', Ridge(alpha=1.0))
+    ])
+    linear_model = MultiOutputRegressor(base_model)
+    print("🧠 Training Linear model...")
+    linear_model.fit(X_train, Y_train)
+
+    Y_train_pred_lin = linear_model.predict(X_train)
+    residuals = Y_train - Y_train_pred_lin
+
+    booster_model = MultiOutputRegressor(
+        HistGradientBoostingRegressor(
+        max_iter=200,
+        learning_rate=0.03,     
+        max_leaf_nodes=15,      
+        min_samples_leaf=150,   
+        l2_regularization=10.0,  
         random_state=RANDOM_SEED
+        )
     )
+    print("🧠 Training Booster model...")
+    booster_model.fit(X_test, residuals)
 
-    # Wrap it in the MultiOutput container
-    combined_brain = MultiOutputRegressor(base_model)
+    # 5. EVALUATE
+    y_pred_lin_test = linear_model.predict(X_test)
+    y_pred_res_test = booster_model.predict(X_test)
+    y_pred_total = y_pred_lin_test + y_pred_res_test
 
-    # 5. TRAIN
-    print("🧠 Training Multi-Output model...")
-    combined_brain.fit(X_train, Y_train)
-    
-    score = combined_brain.score(X_test, Y_test)
+    score = r2_score(Y_test, y_pred_total)
     print(f"✅ Training Complete. Overall R² Score: {score:.4f}")
 
     # 6. SAVE
     os.makedirs(os.path.dirname(OUTPUT_MODEL), exist_ok=True)
-    joblib.dump(combined_brain, OUTPUT_MODEL)
-    print(f"💾 Combined brain saved to {OUTPUT_MODEL}")
+    hybrid_brain = {
+        'linear': linear_model,
+        'booster': booster_model
+    }
+    joblib.dump(hybrid_brain, OUTPUT_MODEL)
+    print(f"💾 Hybrid brain saved to {OUTPUT_MODEL}")
 
 if __name__ == "__main__":
     train_hpc_multi_brain()
