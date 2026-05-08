@@ -11,3 +11,10 @@ outputs/
 *.png
 *.jpg
 
+# Machine Learning Artifacts
+logs/
+ppo_manning_tensorboard/
+saved_models/
+checkpoints/
+*.pkl
+*.zip
