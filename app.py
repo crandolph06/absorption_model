@@ -61,6 +61,7 @@ def predict_metrics(df_inputs):
     #     if t in brain:
     #         df[t] = brain[t].predict(df[features])
 
+    # Multi-output predictions
     all_preds = brain.predict(df[features])
 
     for i, t in enumerate(targets):
