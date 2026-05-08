@@ -155,7 +155,8 @@ def train_hpc_multi_brain(regressor: Regressor, raw_data:bool):
             learning_rate_init=0.001,
             max_iter=500,
             early_stopping=True,     # Stops once it stops improving on the test set
-            random_state=42
+            random_state=42,
+            verbose=True
         )
         mlp_model = Pipeline([
             ('scaler', StandardScaler()),
