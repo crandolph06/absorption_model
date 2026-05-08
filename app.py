@@ -24,16 +24,20 @@ st.markdown("""
 # ==============================================================================
 @st.cache_resource
 def load_brain():
-    model_path = "brains/hpc_sortie_brain_lite.pkl"
+    # model_path = "brains/hpc_sortie_brain_lite.pkl" # Single-output regressor
+    # if os.path.exists(model_path):
+    #     return joblib.load(model_path)
+    # st.error(f"⚠️ Brain file not found at {model_path}")
+    # st.stop()
+    model_path = "brains/hpc_sortie_brain_multi_output.pkl"
     if os.path.exists(model_path):
         return joblib.load(model_path)
-    st.error(f"⚠️ Brain file not found at {model_path}")
-    st.stop()
+    st.error(f"Multi-Output Brain file not found at {model_path}")
+    st.stop
 
 brain = load_brain()
 
 def predict_metrics(df_inputs):
-    """Takes a dataframe of inputs, calculates features, and returns predictions."""
     df = df_inputs.copy()
     
     # Feature Engineering (Matching Training Data)
@@ -52,15 +56,20 @@ def predict_metrics(df_inputs):
         'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
     ]
     
-    # Predict
-    for t in targets:
-        if t in brain:
-            df[t] = brain[t].predict(df[features])
+    # # Single-output predictions
+    # for t in targets:
+    #     if t in brain:
+    #         df[t] = brain[t].predict(df[features])
+
+    all_preds = brain.predict(df[features])
+
+    for i, t in enumerate(targets):
+        df[t] = all_preds[:,i]
             
-    # Calculate Red Air
-    df['wg_red_monthly'] = df['wg_monthly'] - df['wg_blue_monthly']
-    df['fl_red_monthly'] = df['fl_monthly'] - df['fl_blue_monthly']
-    df['ip_red_monthly'] = df['ip_monthly'] - df['ip_blue_monthly']
+    # Calculate Red Air - prevents negative values
+    df['wg_red_monthly'] = (df['wg_monthly'] - df['wg_blue_monthly'])
+    df['fl_red_monthly'] = (df['fl_monthly'] - df['fl_blue_monthly'])
+    df['ip_red_monthly'] = (df['ip_monthly'] - df['ip_blue_monthly'])
     
     # Red Air Percentages (Safe Division)
     df['wg_red_pct'] = df['wg_red_monthly'] / df['wg_monthly'].replace(0, 1)
@@ -149,7 +158,7 @@ with col_main:
     for col in ['wg_monthly', 'fl_monthly', 'ip_monthly']:
         fig_equity.add_trace(go.Scatter(
             x=df_equity[x_var_equity], y=df_equity[col], name=names[col], 
-            line=dict(color=colors_total[col], width=3, shape='spline'), mode='lines',
+            line=dict(color=colors_total[col], width=3), mode='lines',
             hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'
         ))
         
@@ -183,7 +192,7 @@ with col_main:
         fig_comp.add_trace(go.Bar(x=df_comp[x_var_comp], y=df_comp[f'{role}_blue_monthly'], name=f"{role.upper()} Blue", marker_color=colors[role][0], offsetgroup=role, hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'))
         fig_comp.add_trace(go.Bar(x=df_comp[x_var_comp], y=df_comp[f'{role}_red_monthly'], name=f"{role.upper()} Red", marker_color=colors[role][1], offsetgroup=role, base=df_comp[f'{role}_blue_monthly'], hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'))
         if show_trends:
-            fig_comp.add_trace(go.Scatter(x=df_comp[x_var_comp], y=df_comp[f'{role}_monthly'], name=f"{role.upper()} Total Trend", line=dict(color=colors[role][0], width=2, shape='spline'), mode='lines', hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'))
+            fig_comp.add_trace(go.Scatter(x=df_comp[x_var_comp], y=df_comp[f'{role}_monthly'], name=f"{role.upper()} Total Trend", line=dict(color=colors[role][0], width=2), mode='lines', hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'))
             
     fig_comp.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
     fig_comp.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
