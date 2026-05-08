@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import itertools
 import os
 import joblib
+from src.models import Regressor
 
 # ==============================================================================
 # 1. PAGE CONFIG & STYLING
@@ -22,33 +23,60 @@ st.markdown("""
 # ==============================================================================
 # 2. ML ENGINE SETUP
 # ==============================================================================
+brain_type = None
+
 @st.cache_resource
 def load_brain():
-    # model_path = "brains/hpc_sortie_brain_lite.pkl" # Single-output regressor
-    # if os.path.exists(model_path):
-    #     return joblib.load(model_path)
-    # st.error(f"⚠️ Brain file not found at {model_path}")
-    # st.stop()
-    model_path = "brains/hpc_sortie_brain_multi_output_hybrid.pkl"
-    if os.path.exists(model_path):
-        return joblib.load(model_path)
-    st.error(f"Multi-Output Brain file not found at {model_path}")
-    st.stop
+    try:
+        model_path = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
+        if os.path.exists(model_path):
+            brain_type = Regressor.MLP
+            return joblib.load(model_path)
+    except:
+        st.error(f"MLP brain not found. Trying Hybrid brain.")
+        try:
+            model_path = "brains/hpc_sortie_brain_multi_output_hybrid.pkl" # Single-output regressor
+            if os.path.exists(model_path):
+                brain_type = Regressor.HYB
+                return joblib.load(model_path)
+        except:
+            st.error(f"⚠️ Brain file not found at {model_path}")
+            st.stop()
 
 brain = load_brain()
 
-def predict_metrics(df_inputs):
+def predict_metrics(df_inputs, regressor_type: Regressor):
     df = df_inputs.copy()
     
     # Feature Engineering (Matching Training Data)
+    base_features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'wg_qty', 'fl_qty','ip_qty']
+    for col in base_features:
+        if col not in df.columns: 
+            df[col] = 0
+
+    ips = df['ip_qty'].replace(0, 1.0)
+    fls = df['fl_qty'].replace(0, 1.0)
+    wgs = df['wg_qty'].replace(0, 1.0)
+
+    df['mqt_load'] = df['mqt_qty'] / ips
+    df['flug_load'] = df['flug_qty'] / ips
+    df['ipug_load'] = df['ipug_qty'] / ips
+    
+    df['fl_congestion'] = (df['ipug_qty'] + df['flug_qty']) / fls
+    df['wg_crowding'] = (df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']) / wgs
+
+    df['sorties_avail'] = df['paa'] * df['ute']
+    df['pilot_to_sortie'] = df['total_pilots'] / df['sorties_avail']
+
     df['total_students'] = df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']
     df['ip_ratio'] = df['ip_qty'] / df['total_pilots'].replace(0, 1)
     df['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
     
-    features = [
-        'paa', 'ute', 'exp_ratio', 'total_pilots', 
-        'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty', 
-        'ip_ratio', 'ip_to_stud_ratio'
+    df = df.replace([np.inf, -np.inf], 0)
+
+    features = [ # TODO Once we decide on a brain, hard code this
+        'exp_ratio', 'ip_ratio', 'fl_congestion',
+        'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
     ]
     
     targets = [
@@ -56,20 +84,44 @@ def predict_metrics(df_inputs):
         'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
     ]
     
-    # # Single-output predictions
-    # for t in targets:
-    #     if t in brain:
-    #         df[t] = brain[t].predict(df[features])
+    if brain_type == Regressor.MLP:
+        try:
+            preds = brain.predict(df[features])
 
-    # Multi-output predictions
-    # all_preds = brain.predict(df[features])
+        except:
+            features = [
+                'paa', 'ute', 'mqt_load', 'flug_load', 'ipug_load', 
+                'exp_ratio', 'ip_ratio', 'fl_congestion',
+                'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
+            ]
+            try:
+                preds = brain.predict(df[features])
+            
+            except: 
+                st.error(f"Incorrect features passe for selected brain")
+    elif brain_type == Regressor.HYB:
+        try:
+            lin_preds = brain['linear'].predict(df[features])
+            res_preds = brain['booster'].predict(df[features])
+            preds = lin_preds + res_preds
 
-    lin_preds = brain['linear'].predict(df[features])
-    res_preds = brain['booster'].predict(df[features])
-    all_preds = lin_preds + res_preds
+        except:
+            features = [
+                    'exp_ratio', 'ip_ratio', 'fl_congestion',
+                    'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
+                ]
+            try:
+                lin_preds = brain['linear'].predict(df[features])
+                res_preds = brain['booster'].predict(df[features])
+                preds = lin_preds + res_preds
+            
+            except:
+                st.error(f"Error with Hybrid Brain.")
+                st.stop()
+
 
     for i, t in enumerate(targets):
-        df[t] = all_preds[:,i]
+        df[t] = preds[:,i]
             
     # Calculate Red Air - prevents negative values
     df['wg_red_monthly'] = (df['wg_monthly'] - df['wg_blue_monthly'])
@@ -138,7 +190,7 @@ def generate_1d_sweep(x_var):
     x_vals = sweep_ranges.get(x_var, np.arange(0, 10))
     df_sweep = pd.DataFrame([inputs] * len(x_vals))
     df_sweep[x_var] = x_vals
-    return predict_metrics(df_sweep)
+    return predict_metrics(df_sweep, brain_type)
 
 # ==============================================================================
 # 5. MAIN UI & CHARTS
@@ -221,7 +273,7 @@ with col_main:
             df_heat_base[k] = v
             
     # Predict Grid
-    df_heat_preds = predict_metrics(df_heat_base)
+    df_heat_preds = predict_metrics(df_heat_base, brain_type)
     
     # Calculate Status
     df_heat_preds['rap_code'] = df_heat_preds.apply(lambda r: calculate_rap_code(r, is_blue), axis=1)
@@ -266,7 +318,7 @@ with col_summary:
     
     # Predict exactly the point defined in the sidebar
     df_single = pd.DataFrame([inputs])
-    row = predict_metrics(df_single).iloc[0]
+    row = predict_metrics(df_single, brain_type).iloc[0]
     
     current_code = calculate_rap_code(row, is_blue=False)
     label = state_labels_dict.get(current_code, "Unknown")
