@@ -63,7 +63,7 @@ def train_hpc_multi_brain(raw_data: bool):
     
     if raw_data:
         features = [
-            'paa', 'ute', 'mqt_load', 'flug_load', 'ipug_load', 
+            'paa', 'ute', 
             'exp_ratio', 'ip_ratio', 'fl_congestion',
             'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
         ]
@@ -124,4 +124,4 @@ def train_hpc_multi_brain(raw_data: bool):
     print(f"💾 MLP brain saved to {OUTPUT_MODEL}")
 
 if __name__ == "__main__":
-    train_hpc_multi_brain(raw_data=False)
+    train_hpc_multi_brain(raw_data=True)

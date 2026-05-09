@@ -55,7 +55,7 @@ def verify_model(raw_data: bool):
     
     if raw_data == True:
         features = [
-            'paa', 'ute', 'mqt_load', 'flug_load', 'ipug_load', 
+            'paa', 'ute', 
             'exp_ratio', 'ip_ratio', 'fl_congestion',
             'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
         ]
@@ -91,4 +91,4 @@ def verify_model(raw_data: bool):
         print(f"{target:<20} | {y_true.mean():<12.2f} | ± {mae:<10.2f} | {rmse:<12.2f}")
 
 if __name__ == "__main__":
-    verify_model(raw_data=False)
+    verify_model(raw_data=True)
