@@ -168,7 +168,7 @@ class CAFSimulation:
 
                 if self.sim_upgrades:
                     df_batch = self._build_batch_df()
-                    df_results = self.predict_rates(df_batch, raw_data=False)
+                    df_results = self.predict_rates(df_batch)
 
                 for i, sq in enumerate(self.squadrons):
                     if self.sim_upgrades:
@@ -342,7 +342,8 @@ class CAFSimulation:
         batch_data = [sq.get_feature_vector() for sq in self.squadrons]
         return pd.DataFrame(batch_data, columns=base_names)
 
-    def predict_rates(self, df: pd.DataFrame, raw_data: bool = True) -> pd.DataFrame:
+    # def predict_rates(self, df: pd.DataFrame, raw_data: bool = True) -> pd.DataFrame:
+    def predict_rates(self, df: pd.DataFrame) -> pd.DataFrame:
         base_features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'wg_qty', 'fl_qty','ip_qty']
         for col in base_features:
             if col not in df.columns: 
@@ -352,10 +353,10 @@ class CAFSimulation:
         fls = df['fl_qty'].replace(0, 1.0)
         wgs = df['wg_qty'].replace(0, 1.0)
 
-        if raw_data:
-            df['mqt_load'] = df['mqt_qty'] / ips
-            df['flug_load'] = df['flug_qty'] / ips
-            df['ipug_load'] = df['ipug_qty'] / ips
+        # if raw_data:
+        #     df['mqt_load'] = df['mqt_qty'] / ips
+        #     df['flug_load'] = df['flug_qty'] / ips
+        #     df['ipug_load'] = df['ipug_qty'] / ips
         
         df['fl_congestion'] = (df['ipug_qty'] + df['flug_qty']) / fls
         df['wg_crowding'] = (df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']) / wgs
@@ -369,18 +370,18 @@ class CAFSimulation:
         
         df = df.replace([np.inf, -np.inf], 0)
         
-        if raw_data:
-            features = [
-                'paa', 'ute', 'mqt_load', 'flug_load', 'ipug_load', 
-                'exp_ratio', 'ip_ratio', 'fl_congestion',
-                'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
-            ]
+        # if raw_data:
+        #     features = [
+        #         'paa', 'ute', 
+        #         'exp_ratio', 'ip_ratio', 'fl_congestion',
+        #         'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
+        #     ]
             
-        else:
-            features = [
-                'exp_ratio', 'ip_ratio', 'fl_congestion',
-                'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
-            ]
+        # else:
+        features = [
+            'paa', 'ute', 'exp_ratio', 'ip_ratio', 'fl_congestion',
+            'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
+        ]
     
         targets = [
         'wg_monthly', 'fl_monthly', 'ip_monthly', 
@@ -405,7 +406,7 @@ class CAFSimulation:
 
         if self.sim_upgrades:
             df_batch = self._build_batch_df()
-            df_results = self.predict_rates(df_batch, raw_data=False)
+            df_results = self.predict_rates(df_batch)
 
         for i, sq in enumerate(self.squadrons):
             sq.manning_pct = self.max_manning
