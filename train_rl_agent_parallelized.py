@@ -77,6 +77,10 @@ def main():
 
             print("Starting Training Loop...")
             model.learn(total_timesteps=timesteps, progress_bar=True)
+            end_time = time.time()
+            duration = str(datetime.timedelta(seconds=int(end_time - start_time)))
+
+            print(f"✅ Learning Complete. Total duration: {duration} (HH:MM:SS)")
 
             os.makedirs("saved_models", exist_ok=True)
             model_path = f"saved_models/ppo_manning_agent_{reward_mode}_{run_mode}"
@@ -97,8 +101,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-end_time = time.time()
-
-duration = str(datetime.timedelta(seconds=int(end_time - start_time)))
-
-print(f"✅ Run Complete. Total duration: {duration} (HH:MM:SS)")
