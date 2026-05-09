@@ -1,6 +1,7 @@
 import os
 import joblib
 import time
+import datetime
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
@@ -98,14 +99,6 @@ if __name__ == "__main__":
 
 end_time = time.time()
 
-elapsed_seconds = end_time - start_time
-elapsed_minutes = elapsed_seconds / 60
-elapsed_hours = elapsed_seconds / 3600
+duration = str(datetime.timedelta(seconds=int(end_time - start_time)))
 
-print("\n" + "="*30)
-print("⏱️  TRAINING TIME SUMMARY")
-print("="*30)
-print(f"Total Seconds: {elapsed_seconds:.2f}")
-print(f"Total Minutes: {elapsed_minutes:.2f}")
-print(f"Total Hours:   {elapsed_hours:.2f}")
-print("="*30)
+print(f"✅ Run Complete. Total duration: {duration} (HH:MM:SS)")
