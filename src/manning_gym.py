@@ -30,6 +30,9 @@ class ManningEnv(gym.Env):
             # [B-Course, FLUG, IPUG, max manning] -> increase, maintain, decrease for each
             self.action_space = spaces.MultiDiscrete([3, 3, 3, 3])
 
+        else:
+            raise ValueError(f"Invalid run mode: {run_mode}")
+
         self.observation_space = spaces.Box(
             low=0, high=np.inf, shape=(13,), dtype=np.float32 
         )
@@ -65,7 +68,7 @@ class ManningEnv(gym.Env):
         if man_pct_act == 0:
             self.sim.max_manning = max(0, self.sim.max_manning - 0.05)
         elif man_pct_act == 2:
-            self.sim.max_manning = min(1.5, self.sim.max_manning + 0.05)
+            self.sim.max_manning = min(2.0, self.sim.max_manning + 0.05)
 
         # UTE 
         if run_mode == "optimistic":
