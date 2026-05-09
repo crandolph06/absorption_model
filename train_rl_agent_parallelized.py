@@ -1,5 +1,6 @@
 import os
 import joblib
+import time
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
@@ -7,6 +8,8 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 from src.manning_engine import CAFSimulation
 from src.models import PriorityMode
 from src.manning_gym import ManningEnv
+
+start_time = time.time()
 
 def load_ai_brain():
     pc_path = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
@@ -60,8 +63,8 @@ def main():
     print(f"📡 Slurm allocated {n_procs} tasks. Launching parallel environments...")
     timesteps = int(os.getenv("TIMESTEPS", 1_000_000))
 
-    for run_mode in run_modes:
-        for reward_mode in reward_modes:
+    for run_mode in run_modes[0]:
+        for reward_mode in reward_modes[0]:
             print(f"🚀 Training combination: run_mode='{run_mode}', reward_mode='{reward_mode}'")
             env_functions = [make_env(i, run_mode, reward_mode) for i in range(n_procs)]
             env = SubprocVecEnv(env_functions)
@@ -92,3 +95,17 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+end_time = time.time()
+
+elapsed_seconds = end_time - start_time
+elapsed_minutes = elapsed_seconds / 60
+elapsed_hours = elapsed_seconds / 3600
+
+print("\n" + "="*30)
+print("⏱️  TRAINING TIME SUMMARY")
+print("="*30)
+print(f"Total Seconds: {elapsed_seconds:.2f}")
+print(f"Total Minutes: {elapsed_minutes:.2f}")
+print(f"Total Hours:   {elapsed_hours:.2f}")
+print("="*30)
