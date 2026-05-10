@@ -15,7 +15,7 @@ INPUT_DIR = "outputs/single_phase/repart_parquet"
 SAMPLE_FRAC = 0.10 
 RANDOM_SEED = 42
 
-def train_hpc_multi_brain(raw_data: bool):
+def train_hpc_multi_brain():
     print(f"🚀 Starting Multi-Output HPC Brain Training...")
     files = glob.glob(os.path.join(INPUT_DIR, "part.*.parquet"))
     
@@ -40,15 +40,9 @@ def train_hpc_multi_brain(raw_data: bool):
         if col not in df.columns: 
             df[col] = 0
 
-    ips = df['ip_qty'].replace(0, 1.0)
     fls = df['fl_qty'].replace(0, 1.0)
     wgs = df['wg_qty'].replace(0, 1.0)
 
-    if raw_data:
-        df['mqt_load'] = df['mqt_qty'] / ips
-        df['flug_load'] = df['flug_qty'] / ips
-        df['ipug_load'] = df['ipug_qty'] / ips
-    
     df['fl_congestion'] = (df['ipug_qty'] + df['flug_qty']) / fls
     df['wg_crowding'] = (df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']) / wgs
 
@@ -60,19 +54,12 @@ def train_hpc_multi_brain(raw_data: bool):
     df['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
     
     df = df.replace([np.inf, -np.inf], 0)
-    
-    if raw_data:
-        features = [
-            'paa', 'ute', 
-            'exp_ratio', 'ip_ratio', 'fl_congestion',
-            'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
-        ]
-           
-    else:
-        features = [
-            'exp_ratio', 'ip_ratio', 'fl_congestion',
-            'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
-        ]
+
+    features = [
+        'paa', 'ute',
+        'exp_ratio', 'ip_ratio', 'fl_congestion',
+        'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio',
+    ]
     
     targets = [
         'wg_monthly', 'fl_monthly', 'ip_monthly', 
@@ -124,4 +111,4 @@ def train_hpc_multi_brain(raw_data: bool):
     print(f"💾 MLP brain saved to {OUTPUT_MODEL}")
 
 if __name__ == "__main__":
-    train_hpc_multi_brain(raw_data=True)
+    train_hpc_multi_brain()
