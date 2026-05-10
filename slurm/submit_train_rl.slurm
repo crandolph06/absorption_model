@@ -5,7 +5,7 @@
 #SBATCH --partition=general
 #SBATCH --qos=background
 #SBATCH --nodes=1
-#SBATCH --ntasks=1
+#SBATCH --ntasks=4
 #SBATCH --exclusive
 #SBATCH --time=04:00:00
 #
