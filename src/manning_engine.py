@@ -167,16 +167,14 @@ class CAFSimulation:
                     sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
 
                 if self.sim_upgrades:
-                    df_batch = self._build_batch_df()
-                    df_results = self.predict_rates(df_batch)
+                    preds = self.predict_rates_fast()
 
                 for i, sq in enumerate(self.squadrons):
                     if self.sim_upgrades:
-                        result = df_results.iloc[i]
+                        row = preds[i]
                         monthly_rates = AgingRate(
-                            4.0, result['wg_monthly'], result['fl_monthly'], result['ip_monthly'],
-                            4.0, result['wg_blue_monthly'], result['fl_blue_monthly'],
-                            result['ip_blue_monthly']
+                            4.0, row[0], row[1], row[2],
+                            4.0, row[3], row[4], row[5],
                         )
                         rates =  monthly_rates.monthly_to_phase(sq.phase_length_days)
 
@@ -337,65 +335,61 @@ class CAFSimulation:
 
         return new_year, new_phase
     
-    def _build_batch_df(self) -> pd.DataFrame:
-        base_names = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
-        batch_data = [sq.get_feature_vector() for sq in self.squadrons]
-        return pd.DataFrame(batch_data, columns=base_names)
+    # Feature column order must match training / predict_rates (MLP pipeline).
+    _PREDICT_FEATURE_COLS = [
+        'paa', 'ute', 'exp_ratio', 'ip_ratio', 'fl_congestion',
+        'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio',
+    ]
 
-    # def predict_rates(self, df: pd.DataFrame, raw_data: bool = True) -> pd.DataFrame:
-    def predict_rates(self, df: pd.DataFrame) -> pd.DataFrame:
-        base_features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'wg_qty', 'fl_qty','ip_qty']
-        for col in base_features:
-            if col not in df.columns: 
-                df[col] = 0
+    def predict_rates_fast(self) -> np.ndarray:
+        """One DataFrame build per call; same feature math as legacy predict_rates."""
+        batch_records = []
 
-        ips = df['ip_qty'].replace(0, 1.0)
-        fls = df['fl_qty'].replace(0, 1.0)
-        wgs = df['wg_qty'].replace(0, 1.0)
+        for sq in self.squadrons:
+            paa = sq.paa
+            ute = sq.ute
+            # Training uses column name total_pilots but value is line pilot count (cockpit strength).
+            total_pilots = sq.line_pilots
+            exp_ratio = sq.experience_ratio
+            mqt_qty = sq.mqt_students
+            flug_qty = sq.flug_students
+            ipug_qty = sq.ipug_students
+            wg_qty = sq.wg_qty
+            fl_qty = sq.fl_qty
+            ip_qty = sq.ip_qty
 
-        # if raw_data:
-        #     df['mqt_load'] = df['mqt_qty'] / ips
-        #     df['flug_load'] = df['flug_qty'] / ips
-        #     df['ipug_load'] = df['ipug_qty'] / ips
-        
-        df['fl_congestion'] = (df['ipug_qty'] + df['flug_qty']) / fls
-        df['wg_crowding'] = (df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']) / wgs
+            fls = fl_qty if fl_qty != 0 else 1.0
+            wgs = wg_qty if wg_qty != 0 else 1.0
 
-        df['sorties_avail'] = df['paa'] * df['ute']
-        df['pilot_to_sortie'] = df['total_pilots'] / df['sorties_avail']
+            fl_congestion = (ipug_qty + flug_qty) / fls
+            wg_crowding = (mqt_qty + flug_qty + ipug_qty) / wgs
 
-        df['total_students'] = df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']
-        df['ip_ratio'] = df['ip_qty'] / df['total_pilots'].replace(0, 1)
-        df['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
-        
-        df = df.replace([np.inf, -np.inf], 0)
-        
-        # if raw_data:
-        #     features = [
-        #         'paa', 'ute', 
-        #         'exp_ratio', 'ip_ratio', 'fl_congestion',
-        #         'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
-        #     ]
-            
-        # else:
-        features = [
-            'paa', 'ute', 'exp_ratio', 'ip_ratio', 'fl_congestion',
-            'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
-        ]
-    
-        targets = [
-        'wg_monthly', 'fl_monthly', 'ip_monthly', 
-        'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
-        ]
+            sorties_avail = paa * ute
+            pilot_to_sortie = (
+                total_pilots / sorties_avail if sorties_avail != 0 else 0.0
+            )
 
-        X = df[features].fillna(0)
+            total_students = mqt_qty + flug_qty + ipug_qty
+            denom_tp = total_pilots if total_pilots != 0 else 1
+            ip_ratio = ip_qty / denom_tp
+            denom_stud = total_students if total_students != 0 else 0.1
+            ip_to_stud_ratio = ip_qty / denom_stud
 
-        preds = self.brain.predict(X)
-        
-        for i, t in enumerate(targets):
-            df[t] = preds[:,i]
+            batch_records.append({
+                'paa': paa,
+                'ute': ute,
+                'exp_ratio': exp_ratio,
+                'ip_ratio': ip_ratio,
+                'fl_congestion': fl_congestion,
+                'wg_crowding': wg_crowding,
+                'sorties_avail': sorties_avail,
+                'pilot_to_sortie': pilot_to_sortie,
+                'ip_to_stud_ratio': ip_to_stud_ratio,
+            })
 
-        return df
+        X = pd.DataFrame(batch_records, columns=self._PREDICT_FEATURE_COLS)
+        X = X.replace([np.inf, -np.inf], 0).fillna(0)
+        return self.brain.predict(X)
 
     def run_phase(self):
         phase_intake = self.annual_intake // 3
@@ -405,8 +399,7 @@ class CAFSimulation:
         self.add_new_bcourse_graduates(self.current_year, current_batch, self.round_robin) 
 
         if self.sim_upgrades:
-            df_batch = self._build_batch_df()
-            df_results = self.predict_rates(df_batch)
+            preds = self.predict_rates_fast()
 
         for i, sq in enumerate(self.squadrons):
             sq.manning_pct = self.max_manning
@@ -421,10 +414,10 @@ class CAFSimulation:
                                   ipug_quota=self.sq_phase_ipug_intake)
 
             if self.sim_upgrades:
-                result = df_results.iloc[i]
+                row = preds[i]
                 monthly_rates = AgingRate(
-                    4.0, result['wg_monthly'], result['fl_monthly'], result['ip_monthly'],
-                    4.0, result['wg_blue_monthly'], result['fl_blue_monthly'], result['ip_blue_monthly']
+                    4.0, row[0], row[1], row[2],
+                    4.0, row[3], row[4], row[5],
                 )
                 rates =  monthly_rates.monthly_to_phase(sq.phase_length_days)
 
