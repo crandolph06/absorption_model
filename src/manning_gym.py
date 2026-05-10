@@ -4,6 +4,12 @@ import numpy as np
 from src.manning_config import get_initial_squadrons
 
 class ManningEnv(gym.Env):
+    # Stable per-step reward scale for RL (used by quantity / readiness shaping).
+    TARGET_TOTAL_PILOTS = 3500
+    _STEP_REWARD_CLIP = 5.0
+    # Share of unfilled line slots (vs target force) treated as key staff need — see _reward_key_staff.
+    KEY_STAFF_RATIO = 0.2
+
     def __init__(self, sim_engine, run_mode="ideal", reward_mode="quantity_first"):
         super(ManningEnv, self).__init__()
         self.sim = sim_engine
@@ -148,59 +154,73 @@ class ManningEnv(gym.Env):
             # Get to line pilot RAP first, then increase toward 3500 total pilots
             return self._reward_readiness(current_total, wg_short, fl_short, ip_short)
         elif self.reward_mode == "key_staff_first":
-            # Get to 20% of staff pilot positions manned ((3500-line pilots) * .2), then focus on line RAP, then increase toward 3500 total pilots
+            # Fill KEY_STAFF_RATIO of remaining slots toward TARGET_TOTAL_PILOTS, then blend into readiness-first shaping.
             return self._reward_key_staff(current_total, line_count, staff_count, wg_short, fl_short, ip_short)
 
     
     def _reward_quantity(self, current_total, wg_short, fl_short, ip_short):
-        reward = current_total * 0.1
+        """
+        Grow toward TARGET_TOTAL_PILOTS first, with small steady signals each step.
 
-        if current_total >= 3500:
-            reward += 100.0
+        - Headcount: smooth score from 0→4 as you approach full strength (no big jumps).
+        - Readiness: small penalty every step; gets stronger as you near the goal so
+          quantity stays the main focus early, but line health still nudges learning.
+        - Final reward is clipped so the learner does not see huge spikes.
+        """
+        target = float(self.TARGET_TOTAL_PILOTS)
+        progress = min(current_total / target, 1.0)
 
-            if wg_short > 0 or fl_short > 0 or ip_short > 0:
-                reward -= wg_short * 40
-                reward -= (fl_short + ip_short) * 20
+        headcount_points = 4.0 * progress
 
-        return reward
-    
+        # Near full strength, care more about shortfalls (still soft, not an on/off gate).
+        readiness_weight = 0.15 + 0.85 * progress
+        shortfall_penalty = readiness_weight * (
+            0.15 * wg_short + 0.10 * fl_short + 0.10 * ip_short
+        )
+
+        reward = headcount_points - shortfall_penalty
+        return float(np.clip(reward, -self._STEP_REWARD_CLIP, self._STEP_REWARD_CLIP))
+
+    def _reward_readiness_unclipped(self, current_total, wg_short, fl_short, ip_short):
+        """Same math as readiness-first, before clipping (shared with key_staff blend)."""
+        target = float(self.TARGET_TOTAL_PILOTS)
+        progress = min(current_total / target, 1.0)
+        shortfall_cost = (
+            0.75 * wg_short + 0.52 * fl_short + 0.52 * ip_short
+        )
+        return -shortfall_cost + self._STEP_REWARD_CLIP * progress
+
     def _reward_readiness(self, current_total, wg_short, fl_short, ip_short):
-        reward = 0.0
+        """
+        Readiness-first: shortfall penalties are the main drag; population progress
+        scales the positive side up to the clip (best case ≈ +clip at no shortfall, 3500+ pilots).
+        """
+        reward = self._reward_readiness_unclipped(current_total, wg_short, fl_short, ip_short)
+        return float(np.clip(reward, -self._STEP_REWARD_CLIP, self._STEP_REWARD_CLIP))
 
-        if wg_short + fl_short + ip_short > 0.5:
-            reward -= wg_short * 50.0
-            reward -= (fl_short + ip_short) * 25.0
+    def _reward_key_staff(self, current_total, line_count, staff_count, wg_short, fl_short, ip_short):
+        """
+        Key staff first: smooth emphasis on filling key staff slots, then crossfade into
+        the same readiness + population logic as _reward_readiness (stable clip).
+        """
+        target = float(self.TARGET_TOTAL_PILOTS)
+        ratio = self.KEY_STAFF_RATIO
+
+        remaining_slots = max(target - line_count, 0.0)
+        target_staff = remaining_slots * ratio
+
+        if target_staff <= 1e-9:
+            staff_progress = 1.0
         else:
-            reward += 100.0
-            reward += (current_total * 0.1)
+            staff_progress = min(float(staff_count) / target_staff, 1.0)
 
-            if current_total >= 3500:
-                reward += 200.0
+        staff_term = self._STEP_REWARD_CLIP * staff_progress
+        readiness_term = self._reward_readiness_unclipped(
+            current_total, wg_short, fl_short, ip_short
+        )
 
-        return reward
-    
-    def _reward_key_staff(self, current_total, line_count, staff_count, wg_short, fl_short, ip_short, key_staff_ratio=0.2):
-        reward = 0.0
-        target_staff = (3500 - line_count) * key_staff_ratio
-
-        if staff_count < target_staff:
-            reward = (staff_count / max(target_staff, 1)) * 50.0
-            return reward
-        
-        reward += 50.0
-
-        if sum(wg_short, fl_short, ip_short) > 0.5:
-            reward -= wg_short * 50.0
-            reward -= (fl_short + ip_short) * 25.0
-            return reward
-        
-        reward += 100.0
-
-        reward += (current_total * 0.1)
-        if current_total >= 3500:
-            reward += 200.0
-
-        return reward
+        reward = (1.0 - staff_progress) * staff_term + staff_progress * readiness_term
+        return float(np.clip(reward, -self._STEP_REWARD_CLIP, self._STEP_REWARD_CLIP))
 
     def _get_obs(self):
             total_paa = sum(sq.paa for sq in self.sim.squadrons)
