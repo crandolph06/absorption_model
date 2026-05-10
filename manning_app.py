@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -6,7 +8,17 @@ import joblib
 import os
 
 from src.manning_main import setup_simulation
+from src.manning_engine import CAFSimulation
 from src.models import PriorityMode
+
+BRAIN_PATH = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
+
+
+def _pipeline_n_features_in(brain):
+    steps = getattr(brain, "named_steps", None)
+    if steps and "scaler" in steps:
+        return getattr(steps["scaler"], "n_features_in_", None)
+    return getattr(brain, "n_features_in_", None)
 
 st.set_page_config(page_title="CAF Absorption Simulator", layout="wide")
 
@@ -68,22 +80,38 @@ with st.sidebar.form("sim_params"):
     submitted = st.form_submit_button("🚀 Run Simulation")
 
 @st.cache_resource
-def load_ai_brain():
+def load_ai_brain(brain_path: str, brain_mtime: float):
     """
-    Loads the heavy AI Brain ONCE.
-    This object is passed to the simulation engine to prevent reloading.
+    Loads the AI brain. `brain_mtime` is part of the cache key so replacing the
+    file on disk (e.g. after scp from HPC) forces a reload without clearing cache.
     """
-    # Check for brain
-    if not os.path.exists("brains/hpc_sortie_brain_multi_output_mlp.pkl"):
-        st.error("🚨 'hpc_sortie_brain_multi_output_mlp.pkl' not found! Please run 'hpc_train_brain_multi_output.py' on HPC.")
-    # if not os.path.exists("brains/sortie_brain.pkl"):
-        # st.error("🚨 'sortie_brain.pkl' not found! Please run 'train_brain_lite.py'.")
-        st.stop()
+    return joblib.load(brain_path)
 
-    return joblib.load("brains/hpc_sortie_brain_multi_output_mlp.pkl")        
-    # return joblib.load("brains/sortie_brain.pkl")        
 
-cached_brain = load_ai_brain()
+if not os.path.exists(BRAIN_PATH):
+    st.error(
+        f"🚨 '{BRAIN_PATH}' not found! Copy the HPC artifact from "
+        "`outputs/single_phase/brains/` or run `hpc_train_brain_multi_output.py`."
+    )
+    st.stop()
+
+_brain_mtime = os.path.getmtime(BRAIN_PATH)
+cached_brain = load_ai_brain(BRAIN_PATH, _brain_mtime)
+
+_n_fit = _pipeline_n_features_in(cached_brain)
+_n_engine = len(CAFSimulation._PREDICT_FEATURE_COLS)
+if _n_fit is not None and _n_fit != _n_engine:
+    st.error(
+        f"The loaded brain expects {_n_fit} input features but the simulator builds {_n_engine} "
+        f"(including **paa** and **ute**). Retrain with the current `hpc_train_brain_multi_output.py` "
+        f"(same feature list as `CAFSimulation.predict_rates_fast`) and replace `{BRAIN_PATH}`."
+    )
+    st.stop()
+
+st.sidebar.caption(
+    f"Brain: `{BRAIN_PATH}` · file mtime {_brain_mtime:.0f} "
+    f"({datetime.fromtimestamp(_brain_mtime).strftime('%Y-%m-%d %H:%M')})"
+)
 
 # --- Run Simulation ---
 if submitted:
