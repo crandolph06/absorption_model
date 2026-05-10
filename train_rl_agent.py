@@ -1,3 +1,11 @@
+"""
+Local PPO debug runner (single env). Mirrors train_rl_agent_parallelized wiring.
+
+Environment variables (optional):
+  RUN_MODES     Comma-separated; default pragmatic,optimistic,current,ideal
+  REWARD_MODES  Comma-separated; default readiness_first,quantity_first,key_staff_first
+  TIMESTEPS     Integer; default 100000 (raise on HPC / full runs)
+"""
 import os
 import joblib
 from stable_baselines3 import PPO
@@ -6,6 +14,7 @@ from stable_baselines3.common.monitor import Monitor
 from src.manning_engine import CAFSimulation
 from src.models import PriorityMode
 from src.manning_gym import ManningEnv
+
 
 def load_ai_brain():
     pc_path = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
@@ -21,7 +30,9 @@ def load_ai_brain():
         "Run 'hpc_train_brain_multi_output.py' to generate it."
     )
 
+
 brain = load_ai_brain()
+
 
 def parse_mode_list(env_var_name, default_modes):
     raw_value = os.getenv(env_var_name, "").strip()
@@ -32,13 +43,13 @@ def parse_mode_list(env_var_name, default_modes):
 
 def main():
     run_modes = parse_mode_list("RUN_MODES", ["pragmatic", "optimistic", "current", "ideal"])
-    reward_modes = parse_mode_list("REWARD_MODES", ["readiness_first", "quantity_first", "key_staff_first"])
-    timesteps = int(os.getenv("TIMESTEPS", 100_000))  # Eventually change to 1M, then 5M
+    reward_modes = parse_mode_list(
+        "REWARD_MODES", ["readiness_first", "quantity_first", "key_staff_first"]
+    )
+    timesteps = int(os.getenv("TIMESTEPS", 100_000))
 
-    # for run_mode in run_modes:
-    for run_mode in run_modes[0]:
-        for reward_mode in reward_modes[0]:
-        # for reward_mode in reward_modes:
+    for run_mode in run_modes[:1]:
+        for reward_mode in reward_modes[:1]:
             sim_engine = CAFSimulation(
                 sim_upgrades=True,
                 annual_intake=200,
@@ -58,11 +69,19 @@ def main():
             check_env(raw_env, warn=True)
             print("Environment check passed!")
 
-            os.makedirs("logs", exist_ok=True)
-            env = Monitor(raw_env, "logs/")
+            log_dir = f"logs/{run_mode}_{reward_mode}"
+            os.makedirs(log_dir, exist_ok=True)
+            env = Monitor(raw_env, log_dir)
 
             print("Building the Neural Network...")
-            model = PPO("MlpPolicy", env, verbose=1, tensorboard_log=f"./ppo_manning_tensorboard/{run_mode}_{reward_mode}/")
+            model = PPO(
+                "MlpPolicy",
+                env,
+                n_steps=2048,
+                batch_size=1024,
+                verbose=1,
+                tensorboard_log=f"./ppo_manning_tensorboard/{run_mode}_{reward_mode}/",
+            )
 
             print(f"Starting Training Loop for {run_mode}/{reward_mode}...")
             model.learn(total_timesteps=timesteps, progress_bar=True)
@@ -82,6 +101,7 @@ def main():
     #     print(f"Action Taken: {action} | Reward: {reward}")
     #     if done or truncated:
     #         obs, info = env.reset()
+
 
 if __name__ == "__main__":
     main()
