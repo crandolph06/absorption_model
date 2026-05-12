@@ -137,3 +137,37 @@ CONTINUATION_PROFILE = ContinuationProfile(
         ContinuationBucket("Red WG", Qual.WG, "Red", 0.075),
     ]
 )
+
+
+def syllabus_sortie_events_only(syllabus: List[SyllabusEvent]) -> List[SyllabusEvent]:
+    """This simulator only allocates flying for SORTIE syllabus lines (not SIM)."""
+    return [ev for ev in syllabus if ev.event_type == EventType.SORTIE]
+
+
+def count_sortie_student_slots(syllabus: List[SyllabusEvent]) -> int:
+    """
+    Sum of ``num_student`` on every **SORTIE** syllabus row.
+
+    One full pass through the SORTIE-only list is how many student **sorties** a single
+    student must fly to complete the flying portion of that upgrade track (used with
+    ``sorties_flown - sorties_at_upgrade_start`` for graduation in the manning model).
+    """
+    return sum(ev.num_student for ev in syllabus_sortie_events_only(syllabus))
+
+
+def count_sim_student_slots(syllabus: List[SyllabusEvent]) -> int:
+    """
+    Sum of ``num_student`` on every **SIM** syllabus row.
+
+    One full pass is how many student **simulator events** one student must complete for
+    the sim portion of that upgrade track (used with ``sims_flown - sims_at_upgrade_start``).
+    """
+    return sum(ev.num_student for ev in syllabus if ev.event_type == EventType.SIM)
+
+
+SORTIE_SLOTS_MQT = count_sortie_student_slots(MQT_SYLLABUS)
+SORTIE_SLOTS_FLUG = count_sortie_student_slots(FLUG_SYLLABUS)
+SORTIE_SLOTS_IPUG = count_sortie_student_slots(IPUG_SYLLABUS)
+SIM_SLOTS_MQT = count_sim_student_slots(MQT_SYLLABUS)
+SIM_SLOTS_FLUG = count_sim_student_slots(FLUG_SYLLABUS)
+SIM_SLOTS_IPUG = count_sim_student_slots(IPUG_SYLLABUS)
