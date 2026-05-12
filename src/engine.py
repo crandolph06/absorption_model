@@ -1,7 +1,9 @@
 import random
-from typing import List, Dict
+from typing import List
 from src.models import SquadronConfig, Pilot, Qual, Upgrade, EventType
-from src.syllabi import SyllabusEvent, MQT_SYLLABUS, FLUG_SYLLABUS, IPUG_SYLLABUS, CONTINUATION_PROFILE
+from src.syllabi import SyllabusEvent, ContinuationProfile, MQT_SYLLABUS, FLUG_SYLLABUS, IPUG_SYLLABUS, CONTINUATION_PROFILE
+from src import rules
+
 
 # ----------------------
 # Pilot Creation
@@ -55,74 +57,155 @@ def select_upgrade_students(pilots: List[Pilot], upgrade_type: Upgrade, count: i
 # ----------------------
 def assign_sortie(candidates: List[Pilot], side: str = "Blue", noise: float = 0.0, avg_sortie_dur: float = 1.3) -> bool:
     """
-    Selects the best candidate (lowest utilization) to fly a sortie.
-    Returns True if a pilot was found and assigned, False otherwise.
+    Selects a candidate to fly a sortie by lowest effective phase utilization.
+
+    ``noise`` (>= 0): each pilot's ``sortie_phase`` is perturbed by
+    ``uniform(-noise, noise)`` before sorting, so the lowest-load pilot is not
+    always picked—representing scheduling friction and ops variance. When
+    ``noise`` is 0, allocation is deterministic (minimum ``sortie_phase`` wins).
     """
     if not candidates:
         return False
-    
-    # Sort by current monthly sorties + random noise for distribution
-    candidates.sort(key=lambda p: p.sortie_phase + random.uniform(0, noise))
-    
+
+    n = max(0.0, float(noise))
+
+    def _effective_util(p: Pilot) -> float:
+        jitter = random.uniform(-n, n) if n > 0 else 0.0
+        return p.sortie_phase + jitter
+
+    candidates.sort(key=_effective_util)
+
     winner = candidates[0]
-    
-    # Use helper method if available in models.py, otherwise update manually
+
     winner.add_sortie(avg_sortie_dur, side)
-        
+
     return True
 
 # ----------------------
 # Syllabus Execution
 # ----------------------
+def _ips_for_syllabus(all_pilots: List[Pilot], syllabus_upgrade_type: Upgrade) -> List[Pilot]:
+    return [p for p in all_pilots if rules.can_fill_seat(p, Qual.IP, syllabus_upgrade_type)]
+
+
+def _wg_blue_candidates(all_pilots: List[Pilot], syllabus_upgrade_type: Upgrade, student: Pilot) -> List[Pilot]:
+    c = [p for p in all_pilots if rules.can_fill_seat(p, Qual.WG, syllabus_upgrade_type)]
+    return [p for p in c if p is not student]
+
+
+def _fl_blue_candidates(all_pilots: List[Pilot], syllabus_upgrade_type: Upgrade, student: Pilot) -> List[Pilot]:
+    c = [p for p in all_pilots if rules.can_fill_seat(p, Qual.FL, syllabus_upgrade_type)]
+    return [p for p in c if p is not student]
+
+
+def _wg_red_candidates(all_pilots: List[Pilot], syllabus_upgrade_type: Upgrade, student: Pilot) -> List[Pilot]:
+    c = [p for p in all_pilots if rules.can_fill_seat(p, Qual.WG, syllabus_upgrade_type)]
+    return [p for p in c if p is not student]
+
+
+def _fl_red_candidates(all_pilots: List[Pilot], syllabus_upgrade_type: Upgrade, student: Pilot) -> List[Pilot]:
+    c = [p for p in all_pilots if rules.can_fill_seat(p, Qual.FL, syllabus_upgrade_type)]
+    return [p for p in c if p is not student]
+
+
+def _can_fulfill_student_slot(
+    event: SyllabusEvent,
+    student: Pilot,
+    all_pilots: List[Pilot],
+    syllabus_upgrade_type: Upgrade,
+    noise: float = 0.0,
+) -> bool:
+    """
+    True only if every required seat for this syllabus repetition has at least one eligible pilot.
+    Prevents crediting MQT (or FLUG/IPUG) student sorties when IPs or wingmen cannot be filled.
+
+    ``noise`` is accepted for API symmetry with allocation; preflight remains deterministic.
+    Reserved for future stochastic rules (e.g. last-minute cancellations) without changing
+    the current hard feasibility checks.
+    """
+    if event.num_instructor > 0 and not _ips_for_syllabus(all_pilots, syllabus_upgrade_type):
+        return False
+    if event.num_blue_wg > 0 and not _wg_blue_candidates(all_pilots, syllabus_upgrade_type, student):
+        return False
+    if event.num_blue_fl > 0 and not _fl_blue_candidates(all_pilots, syllabus_upgrade_type, student):
+        return False
+    if event.num_red_wg > 0 and not _wg_red_candidates(all_pilots, syllabus_upgrade_type, student):
+        return False
+    if event.num_red_fl > 0 and not _fl_red_candidates(all_pilots, syllabus_upgrade_type, student):
+        return False
+    return True
+
+
+def _apply_student_training_event(
+    cfg: SquadronConfig,
+    event: SyllabusEvent,
+    student: Pilot,
+    all_pilots: List[Pilot],
+    syllabus_upgrade_type: Upgrade,
+    noise: float,
+) -> None:
+    """Assign instructors and wingmen, then credit the student (sortie or sim). Caller ensures fulfillment."""
+    ips = _ips_for_syllabus(all_pilots, syllabus_upgrade_type)
+    for _ in range(event.num_instructor):
+        assign_sortie(ips, "Blue", noise, cfg.avg_sortie_dur)
+
+    if event.event_type == EventType.SIM:
+        student.sim_phase += 1
+        student.hours_phase += cfg.avg_sortie_dur
+    else:
+        student.add_sortie(cfg.avg_sortie_dur, "Blue")
+
+    for _ in range(event.num_blue_wg):
+        assign_sortie(
+            _wg_blue_candidates(all_pilots, syllabus_upgrade_type, student),
+            "Blue",
+            noise,
+            cfg.avg_sortie_dur,
+        )
+    for _ in range(event.num_blue_fl):
+        assign_sortie(
+            _fl_blue_candidates(all_pilots, syllabus_upgrade_type, student),
+            "Blue",
+            noise,
+            cfg.avg_sortie_dur,
+        )
+    for _ in range(event.num_red_wg):
+        assign_sortie(
+            _wg_red_candidates(all_pilots, syllabus_upgrade_type, student),
+            "Red",
+            noise,
+            cfg.avg_sortie_dur,
+        )
+    for _ in range(event.num_red_fl):
+        assign_sortie(
+            _fl_red_candidates(all_pilots, syllabus_upgrade_type, student),
+            "Red",
+            noise,
+            cfg.avg_sortie_dur,
+        )
+
+
 def process_syllabus_event(
     cfg: SquadronConfig,
-    event: SyllabusEvent, 
-    upgrade_students: List[Pilot], 
-    all_pilots: List[Pilot], 
+    event: SyllabusEvent,
+    upgrade_students: List[Pilot],
+    all_pilots: List[Pilot],
     syllabus_upgrade_type: Upgrade,
-    noise: float
+    noise: float,
 ):
     """
-    Allocates sorties for a specific syllabus event.
-    CRITICAL FIX: Support sorties are now generated PER student sortie.
+    Allocates sorties (and sim events) for a syllabus line item.
+
+    Student credit is applied only when the full crew requirement for that repetition
+    can be satisfied (e.g. no MQT student sorties with zero IPs when the event requires an IP).
     """
     for student in upgrade_students:
-        # 1. Student Sorties (The student flies 'num_student' times for this event)
         for _ in range(event.num_student):
-            
-            # -- Student flies --
-            student.add_sortie(cfg.avg_sortie_dur, "Blue")
-            
-            # -- Instructor flies (Per student sortie) --
-            for _ in range(event.num_instructor):
-                # Only IPs can instruct
-                ips = [p for p in all_pilots if rules.can_fill_seat(p, Qual.IP, syllabus_upgrade_type)]
-                assign_sortie(ips, "Blue", noise, cfg.avg_sortie_dur)
-
-            # -- Blue Wingmen (Per student sortie) --
-            for _ in range(event.num_blue_wg):
-                candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.WG, syllabus_upgrade_type)]
-                # Filter out the student themselves if they are in the candidate list
-                candidates = [p for p in candidates if p is not student]
-                assign_sortie(candidates, "Blue", noise, cfg.avg_sortie_dur)
-
-            # -- Blue Flight Leads (Per student sortie) --
-            for _ in range(event.num_blue_fl):
-                candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.FL, syllabus_upgrade_type)]
-                candidates = [p for p in candidates if p is not student]
-                assign_sortie(candidates, "Blue", noise, cfg.avg_sortie_dur)
-
-            # -- Red Wingmen (Per student sortie) --
-            for _ in range(event.num_red_wg):
-                candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.WG, syllabus_upgrade_type)]
-                candidates = [p for p in candidates if p is not student]
-                assign_sortie(candidates, "Red", noise, cfg.avg_sortie_dur)
-
-            # -- Red Flight Leads (Per student sortie) --
-            for _ in range(event.num_red_fl):
-                candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.FL, syllabus_upgrade_type)]
-                candidates = [p for p in candidates if p is not student]
-                assign_sortie(candidates, "Red", noise, cfg.avg_sortie_dur)
+            if not _can_fulfill_student_slot(
+                event, student, all_pilots, syllabus_upgrade_type, noise
+            ):
+                continue
+            _apply_student_training_event(cfg, event, student, all_pilots, syllabus_upgrade_type, noise)
 
 def run_upgrade_program(
     cfg: SquadronConfig,
@@ -152,7 +235,7 @@ def allocate_continuation_training(
     if remaining_capacity <= 0:
         return
 
-    # Identify CT candidates (anyone NOT in an active upgrade)
+    # CT: anyone not in MQT may draw continuation sorties (FLUG/IPUG often need them for RAP).
     ct_candidates = [p for p in pilots if p.upgrade != Upgrade.MQT]
 
     if not ct_candidates:
@@ -183,16 +266,13 @@ def allocate_continuation_training(
 # Main Simulation Phase
 # ----------------------
 def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_noise: float = 0.0):
-    
+    """
+    Run one training phase. ``allocation_noise`` perturbs who gets each sortie slot
+    (see ``assign_sortie``); keep at 0 for deterministic least-loaded allocation.
+    """
     # 1. Reset Phase Counters
     for p in pilots:
-        if hasattr(p, 'reset_counters'):
-            p.reset_counters()
-        else:
-            p.sortie_phase = 0 
-            p.sortie_blue_phase = 0
-            p.sortie_red_phase = 0
-            p.sim_phase = 0
+        p.reset_phase_counters()
 
     # 2. Select Students
     # Note: If pilots were already assigned upgrades in a previous phase, 
@@ -207,19 +287,16 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
     run_upgrade_program(cfg, IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise)
 
 
-    # 4. Continuation Training
-    # Scale capacity to phase length (e.g. 1 month vs 4 months)
-    phase_months = cfg.phase_length_days / 30.0
-    total_capacity = int(total_phase_capacity(cfg) * phase_months)
+    # 4. Continuation Training — capacity = (PAA × UTE) sorties/month × phase length in notional months.
+    phase_months = cfg.phase_length_months
+    total_capacity = max(0, round(total_phase_capacity(cfg) * phase_months))
     
     allocate_continuation_training(cfg, pilots, CONTINUATION_PROFILE, total_capacity, allocation_noise)
 
-    # 5. Finalize Stats
+    # 5. Finalize stats (RAP shortfall scales with phase_length_days via update_total)
     for p in pilots:
-        # Assuming sim is flat per month, scaled to phase
-        months = cfg.phase_length_days / 30.0
-        p.sim_phase = 3 * phase_months
-        p.update_total()
+        p.set_rap_requirement()
+        p.update_total(cfg.phase_length_days)
         p.update_monthly(cfg.phase_length_days)
 
     return pilots
@@ -228,7 +305,7 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
 # Reporting
 # ----------------------
 def print_phase_summary(pilots: List[Pilot], cfg: SquadronConfig, verbose: bool = True):
-    print("\n=== Phase Summary ===")
+    print(f"\n=== Phase Summary ({cfg.phase_length_days} d ≈ {cfg.phase_length_months:.2f} mo) ===")
     
     groups = {
         "MQT Students": [p for p in pilots if p.upgrade == Upgrade.MQT],
