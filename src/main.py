@@ -19,5 +19,13 @@ if __name__ == "__main__":
     pilots = create_pilots(cfg)
 
     run_phase_simulation(cfg, pilots)
-    
+
+    h = cfg.last_phase_upgrade_handoff
+    if h is not None:
+        print(
+            f"Upgrade handoff — MQT complete: {h.mqt_syllabus_complete}, "
+            f"FLUG complete: {h.flug_syllabus_complete}, IPUG complete: {h.ipug_syllabus_complete}, "
+            f"deferred syllabus lines: {len(h.deferred_requirements)}"
+        )
+
     print_phase_summary(pilots, cfg, verbose=False)
