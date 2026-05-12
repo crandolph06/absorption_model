@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 import random
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 # ----------------------
 # Math
@@ -9,6 +9,13 @@ from typing import List, Optional
 # Used with `phase_length_days` everywhere we scale monthly rates or RAP to a phase
 # (not calendar months; matches historical 120-day ≈ 4-month convention).
 PHASE_DAYS_PER_NOTIONAL_MONTH: float = 30.0
+# Monthly sim RAP (WG / FL / IP): 1 EP + 2 other sims = 3 / month in ``SIM_RAP_MONTHLY``.
+SIM_RAP_MONTHLY: float = 3.0
+SIM_EP_MONTHLY: float = 1.0
+# Simulator wing capacity: ~30 session lines / month; each session has this many bays
+# (e.g. 4 bays = one 4-ship block or two 2-ship blocks in parallel).
+SIM_SESSIONS_MONTHLY: float = 30.0
+SIM_BAYS_PER_SESSION: int = 4
 
 
 def inv(x): return 1/x if x != 0 else 0
@@ -46,17 +53,42 @@ class PriorityMode(Enum):
 
 @dataclass
 class DeferredSyllabusItem:
-    """One syllabus repetition not completed this phase (e.g. missing crew); carry to next phase."""
+    """
+    One syllabus line item that did not execute this phase (e.g. missing IP).
+
+    ``syllabus_event_index`` is the 0-based index into the **full** upgrade syllabus
+    (``MQT_SYLLABUS``, ``FLUG_SYLLABUS``, or ``IPUG_SYLLABUS``), including SIM rows. It
+    disambiguates duplicate ``event_name`` strings and fixes curriculum order for
+    the next phase: carry-forward work must replay **these** rows (and remaining
+    later indices), **not** restart the full syllabus from index 0 while skipping
+    high-support events.
+
+    ``student_event_repetition`` is the index within ``range(event.num_student)``
+    for this student/event (usually 0).
+
+    Next-phase logic (not implemented yet) must merge this queue with any new
+    syllabus tail so training cannot substitute low-support early events for
+    deferred high-support lines.
+    """
     upgrade: Upgrade
     event_name: str
     event_type: EventType
+    syllabus_event_index: int
+    student_event_repetition: int
     student_year_group: int
     student_squadron_id: int
 
 
 @dataclass
 class PhaseUpgradeHandoff:
-    """Snapshot after a phase for downstream logic: syllabus completion + deferred upgrade lines."""
+    """
+    Snapshot after a phase for downstream multi-phase logic.
+
+    ``deferred_requirements`` lists exact syllabus rows (SORTIE or SIM) that failed this phase.
+    A future phase runner must consume them in curriculum order (by
+    ``syllabus_event_index``, then student identity) rather than re-running only
+    the beginning of the syllabus.
+    """
     mqt_syllabus_complete: bool
     flug_syllabus_complete: bool
     ipug_syllabus_complete: bool
@@ -112,59 +144,80 @@ class Pilot:
     qual: Qual = Qual.WG 
     upgrade: Upgrade = Upgrade.NONE
     sortie_phase: float = 0 
-    hours_phase: float = 0
+    flight_hours_phase: float = 0.0
+    sim_hours_phase: float = 0.0
     sim_phase: float = 0 
+    ep_sim_phase: float = 0.0
     total_phase: float = 0 
     sortie_blue_phase: float = 0 
     sortie_red_phase: float = 0 
 
     target_sorties: float = 0
+    target_sims: float = 0.0
     rap_shortfall: float = 0
+    sim_rap_shortfall: float = 0.0
 
     sortie_monthly: float = 0
     sim_monthly: float = 0
+    flight_hours_monthly: float = 0.0
+    sim_hours_monthly: float = 0.0
     sortie_blue_monthly: float = 0
     sortie_red_monthly: float = 0
 
     year_group: int = 9999
     squadron_id: int = 99
     sorties_flown: int = 0
-    hours_flown: int = 0
+    sorties_at_upgrade_start: int = 0
+    sims_flown: int = 0
+    sims_at_upgrade_start: int = 0
+    flight_hours_flown: float = 0.0
+    sim_hours_flown: float = 0.0
     adsc_remaining: int = 120 # Measured in months
     active: bool = True
     separation_date: tuple = (9999, 0)
     current_assignment: Assignment = Assignment.LINE
     
     def set_rap_requirement(self):
-        """Monthly RAP sortie targets (scaled to phase length in update_total)."""
+        """Monthly RAP sortie and sim targets (``SIM_RAP_MONTHLY`` includes EP + other sims)."""
         if self.qual == Qual.WG:
             self.target_sorties = 9
         elif self.qual in (Qual.FL, Qual.IP):
             self.target_sorties = 8
+        if self.qual in (Qual.WG, Qual.FL, Qual.IP):
+            self.target_sims = SIM_RAP_MONTHLY
+        else:
+            self.target_sims = 0.0
 
     def update_total(self, phase_length_days: Optional[float] = None):
         self.total_phase = self.sortie_phase + self.sim_phase
         if phase_length_days is not None and phase_length_days > 0:
             months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
-            expected = self.target_sorties * months
-            self.rap_shortfall = max(0.0, expected - self.total_phase)
+            exp_sorties = self.target_sorties * months
+            self.rap_shortfall = max(0.0, exp_sorties - self.sortie_phase)
+            exp_sims = self.target_sims * months
+            self.sim_rap_shortfall = max(0.0, exp_sims - self.sim_phase)
         else:
-            self.rap_shortfall = max(0.0, self.target_sorties - self.total_phase)
+            self.rap_shortfall = max(0.0, self.target_sorties - self.sortie_phase)
+            self.sim_rap_shortfall = max(0.0, self.target_sims - self.sim_phase)
 
     def update_monthly(self, phase_length_days: float):
         months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
         if months > 0:
             self.sortie_monthly = self.sortie_phase / months
             self.sim_monthly = self.sim_phase / months
+            self.flight_hours_monthly = self.flight_hours_phase / months
+            self.sim_hours_monthly = self.sim_hours_phase / months
             self.sortie_blue_monthly = self.sortie_blue_phase / months
             self.sortie_red_monthly = self.sortie_red_phase / months
 
     def reset_phase_counters(self):
         self.sortie_phase = 0
-        self.hours_phase = 0
+        self.flight_hours_phase = 0.0
+        self.sim_hours_phase = 0.0
         self.sortie_blue_phase = 0
         self.sortie_red_phase = 0
         self.sim_phase = 0
+        self.ep_sim_phase = 0.0
 
     def add_sortie(self, avg_sortie_dur: float, side: str = "Blue"):
         self.sortie_phase += 1
@@ -173,7 +226,17 @@ class Pilot:
         elif side == "Red":
             self.sortie_red_phase += 1
 
-        self.hours_phase += avg_sortie_dur
+        self.flight_hours_phase += avg_sortie_dur
+        self.flight_hours_flown += avg_sortie_dur
+
+    def add_sim(self, avg_event_dur: float, *, count_ep: bool = False) -> None:
+        """One simulator event for this pilot (syllabus or sim RAP). ``count_ep`` tags EP RAP."""
+        self.sim_phase += 1.0
+        self.sims_flown += 1
+        self.sim_hours_phase += avg_event_dur
+        self.sim_hours_flown += avg_event_dur
+        if count_ep:
+            self.ep_sim_phase += 1.0
 
     def graduate(self):
         if self.upgrade == Upgrade.MQT:
@@ -190,7 +253,7 @@ class Pilot:
             return
             
         self.sorties_flown += aging_rate
-        self.hours_flown += aging_rate * asd
+        self.flight_hours_flown += aging_rate * asd
         
         if self.adsc_remaining > 0:
             self.adsc_remaining -= phase_length_months
@@ -235,9 +298,14 @@ class SquadronConfig:
     experience_ratio: float = 0.0
     phase_length_days: int = 120  # Default ~4 months; drive all phase scaling from this field.
     avg_sortie_dur: float = 1.3
+    # Simulator wing: session lines per month (each line has ``sim_bays_per_session`` bays).
+    sim_sessions_monthly: float = SIM_SESSIONS_MONTHLY
+    sim_bays_per_session: int = SIM_BAYS_PER_SESSION
 
     pilots: List[Pilot] = field(default_factory=list)
     last_phase_upgrade_handoff: Optional["PhaseUpgradeHandoff"] = None
+    pending_deferred_requirements: List["DeferredSyllabusItem"] = field(default_factory=list)
+    observed_mqt_monthly: Optional[float] = None
 
     @property
     def phase_length_months(self) -> float:
@@ -290,13 +358,36 @@ class SquadronConfig:
         self.ipug_students = sum(1 for p in line_pilots if p.upgrade == Upgrade.IPUG)
 
     def graduate_current_upgrades(self):
-        dirty = False 
+        """Graduate pilots when SORTIE and SIM student syllabus requirements are met."""
+        from src.syllabi import (
+            FLUG_SYLLABUS,
+            IPUG_SYLLABUS,
+            MQT_SYLLABUS,
+            count_sim_student_slots,
+            count_sortie_student_slots,
+        )
+
+        dirty = False
 
         for pilot in self.pilots:
-            if pilot.upgrade != Upgrade.NONE:
+            if pilot.upgrade == Upgrade.NONE:
+                continue
+            if pilot.upgrade == Upgrade.MQT:
+                syllabus = MQT_SYLLABUS
+            elif pilot.upgrade == Upgrade.FLUG:
+                syllabus = FLUG_SYLLABUS
+            elif pilot.upgrade == Upgrade.IPUG:
+                syllabus = IPUG_SYLLABUS
+            else:
+                continue
+            need_sort = count_sortie_student_slots(syllabus)
+            need_sim = count_sim_student_slots(syllabus)
+            since_sort = pilot.sorties_flown - pilot.sorties_at_upgrade_start
+            since_sim = pilot.sims_flown - pilot.sims_at_upgrade_start
+            if since_sort >= need_sort and since_sim >= need_sim:
                 pilot.graduate()
                 dirty = True
-        
+
         if dirty:
             self.update_stats()
         if self.mqt_students > 0 or self.flug_students > 0 or self.ipug_students > 0:
@@ -319,14 +410,16 @@ class SquadronConfig:
         for i in range(min(len(flug_eligible), flug_limit)):
             p = flug_eligible[i]
             p.upgrade = Upgrade.FLUG
+            p.sorties_at_upgrade_start = p.sorties_flown
+            p.sims_at_upgrade_start = p.sims_flown
 
         ipug_eligible = [
             p for p in self.pilots if p.qual == Qual.FL and p.upgrade == Upgrade.NONE 
-            and ipug_window_start <= p.hours_flown 
+            and ipug_window_start <= p.flight_hours_flown 
         ]
         
         if use_upgrade_quotas:
-            ipug_eligible.sort(key=lambda x: x.hours_flown, reverse=True)
+            ipug_eligible.sort(key=lambda x: x.flight_hours_flown, reverse=True)
             ipug_limit = ipug_quota
         else:
             ipug_limit = len(ipug_eligible)
@@ -334,11 +427,13 @@ class SquadronConfig:
         for i in range(min(len(ipug_eligible), ipug_limit)):
             p = ipug_eligible[i]
             p.upgrade = Upgrade.IPUG
+            p.sorties_at_upgrade_start = p.sorties_flown
+            p.sims_at_upgrade_start = p.sims_flown
 
         self.update_stats()
         
     def apply_phase_aging(self, rates: AgingRate):
-        "Ages pilots by adding phase aging rate in hours/sorties and subtracts phase length from ADSC remaining."
+        "Ages pilots by adding phase sortie rate (flight hours) and subtracts phase length from ADSC remaining."
         phase_length_months = self.phase_length_months
 
         for p in self.pilots:
