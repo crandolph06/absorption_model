@@ -30,6 +30,28 @@ class Qual(Enum):
     FL = 'FL'
     IP = 'IP'
 
+
+# Monthly sortie RAP (same as ``Pilot.set_rap_requirement`` / ``rap_state`` / manning stats).
+SORTIE_RAP_MONTHLY_WG: float = 9.0
+SORTIE_RAP_MONTHLY_FL_IP: float = 8.0
+
+
+def monthly_sortie_rap_target(qual: Qual) -> float:
+    """Notional monthly sortie RAP requirement for ``qual``; 0 if none."""
+    if qual == Qual.WG:
+        return SORTIE_RAP_MONTHLY_WG
+    if qual in (Qual.FL, Qual.IP):
+        return SORTIE_RAP_MONTHLY_FL_IP
+    return 0.0
+
+
+def monthly_sim_rap_target(qual: Qual) -> float:
+    """Notional monthly sim RAP for WG/FL/IP; 0 otherwise (``Pilot.set_rap_requirement``)."""
+    if qual in (Qual.WG, Qual.FL, Qual.IP):
+        return float(SIM_RAP_MONTHLY)
+    return 0.0
+
+
 class Upgrade(Enum):
     NONE = 'None'
     MQT = 'MQT'
@@ -178,15 +200,13 @@ class Pilot:
     current_assignment: Assignment = Assignment.LINE
     
     def set_rap_requirement(self):
-        """Monthly RAP sortie and sim targets (``SIM_RAP_MONTHLY`` includes EP + other sims)."""
-        if self.qual == Qual.WG:
-            self.target_sorties = 9
-        elif self.qual in (Qual.FL, Qual.IP):
-            self.target_sorties = 8
-        if self.qual in (Qual.WG, Qual.FL, Qual.IP):
-            self.target_sims = SIM_RAP_MONTHLY
-        else:
+        """Monthly sortie and sim RAP targets (single source: ``monthly_*_rap_target``)."""
+        if self.upgrade == Upgrade.MQT:
+            self.target_sorties = 0.0
             self.target_sims = 0.0
+            return
+        self.target_sorties = monthly_sortie_rap_target(self.qual)
+        self.target_sims = monthly_sim_rap_target(self.qual)
 
     def update_total(self, phase_length_days: Optional[float] = None):
         self.total_phase = self.sortie_phase + self.sim_phase
@@ -504,12 +524,12 @@ class SquadronConfig:
             'wg_rate_blue': rates.wg_blue_phase / months,
             'fl_rate_blue': rates.fl_blue_phase / months,
             'ip_rate_blue': rates.ip_blue_phase / months,
-            'wg_rap_shortfall': 9 - (rates.wg_phase / months), 
-            'fl_rap_shortfall': 8 - (rates.fl_phase / months),
-            'ip_rap_shortfall': 8 - (rates.ip_phase / months),
-            'wg_blue_shortfall': 9 - (rates.wg_blue_phase / months),
-            'fl_blue_shortfall': 8 - (rates.fl_blue_phase / months),
-            'ip_blue_shortfall': 8 - (rates.ip_blue_phase / months)
+            'wg_rap_shortfall': monthly_sortie_rap_target(Qual.WG) - (rates.wg_phase / months),
+            'fl_rap_shortfall': monthly_sortie_rap_target(Qual.FL) - (rates.fl_phase / months),
+            'ip_rap_shortfall': monthly_sortie_rap_target(Qual.IP) - (rates.ip_phase / months),
+            'wg_blue_shortfall': monthly_sortie_rap_target(Qual.WG) - (rates.wg_blue_phase / months),
+            'fl_blue_shortfall': monthly_sortie_rap_target(Qual.FL) - (rates.fl_blue_phase / months),
+            'ip_blue_shortfall': monthly_sortie_rap_target(Qual.IP) - (rates.ip_blue_phase / months)
         }
     
         return current_stats
