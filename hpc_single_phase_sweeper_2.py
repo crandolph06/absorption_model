@@ -19,7 +19,7 @@ from src.rap_state import (
 # --- HPC CONFIGURATION ---
 PHASE_DAYS = 120
 ITERATIONS_PER_CONFIG = 3
-OUTPUT_DIR = "outputs/single_phase/parquet/2"  
+OUTPUT_DIR = "outputs/single_phase/parquet"  
 CHUNK_SIZE = 500000 
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
