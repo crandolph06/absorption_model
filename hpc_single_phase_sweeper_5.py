@@ -19,13 +19,13 @@ from src.rap_state import (
 # --- HPC CONFIGURATION ---
 PHASE_DAYS = 120
 ITERATIONS_PER_CONFIG = 3
-OUTPUT_DIR = "outputs/single_phase/parquet"  
+OUTPUT_DIR = "outputs/single_phase/parquet/5"  
 CHUNK_SIZE = 500000 
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def get_sweep_configs():
-    ute_values = range(6, 21)
+    ute_values = range(18, 21)
     ip_qty_values = range(3, 10)
     exp_ratios = np.linspace(0.0, 1.0, 21).round(2)
     paa_values = range(18, 24)
@@ -219,7 +219,7 @@ def run_parallel_sweep():
 
             if len(buffer) >= CHUNK_SIZE:
                 batch_index += 1
-                batch_file = os.path.join(OUTPUT_DIR, f"batch_{batch_index:04d}.parquet")
+                batch_file = os.path.join(OUTPUT_DIR, f"batch_5_{batch_index:04d}.parquet")
                 
                 # Convert buffer to DataFrame and save to Parquet
                 df_chunk = pd.DataFrame(buffer)
@@ -233,13 +233,13 @@ def run_parallel_sweep():
         if buffer:
             batch_index += 1
             if batch_index not in completed_batches:
-                batch_file = os.path.join(OUTPUT_DIR, f"batch_{batch_index:04d}.parquet")
+                batch_file = os.path.join(OUTPUT_DIR, f"batch_5_{batch_index:04d}.parquet")
                 pd.DataFrame(buffer).to_parquet(batch_file, index=False)
                 count += len(buffer)
 
-    with open("SWEEP_COMPLETE.txt", "w") as f:
+    with open("SWEEP_5_COMPLETE.txt", "w") as f:
         f.write("Done")
-    print(f"\n✅ Sweep Complete. Total valid configs: {count}")
+    print(f"\n✅ Sweep 5 Complete. Total valid configs: {count}")
 
 if __name__ == "__main__":
     run_parallel_sweep()
