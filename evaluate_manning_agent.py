@@ -16,7 +16,6 @@ def run_evaluation(run_mode="pragmatic", reward_mode="readiness_first"):
     brain = joblib.load(brain_path)
     
     sim_engine = CAFSimulation(
-        sim_upgrades=True,
         annual_intake=200,
         retention_rate=0.40,
         brain=brain,
