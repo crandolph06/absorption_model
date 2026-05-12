@@ -36,7 +36,6 @@ def make_env(rank, run_mode, reward_mode, seed=0):
     def _init():
         brain = load_ai_brain()
         sim_engine = CAFSimulation(
-            sim_upgrades=True,
             annual_intake=200,
             retention_rate=0.40,
             round_robin=False,
