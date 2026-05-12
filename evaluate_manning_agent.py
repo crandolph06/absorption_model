@@ -30,10 +30,7 @@ def run_evaluation(run_mode="pragmatic", reward_mode="readiness_first"):
     
     env = ManningEnv(sim_engine, run_mode=run_mode, reward_mode=reward_mode)
 
-    # Standardized to match the exact save structure from your training loop
-    model_path = f"rl_agents/ppo_manning_agent_{reward_mode}_{run_mode}"
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Could not find RL agent at {model_path}")
+    model_path = f"saved_models/ppo_manning_agent_{reward_mode}_{run_mode}"
     print(f"🧠 Loading RL Brain from {model_path}...")
     model = PPO.load(model_path)
 
@@ -43,40 +40,40 @@ def run_evaluation(run_mode="pragmatic", reward_mode="readiness_first"):
     
     history = []
     
-    # Map the action indices to actual meanings for the pragmatic mode
-    action_names = ["Intake", "FLUG", "IPUG", "Max Manning"]
-    if run_mode in ["current", "ideal", "optimistic"]:
-        action_names.append("UTE")
-        action_names.append("Retention")
+    # Map the action indices to actual meanings
+    action_names = ["Intake", "FLUG", "IPUG", "Max Manning", "UTE", "Retention"]
     if run_mode in ["ideal", "optimistic"]:
         action_names.append("PAA")
         
     while not (terminated or truncated):
-        # deterministic=True forces the agent to take what it believes is the optimal path
         action, _states = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, info = env.step(action)
         
-        # Calculate real shortfalls for the log
-        total_shortfall = (sim_engine.current_wg_shortfall + 
-                           sim_engine.current_fl_shortfall + 
-                           sim_engine.current_ip_shortfall)
-                           
         avg_ute = sum(sq.ute for sq in sim_engine.squadrons) / max(len(sim_engine.squadrons), 1) if sim_engine.squadrons else 0
+        total_paa = sum(sq.paa for sq in sim_engine.squadrons) if sim_engine.squadrons else 0
         
-        # Build the phase record
+        # Build the phase record (Added Staff Pilots, FLUG, IPUG, and PAA)
         record = {
             "Year": sim_engine.current_year,
             "Phase": sim_engine.current_phase,
             "Reward": reward,
             "Total Pilots": sim_engine.total_active_pilot_count,
-            "Total Shortfall": total_shortfall,
+            "Total Staff Pilots": sim_engine.total_staff_pilot_count,
+            "WG Shortfall": sim_engine.current_wg_shortfall,
+            "FL Shortfall": sim_engine.current_fl_shortfall,
+            "IP Shortfall": sim_engine.current_ip_shortfall,
             "Intake Target": sim_engine.annual_intake,
+            "FLUG Intake": sim_engine.sq_phase_flug_intake,
+            "IPUG Intake": sim_engine.sq_phase_ipug_intake,
             "Retention Rate": sim_engine.retention_rate,
             "Max Manning": sim_engine.max_manning,
-            "Avg UTE": avg_ute
+            "Avg UTE": avg_ute,
+            "Total PAA": total_paa,
+            "Experience Ratio": sim_engine.experience_ratio,
+            "Number of Squadrons": len(sim_engine.squadrons)
         }
         
-        # Map the 0,1,2 actions to -1,0,1 so they plot cleanly on a chart (-1=Decrease, 0=Hold, 1=Increase)
+        # Map the 0,1,2 actions to -1,0,1 so they plot cleanly on a chart
         for i, name in enumerate(action_names):
             record[f"Action: {name}"] = action[i] - 1 
             
