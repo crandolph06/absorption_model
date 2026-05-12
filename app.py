@@ -7,6 +7,8 @@ import itertools
 import os
 import joblib
 
+from src.models import Qual, monthly_sortie_rap_target
+
 # ==============================================================================
 # 1. PAGE CONFIG & STYLING
 # ==============================================================================
@@ -99,9 +101,12 @@ def calculate_rap_code(row, is_blue=False):
     ip = row.get(f'ip{suffix}', 0)
     
     code = 0
-    if wg < 9: code += 1
-    if fl < 8: code += 2
-    if ip < 8: code += 4
+    if wg < monthly_sortie_rap_target(Qual.WG):
+        code += 1
+    if fl < monthly_sortie_rap_target(Qual.FL):
+        code += 2
+    if ip < monthly_sortie_rap_target(Qual.IP):
+        code += 4
     return code
 
 state_labels_dict = {
