@@ -7,7 +7,7 @@ import joblib
 
 
 class CAFSimulation:
-    def __init__(self, sim_upgrades: bool, annual_intake: int, retention_rate: float, 
+    def __init__(self, annual_intake: int, retention_rate: float, 
                  round_robin: bool, brain = None, flug_window_start: int = 250, 
                  ipug_window_start: int = 400, max_manning_pct: int = 150, 
                  staff_priority_mode: PriorityMode = PriorityMode.RANDOM,
@@ -38,7 +38,6 @@ class CAFSimulation:
             self.brain = joblib.load("brains/hpc_sortie_brain_multi_output_mlp.pkl")
         else:
             raise FileNotFoundError(f"Could not find brains/hpc_sortie_brain_multi_output_mlp. Please confirm file path first.")
-        self.sim_upgrades = sim_upgrades
         self.round_robin = round_robin
 
     @property
@@ -116,6 +115,26 @@ class CAFSimulation:
         self.current_year = 2026
         self.current_phase = 1
 
+    def _resolve_mqt_monthly(self, sq: SquadronConfig) -> float:
+        """
+        Monthly MQT sortie rate for ``AgingRate`` when blending with the sortie brain.
+
+        Uses last phase's observed rate when available. Otherwise: no line IPs means
+        MQT cannot be crewed (0). No MQT students means 0. Else fall back to the same
+        MQT monthly implied by ``calc_analytic_aging_rate()`` (not a separate magic constant).
+        """
+        if sq.observed_mqt_monthly is not None:
+            return float(sq.observed_mqt_monthly)
+        if sq.mqt_students <= 0:
+            return 0.0
+        if sq.ip_qty <= 0:
+            return 0.0
+        months = sq.phase_length_months
+        if months <= 0:
+            return 0.0
+        baseline = sq.calc_analytic_aging_rate()
+        return baseline.mqt_phase / months
+
     def add_new_bcourse_graduates(self, year: int, count: int, round_robin: bool): 
         num_sq = len(self.squadrons)
         if num_sq == 0:
@@ -134,8 +153,12 @@ class CAFSimulation:
                 adsc_remaining=120, 
                 active=True,
                 squadron_id=target_sq.id,
-                hours_flown=50,
-                sorties_flown=50 
+                flight_hours_flown=50.0,
+                sim_hours_flown=0.0,
+                sorties_flown=50,
+                sorties_at_upgrade_start=50,
+                sims_flown=0,
+                sims_at_upgrade_start=0,
             ))
 
             target_sq.pilots.append(new_pilot)
@@ -166,22 +189,34 @@ class CAFSimulation:
                         raise AssertionError(f'Critical Data Mismatch in Squadron Pilots')
                     sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
 
-                if self.sim_upgrades:
-                    preds = self.predict_rates_fast()
+                preds = self.predict_rates_fast()
 
                 for i, sq in enumerate(self.squadrons):
-                    if self.sim_upgrades:
-                        row = preds[i]
-                        monthly_rates = AgingRate(
-                            4.0, row[0], row[1], row[2],
-                            4.0, row[3], row[4], row[5],
-                        )
-                        rates =  monthly_rates.monthly_to_phase(sq.phase_length_days)
-
-                    else:
-                        rates = sq.calc_aging_rate(False)
+                    row = preds[i]
+                    mqt_mo = self._resolve_mqt_monthly(sq)
+                    monthly_rates = AgingRate(
+                        mqt_mo, row[0], row[1], row[2],
+                        mqt_mo, row[3], row[4], row[5],
+                    )
+                    rates = monthly_rates.monthly_to_phase(sq.phase_length_days)
+                    mqt_baseline = {
+                        id(p): p.sorties_flown
+                        for p in sq.pilots
+                        if p.upgrade == Upgrade.MQT and p.active
+                    }
 
                     sq.apply_phase_aging(rates)
+
+                    if mqt_baseline:
+                        months = sq.phase_length_months
+                        if months > 0:
+                            deltas = [
+                                p.sorties_flown - mqt_baseline[id(p)]
+                                for p in sq.pilots
+                                if p.upgrade == Upgrade.MQT and id(p) in mqt_baseline
+                            ]
+                            if deltas:
+                                sq.observed_mqt_monthly = sum(deltas) / len(deltas) / months
 
                     current_stats = sq.store_stats(year, phase_num, rates)
 
@@ -398,8 +433,7 @@ class CAFSimulation:
 
         self.add_new_bcourse_graduates(self.current_year, current_batch, self.round_robin) 
 
-        if self.sim_upgrades:
-            preds = self.predict_rates_fast()
+        preds = self.predict_rates_fast()
 
         for i, sq in enumerate(self.squadrons):
             sq.manning_pct = self.max_manning
@@ -413,18 +447,31 @@ class CAFSimulation:
                                   flug_quota=self.sq_phase_flug_intake,
                                   ipug_quota=self.sq_phase_ipug_intake)
 
-            if self.sim_upgrades:
-                row = preds[i]
-                monthly_rates = AgingRate(
-                    4.0, row[0], row[1], row[2],
-                    4.0, row[3], row[4], row[5],
-                )
-                rates =  monthly_rates.monthly_to_phase(sq.phase_length_days)
-
-            else:
-                rates = sq.calc_aging_rate(False)
+            row = preds[i]
+            mqt_mo = self._resolve_mqt_monthly(sq)
+            monthly_rates = AgingRate(
+                mqt_mo, row[0], row[1], row[2],
+                mqt_mo, row[3], row[4], row[5],
+            )
+            rates = monthly_rates.monthly_to_phase(sq.phase_length_days)
+            mqt_baseline = {
+                id(p): p.sorties_flown
+                for p in sq.pilots
+                if p.upgrade == Upgrade.MQT and p.active
+            }
 
             sq.apply_phase_aging(rates)
+
+            if mqt_baseline:
+                months = sq.phase_length_months
+                if months > 0:
+                    deltas = [
+                        p.sorties_flown - mqt_baseline[id(p)]
+                        for p in sq.pilots
+                        if p.upgrade == Upgrade.MQT and id(p) in mqt_baseline
+                    ]
+                    if deltas:
+                        sq.observed_mqt_monthly = sum(deltas) / len(deltas) / months
 
             current_stats = sq.store_stats(self.current_year, self.current_phase, rates)
             self.process_end_of_phase(sq, self.current_year, self.current_phase, self.retention_rate, current_stats) 
