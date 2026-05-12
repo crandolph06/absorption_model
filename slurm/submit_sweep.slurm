@@ -6,7 +6,6 @@
 #SBATCH --qos=background
 #SBATCH --nodes=1
 #SBATCH --ntasks=16
-#SBATCH --cpus-per-task=1
 #SBATCH --exclusive
 #SBATCH --time=04:00:00
 #
@@ -34,7 +33,9 @@ python --version
 #
 export PYTHONUNBUFFERED=1
 #
-timeout 14100s python -u hpc_single_phase_sweeper.py || true
+mkdir -p logs
+# One MPI-style task per process: each sets SLURM_PROCID / SLURM_NTASKS; sweeper shards the grid.
+timeout 14100s srun python -u hpc_single_phase_sweeper.py && touch SWEEP_COMPLETE.txt || true
 #
 
 if [ -f SWEEP_COMPLETE.txt ]; then
