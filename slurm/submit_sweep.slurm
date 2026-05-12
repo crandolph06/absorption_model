@@ -5,7 +5,8 @@
 #SBATCH --partition=general
 #SBATCH --qos=background
 #SBATCH --nodes=1
-#SBATCH --ntasks=1
+#SBATCH --ntasks=16
+#SBATCH --cpus-per-task=1
 #SBATCH --exclusive
 #SBATCH --time=04:00:00
 #
