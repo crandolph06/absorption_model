@@ -51,7 +51,6 @@ def main():
     for run_mode in run_modes[:1]:
         for reward_mode in reward_modes[:1]:
             sim_engine = CAFSimulation(
-                sim_upgrades=True,
                 annual_intake=200,
                 retention_rate=0.40,
                 round_robin=False,
