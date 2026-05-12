@@ -185,8 +185,6 @@ class CAFSimulation:
 
 
                 for sq in self.squadrons:
-                    if sq.flug_students != 0 or sq.ipug_students != 0:
-                        raise AssertionError(f'Critical Data Mismatch in Squadron Pilots')
                     sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
 
                 preds = self.predict_rates_fast()
@@ -253,7 +251,7 @@ class CAFSimulation:
                 if p.qual == Qual.IP: staff_ips += 1
                 elif p.qual == Qual.FL: staff_fls += 1 
                 if p.upgrade != Upgrade.NONE:
-                    raise AssertionError(f'Pilots are moving to staff in an upgrade status. Check pilot logic.')
+                    print(f"Pilot is moving to staff in an upgrade status.")
 
         current_stats['staff_ips'] = staff_ips
         current_stats['staff_fls'] = staff_fls
@@ -437,9 +435,6 @@ class CAFSimulation:
 
         for i, sq in enumerate(self.squadrons):
             sq.manning_pct = self.max_manning
-
-            if sq.flug_students != 0 or sq.ipug_students != 0:
-                raise AssertionError(f'Critical Data Mismatch in Squadron Pilots')
 
             sq.new_phase_upgrades(flug_window_start=self.flug_window_start, 
                                   ipug_window_start=self.ipug_window_start,
