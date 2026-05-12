@@ -44,6 +44,24 @@ class PriorityMode(Enum):
     RANDOM = 'random'
 
 
+@dataclass
+class DeferredSyllabusItem:
+    """One syllabus repetition not completed this phase (e.g. missing crew); carry to next phase."""
+    upgrade: Upgrade
+    event_name: str
+    event_type: EventType
+    student_year_group: int
+    student_squadron_id: int
+
+
+@dataclass
+class PhaseUpgradeHandoff:
+    """Snapshot after a phase for downstream logic: syllabus completion + deferred upgrade lines."""
+    mqt_syllabus_complete: bool
+    flug_syllabus_complete: bool
+    ipug_syllabus_complete: bool
+    deferred_requirements: List[DeferredSyllabusItem] = field(default_factory=list)
+
 
 @dataclass 
 class AgingRate:
@@ -219,6 +237,7 @@ class SquadronConfig:
     avg_sortie_dur: float = 1.3
 
     pilots: List[Pilot] = field(default_factory=list)
+    last_phase_upgrade_handoff: Optional["PhaseUpgradeHandoff"] = None
 
     @property
     def phase_length_months(self) -> float:
