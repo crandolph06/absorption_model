@@ -1,10 +1,7 @@
 import random
 from typing import List, Dict
-from src.models import SquadronConfig, Pilot, Qual, Upgrade
-from src.syllabi import SyllabusEvent, ContinuationProfile, UpgradeProgram
-from src import rules
-# from src.syllabi import TEST_MQT_SYLLABUS, TEST_FLUG_SYLLABUS, TEST_IPUG_SYLLABUS, CONTINUATION_PROFILE
-from src.syllabi import MQT_SYLLABUS, FLUG_SYLLABUS, IPUG_SYLLABUS, CONTINUATION_PROFILE
+from src.models import SquadronConfig, Pilot, Qual, Upgrade, EventType
+from src.syllabi import SyllabusEvent, MQT_SYLLABUS, FLUG_SYLLABUS, IPUG_SYLLABUS, CONTINUATION_PROFILE
 
 # ----------------------
 # Pilot Creation
