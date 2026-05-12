@@ -3,7 +3,7 @@ from src.manning_engine import CAFSimulation
 
 # Use your current engine setup
 sim = CAFSimulation(
-    sim_upgrades=True, use_upgrade_quotas=True, annual_intake=150, 
+    use_upgrade_quotas=True, annual_intake=150,
     retention_rate=.4, round_robin=False) 
 env = ManningEnv(sim, run_mode="optimistic")
 
