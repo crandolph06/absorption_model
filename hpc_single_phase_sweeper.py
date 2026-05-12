@@ -4,8 +4,17 @@ import os
 import itertools
 from concurrent.futures import ProcessPoolExecutor
 from src.engine import run_phase_simulation, create_pilots
-from src.models import SquadronConfig
-from src.rap_state import rap_assess, rap_state_code, rap_state_label
+from src.models import SquadronConfig, Upgrade
+from src.rap_state import (
+    rap_assess,
+    rap_state_code,
+    rap_state_label,
+    sim_rap_metrics,
+    sim_rap_state_code,
+    sim_rap_state_label,
+    mqt_observed_sortie_metrics,
+    mqt_observed_sim_metrics,
+)
 
 # --- HPC CONFIGURATION ---
 PHASE_DAYS = 120
@@ -19,7 +28,7 @@ def get_sweep_configs():
     ute_values = range(6, 21)
     ip_qty_values = range(3, 10)
     exp_ratios = np.linspace(0.0, 1.0, 21).round(2)
-    paa_values = range( 18, 24)
+    paa_values = range(18, 24)
     mqt_students = range(0, 15)
     flug_students = range(0, 15)
     ipug_students = range(0, 15)
@@ -72,18 +81,40 @@ def process_single_config(args):
             pilots = create_pilots(cfg)
             final_pilots = run_phase_simulation(cfg, pilots, allocation_noise=0.0)
             
-            # Extract Metrics
+            # Extract metrics + upgrade syllabus handoff (same cfg object updated each iteration)
+            h = cfg.last_phase_upgrade_handoff
+            if h is None:
+                raise ValueError("last_phase_upgrade_handoff not set after run_phase_simulation")
+
             rap, blue_rap, red = rap_assess(final_pilots)
-            
-            # Store raw numbers for averaging
+            simm = sim_rap_metrics(final_pilots)
+            mqt_sorties = mqt_observed_sortie_metrics(final_pilots)
+            mqt_sims = mqt_observed_sim_metrics(final_pilots)
+
             results.append({
                 "r_code": rap_state_code(rap),
                 "b_code": rap_state_code(blue_rap),
-                "mqt_mo": rap["MQT"][1], 
+                "sim_code": sim_rap_state_code(simm),
+                "mqt_mo": mqt_sorties["sortie_mo"],
                 "wg_mo": rap["WG"][1], "fl_mo": rap["FL"][1], "ip_mo": rap["IP"][1],
                 "wg_b_mo": blue_rap["WG"][1], "fl_b_mo": blue_rap["FL"][1], "ip_b_mo": blue_rap["IP"][1],
                 "wg_r_mo": red["WG"][1], "fl_r_mo": red["FL"][1], "ip_r_mo": red["IP"][1],
-                "wg_r_pct": red["WG"][0], "fl_r_pct": red["FL"][0], "ip_r_pct": red["IP"][0]
+                "wg_r_pct": red["WG"][0], "fl_r_pct": red["FL"][0], "ip_r_pct": red["IP"][0],
+                "mqt_sim_mo": mqt_sims["sim_mo"],
+                "wg_sim_mo": simm["WG"]["sim_mo"],
+                "fl_sim_mo": simm["FL"]["sim_mo"],
+                "ip_sim_mo": simm["IP"]["sim_mo"],
+                "mqt_sim_rap_sf": mqt_sims["sim_rap_shortfall"],
+                "wg_sim_rap_sf": simm["WG"]["sim_rap_shortfall"],
+                "fl_sim_rap_sf": simm["FL"]["sim_rap_shortfall"],
+                "ip_sim_rap_sf": simm["IP"]["sim_rap_shortfall"],
+                "mqt_syllabus_complete": float(h.mqt_syllabus_complete),
+                "flug_syllabus_complete": float(h.flug_syllabus_complete),
+                "ipug_syllabus_complete": float(h.ipug_syllabus_complete),
+                "deferred_syllabus_lines": len(h.deferred_requirements),
+                "deferred_mqt_lines": sum(1 for d in h.deferred_requirements if d.upgrade == Upgrade.MQT),
+                "deferred_flug_lines": sum(1 for d in h.deferred_requirements if d.upgrade == Upgrade.FLUG),
+                "deferred_ipug_lines": sum(1 for d in h.deferred_requirements if d.upgrade == Upgrade.IPUG),
             })
 
         except ValueError:
@@ -99,19 +130,39 @@ def process_single_config(args):
     # 5. Construct Final Row
     # We add the inputs back here for the CSV
     return {
-        "paa": paa, "ute": ute, 
-        "total_capacity": cfg.paa * cfg.ute * (PHASE_DAYS / 30),
+        "paa": paa, "ute": ute,
+        "total_capacity": cfg.paa * cfg.ute * cfg.phase_length_months,
         "exp_ratio": exp, "ip_qty": ip_q, "total_pilots": total,
         "mqt_qty": mqt, "flug_qty": flug, "ipug_qty": ipug,
-        "rap_state_code": avg["r_code"], 
+        "rap_state_code": avg["r_code"],
         "rap_state_label": rap_state_label(int(round(avg["r_code"]))),
-        "blue_rap_state_code": avg["b_code"], 
+        "blue_rap_state_code": avg["b_code"],
         "blue_rap_state_label": rap_state_label(int(round(avg["b_code"]))),
-        "mqt_monthly": avg["mqt_mo"], 
+        "sim_rap_state_code": avg["sim_code"],
+        "sim_rap_state_label": sim_rap_state_label(int(round(avg["sim_code"]))),
+        "mqt_monthly": avg["mqt_mo"],
         "wg_monthly": avg["wg_mo"], "fl_monthly": avg["fl_mo"], "ip_monthly": avg["ip_mo"],
         "wg_blue_monthly": avg["wg_b_mo"], "fl_blue_monthly": avg["fl_b_mo"], "ip_blue_monthly": avg["ip_b_mo"],
         "wg_red_monthly": avg["wg_r_mo"], "fl_red_monthly": avg["fl_r_mo"], "ip_red_monthly": avg["ip_r_mo"],
-        "wg_red_pct": avg["wg_r_pct"], "fl_red_pct": avg["fl_r_pct"], "ip_red_pct": avg["ip_r_pct"]
+        "wg_red_pct": avg["wg_r_pct"], "fl_red_pct": avg["fl_r_pct"], "ip_red_pct": avg["ip_r_pct"],
+        "mqt_sim_monthly": avg["mqt_sim_mo"],
+        "wg_sim_monthly": avg["wg_sim_mo"],
+        "fl_sim_monthly": avg["fl_sim_mo"],
+        "ip_sim_monthly": avg["ip_sim_mo"],
+        "mqt_sim_rap_shortfall_mean": avg["mqt_sim_rap_sf"],
+        "wg_sim_rap_shortfall_mean": avg["wg_sim_rap_sf"],
+        "fl_sim_rap_shortfall_mean": avg["fl_sim_rap_sf"],
+        "ip_sim_rap_shortfall_mean": avg["ip_sim_rap_sf"],
+        "mqt_syllabus_complete_frac": avg["mqt_syllabus_complete"],
+        "flug_syllabus_complete_frac": avg["flug_syllabus_complete"],
+        "ipug_syllabus_complete_frac": avg["ipug_syllabus_complete"],
+        "deferred_syllabus_lines_mean": avg["deferred_syllabus_lines"],
+        "deferred_mqt_lines_mean": avg["deferred_mqt_lines"],
+        "deferred_flug_lines_mean": avg["deferred_flug_lines"],
+        "deferred_ipug_lines_mean": avg["deferred_ipug_lines"],
+        "deferred_syllabus_lines_mqt_mean": avg["deferred_mqt_lines"],
+        "deferred_syllabus_lines_flug_mean": avg["deferred_flug_lines"],
+        "deferred_syllabus_lines_ipug_mean": avg["deferred_ipug_lines"],
     }
 
 def run_parallel_sweep():
