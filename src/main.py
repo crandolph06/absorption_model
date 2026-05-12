@@ -1,5 +1,5 @@
 from src.models import SquadronConfig
-from src.engine import run_phase_simulation, print_phase_summary # You'll need to move print_summary to engine
+from src.engine import create_pilots, run_phase_simulation, print_phase_summary
 
 if __name__ == "__main__":
     cfg = SquadronConfig(
@@ -16,7 +16,6 @@ if __name__ == "__main__":
         avg_sortie_dur = 1.3
     )
 
-    from engine import create_pilots
     pilots = create_pilots(cfg)
 
     run_phase_simulation(cfg, pilots)
