@@ -1,12 +1,16 @@
 from dataclasses import dataclass, field
 from enum import Enum
 import random
-from typing import List
-import pandas as pd
+from typing import List, Optional
 
 # ----------------------
-# Math 
+# Math
 # ----------------------
+# Used with `phase_length_days` everywhere we scale monthly rates or RAP to a phase
+# (not calendar months; matches historical 120-day ≈ 4-month convention).
+PHASE_DAYS_PER_NOTIONAL_MONTH: float = 30.0
+
+
 def inv(x): return 1/x if x != 0 else 0
 def square(x): return x**2
 
@@ -53,8 +57,8 @@ class AgingRate:
     fl_blue_phase: float = 0.0
     ip_blue_phase: float = 0.0
 
-    def monthly_to_phase(self, phase_length_days):
-        phase_length_months = phase_length_days / 30
+    def monthly_to_phase(self, phase_length_days: float):
+        phase_length_months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
 
         return AgingRate(
             mqt_phase=self.mqt_phase * phase_length_months,
@@ -68,8 +72,8 @@ class AgingRate:
             ip_blue_phase=self.ip_blue_phase * phase_length_months
         )
     
-    def phase_to_monthly(self, phase_length_days):
-        phase_length_months = phase_length_days / 30
+    def phase_to_monthly(self, phase_length_days: float):
+        phase_length_months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
 
         return AgingRate(
             mqt_phase=self.mqt_phase / phase_length_months,
@@ -114,17 +118,23 @@ class Pilot:
     current_assignment: Assignment = Assignment.LINE
     
     def set_rap_requirement(self):
+        """Monthly RAP sortie targets (scaled to phase length in update_total)."""
         if self.qual == Qual.WG:
             self.target_sorties = 9
-        elif self.qual == Qual.FL or Qual.IP:
+        elif self.qual in (Qual.FL, Qual.IP):
             self.target_sorties = 8
-    
-    def update_total(self):
-        self.total_phase = self.sortie_phase + self.sim_phase
-        self.rap_shortfall = max(0, self.target_sorties - self.total_phase) 
 
-    def update_monthly(self, phase_length_days: int):
-        months = phase_length_days / 30
+    def update_total(self, phase_length_days: Optional[float] = None):
+        self.total_phase = self.sortie_phase + self.sim_phase
+        if phase_length_days is not None and phase_length_days > 0:
+            months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
+            expected = self.target_sorties * months
+            self.rap_shortfall = max(0.0, expected - self.total_phase)
+        else:
+            self.rap_shortfall = max(0.0, self.target_sorties - self.total_phase)
+
+    def update_monthly(self, phase_length_days: float):
+        months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
         if months > 0:
             self.sortie_monthly = self.sortie_phase / months
             self.sim_monthly = self.sim_phase / months
@@ -205,10 +215,15 @@ class SquadronConfig:
     total_pilots: int = 0
     line_pilots: int = 0
     experience_ratio: float = 0.0
-    phase_length_days: int = 120  
+    phase_length_days: int = 120  # Default ~4 months; drive all phase scaling from this field.
     avg_sortie_dur: float = 1.3
 
     pilots: List[Pilot] = field(default_factory=list)
+
+    @property
+    def phase_length_months(self) -> float:
+        """Notional months in a phase (phase_length_days / 30)."""
+        return max(0.0, float(self.phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH)
 
     @property
     def desired_manning(self) -> int:
@@ -305,7 +320,7 @@ class SquadronConfig:
         
     def apply_phase_aging(self, rates: AgingRate):
         "Ages pilots by adding phase aging rate in hours/sorties and subtracts phase length from ADSC remaining."
-        phase_length_months = self.phase_length_days / 30
+        phase_length_months = self.phase_length_months
 
         for p in self.pilots:
             if p.qual == Qual.IP:
@@ -320,7 +335,7 @@ class SquadronConfig:
             p.age_one_phase_with_rates(p_rate, self.avg_sortie_dur, phase_length_months)
 
     def calc_aging_rate(self, sim_upgrades: bool):
-        phase_months = self.phase_length_days / 30
+        phase_months = self.phase_length_months
         
         ute = self.ute
         paa = self.paa
@@ -340,65 +355,10 @@ class SquadronConfig:
                 ip_blue_phase=None
             )
     
-    # def predict_aging_rate(self, brain: dict) -> AgingRate:
-    #     """
-    #     Args:
-    #         brain: Dictionary containing the trained sklearn models 
-    #                (wg_monthly, fl_monthly, ip_monthly, etc.)
-    #     """
-    #     # 1. CALCULATE INPUTS (Must match training order EXACTLY)
-    #     # Features: ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
-        
-    #     # Ensure we are using Line Pilots (Cockpit Strength)
-    #     line_pilots = len([p for p in self.pilots if p.current_assignment == Assignment.LINE])
-        
-    #     # Construct Input Vector (2D Array for sklearn)
-    #     feature_names = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'ip_qty']
-        
-    #     # 3. Construct Input Vector
-    #     input_data = pd.DataFrame([[
-    #         self.paa,
-    #         self.ute,
-    #         self.experience_ratio,
-    #         self.line_pilots,       
-    #         self.mqt_students,
-    #         self.flug_students,
-    #         self.ipug_students,
-    #         self.ip_qty
-    #     ]], columns=feature_names)
-
-    #     # 2. GET PREDICTIONS (Monthly Rates)
-    #     try:
-    #         wg_mo = brain['wg_monthly'].predict(input_data)[0]
-    #         fl_mo = brain['fl_monthly'].predict(input_data)[0]
-    #         ip_mo = brain['ip_monthly'].predict(input_data)[0]
-            
-    #         # Blue Air Predictions
-    #         wg_blue_mo = brain['wg_blue_monthly'].predict(input_data)[0]
-    #         fl_blue_mo = brain['fl_blue_monthly'].predict(input_data)[0]
-    #         ip_blue_mo = brain['ip_blue_monthly'].predict(input_data)[0]
-    #     except KeyError as e:
-    #         print(f"🚨 Brain Missing Model: {e}")
-    #         return AgingRate() # Return empty/zero rate on failure
-
-    #     # 3. CONVERT TO PHASE OUTPUT (Sorties per Phase)
-    #     months_per_phase = self.phase_length_days / 30.0
-
-    #     return AgingRate(
-    #         mqt_phase=4.0 * months_per_phase, # Fixed allocation for MQT
-    #         wg_phase=max(0, wg_mo * months_per_phase),
-    #         fl_phase=max(0, fl_mo * months_per_phase),
-    #         ip_phase=max(0, ip_mo * months_per_phase),
-            
-    #         # Blue Air Support Requirements
-    #         mqt_blue_phase=4.0 * months_per_phase, # Fixed allocation for MQT
-    #         wg_blue_phase=max(0, wg_blue_mo * months_per_phase),
-    #         fl_blue_phase=max(0, fl_blue_mo * months_per_phase),
-    #         ip_blue_phase=max(0, ip_blue_mo * months_per_phase)
-    #     )
-        
     def store_stats(self, year: int, phase_num: int, rates: AgingRate):
-        months = self.phase_length_days / 30
+        months = self.phase_length_months
+        if months <= 0:
+            months = 1e-9
 
         self.update_stats()
 
