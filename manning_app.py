@@ -9,7 +9,7 @@ import os
 
 from src.manning_main import setup_simulation
 from src.manning_engine import CAFSimulation
-from src.models import PriorityMode
+from src.models import PriorityMode, Qual, monthly_sortie_rap_target
 
 BRAIN_PATH = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
 
@@ -209,9 +209,12 @@ if submitted:
             ip_rate = row.get(f'ip_rate{suffix}', 0)
 
             code = 0
-            if wg_rate < 9: code += 1
-            if fl_rate < 8: code += 2
-            if ip_rate < 8: code += 4
+            if wg_rate < monthly_sortie_rap_target(Qual.WG):
+                code += 1
+            if fl_rate < monthly_sortie_rap_target(Qual.FL):
+                code += 2
+            if ip_rate < monthly_sortie_rap_target(Qual.IP):
+                code += 4
 
             return code
         
