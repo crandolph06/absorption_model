@@ -1,6 +1,14 @@
 import random
-from typing import List
-from src.models import SquadronConfig, Pilot, Qual, Upgrade, EventType
+from typing import List, Optional
+from src.models import (
+    SquadronConfig,
+    Pilot,
+    Qual,
+    Upgrade,
+    EventType,
+    DeferredSyllabusItem,
+    PhaseUpgradeHandoff,
+)
 from src.syllabi import SyllabusEvent, ContinuationProfile, MQT_SYLLABUS, FLUG_SYLLABUS, IPUG_SYLLABUS, CONTINUATION_PROFILE
 from src import rules
 
@@ -30,6 +38,15 @@ def create_pilots(cfg: SquadronConfig) -> List[Pilot]:
     return ([Pilot(Qual.WG) for _ in range(wg_count)] +
             [Pilot(Qual.FL) for _ in range(fl_count)] +
             [Pilot(Qual.IP) for _ in range(ip_count)])
+
+def _syllabus_track_complete(
+    students: List[Pilot], upgrade: Upgrade, deferred: List[DeferredSyllabusItem]
+) -> bool:
+    """True if no students in this track or no deferred lines for this upgrade."""
+    if not students:
+        return True
+    return not any(d.upgrade == upgrade for d in deferred)
+
 
 def total_phase_capacity(cfg: SquadronConfig) -> float:
     return cfg.ute * cfg.paa
@@ -192,6 +209,7 @@ def process_syllabus_event(
     all_pilots: List[Pilot],
     syllabus_upgrade_type: Upgrade,
     noise: float,
+    deferred_requirements: Optional[List[DeferredSyllabusItem]] = None,
 ):
     """
     Allocates sorties (and sim events) for a syllabus line item.
@@ -204,6 +222,16 @@ def process_syllabus_event(
             if not _can_fulfill_student_slot(
                 event, student, all_pilots, syllabus_upgrade_type, noise
             ):
+                if deferred_requirements is not None:
+                    deferred_requirements.append(
+                        DeferredSyllabusItem(
+                            upgrade=syllabus_upgrade_type,
+                            event_name=event.name,
+                            event_type=event.event_type,
+                            student_year_group=student.year_group,
+                            student_squadron_id=student.squadron_id,
+                        )
+                    )
                 continue
             _apply_student_training_event(cfg, event, student, all_pilots, syllabus_upgrade_type, noise)
 
@@ -213,10 +241,19 @@ def run_upgrade_program(
     students: List[Pilot],
     all_pilots: List[Pilot],
     upgrade_type: Upgrade,
-    noise: float
+    noise: float,
+    deferred_requirements: Optional[List[DeferredSyllabusItem]] = None,
 ):
     for event in syllabus:
-        process_syllabus_event(cfg, event, students, all_pilots, upgrade_type, noise)
+        process_syllabus_event(
+            cfg,
+            event,
+            students,
+            all_pilots,
+            upgrade_type,
+            noise,
+            deferred_requirements,
+        )
 
 # ----------------------
 # Continuation Training (CT)
@@ -281,11 +318,12 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
     flug_students = select_upgrade_students(pilots, Upgrade.FLUG, cfg.flug_students)
     ipug_students = select_upgrade_students(pilots, Upgrade.IPUG, cfg.ipug_students)
 
-    # 3. Execute Syllabi
-    run_upgrade_program(cfg, MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise)
-    run_upgrade_program(cfg, FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise)
-    run_upgrade_program(cfg, IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise)
+    deferred_requirements: List[DeferredSyllabusItem] = []
 
+    # 3. Execute Syllabi
+    run_upgrade_program(cfg, MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise, deferred_requirements)
+    run_upgrade_program(cfg, FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise, deferred_requirements)
+    run_upgrade_program(cfg, IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise, deferred_requirements)
 
     # 4. Continuation Training — capacity = (PAA × UTE) sorties/month × phase length in notional months.
     phase_months = cfg.phase_length_months
@@ -298,6 +336,13 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
         p.set_rap_requirement()
         p.update_total(cfg.phase_length_days)
         p.update_monthly(cfg.phase_length_days)
+
+    cfg.last_phase_upgrade_handoff = PhaseUpgradeHandoff(
+        mqt_syllabus_complete=_syllabus_track_complete(mqt_students, Upgrade.MQT, deferred_requirements),
+        flug_syllabus_complete=_syllabus_track_complete(flug_students, Upgrade.FLUG, deferred_requirements),
+        ipug_syllabus_complete=_syllabus_track_complete(ipug_students, Upgrade.IPUG, deferred_requirements),
+        deferred_requirements=list(deferred_requirements),
+    )
 
     return pilots
 
