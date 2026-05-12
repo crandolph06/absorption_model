@@ -5,7 +5,9 @@
 #SBATCH --partition=general
 #SBATCH --qos=background
 #SBATCH --nodes=1
-#SBATCH --ntasks=16
+# One Python process; parallelize inside it (ProcessPoolExecutor reads SLURM_CPUS_PER_TASK).
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=128
 #SBATCH --exclusive
 #SBATCH --time=04:00:00
 #
@@ -16,11 +18,10 @@
 #SBATCH --error=logs/sweep_%j.err
 #
 ## Execution Block ----------------------------------------------
-# Environment Setup
 JOBID=`echo $SLURM_JOB_ID`
 #
 PROJECT_DIR="$WORKDIR/absorption_model"
-cd $PROJECT_DIR
+cd "$PROJECT_DIR" || exit 1
 #
 module purge
 module load python/3.11/3.11
@@ -34,8 +35,8 @@ python --version
 export PYTHONUNBUFFERED=1
 #
 mkdir -p logs
-# One MPI-style task per process: each sets SLURM_PROCID / SLURM_NTASKS; sweeper shards the grid.
-timeout 14100s srun python -u hpc_single_phase_sweeper.py && touch SWEEP_COMPLETE.txt || true
+# No srun: batch jobs here do not expose srun in PATH. Python writes SWEEP_COMPLETE.txt when done (rank 0/1).
+timeout 14100s python -u hpc_single_phase_sweeper.py || true
 #
 
 if [ -f SWEEP_COMPLETE.txt ]; then
@@ -43,5 +44,12 @@ if [ -f SWEEP_COMPLETE.txt ]; then
    rm SWEEP_COMPLETE.txt
 else
    echo "🔄 Sweep not finished. Resubmitting..."
-   sbatch /p/work1/clrand16/absorption_model/submit_sweep.slurm
+   if command -v sbatch >/dev/null 2>&1; then
+      sbatch "$PROJECT_DIR/slurm/submit_sweep.slurm"
+   elif [ -x /usr/bin/sbatch ]; then
+      /usr/bin/sbatch "$PROJECT_DIR/slurm/submit_sweep.slurm"
+   else
+      echo "⚠️ sbatch not found on this node; resubmit manually from a login node:" >&2
+      echo "   sbatch $PROJECT_DIR/slurm/submit_sweep.slurm" >&2
+   fi
 fi

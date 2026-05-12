@@ -29,15 +29,20 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def _sweep_rank_and_size():
     """
-    Multi-task (e.g. Slurm ``srun -n 16``): ``SLURM_PROCID`` and ``SLURM_NTASKS`` are set.
+    Multi-task sharding (e.g. ``srun -n 16``): use ``SLURM_PROCID`` / ``SLURM_NTASKS``.
 
-    Override with ``SWEEP_TASK_ID`` / ``SWEEP_NUM_TASKS`` for testing. If Slurm ntasks
-    is set but you are not inside ``srun`` (no ``SLURM_PROCID``), returns (0, 1) so a
-    single ``python`` process does not accidentally shard.
+    ``#SBATCH --ntasks=16`` alone (one ``python`` in the batch script, no ``srun``) also
+    exports ``SLURM_NTASKS``; that is **not** 16 separate processes. We only treat
+    Slurm as multi-task when ``SLURM_STEP_ID`` is set (``srun`` / step context), or
+    when you set ``SWEEP_TASK_ID`` / ``SWEEP_NUM_TASKS`` explicitly.
     """
     if "SWEEP_TASK_ID" in os.environ and "SWEEP_NUM_TASKS" in os.environ:
         return int(os.environ["SWEEP_TASK_ID"]), max(1, int(os.environ["SWEEP_NUM_TASKS"]))
-    if "SLURM_PROCID" in os.environ and "SLURM_NTASKS" in os.environ:
+    if (
+        "SLURM_PROCID" in os.environ
+        and "SLURM_NTASKS" in os.environ
+        and os.environ.get("SLURM_STEP_ID") is not None
+    ):
         return int(os.environ["SLURM_PROCID"]), max(1, int(os.environ["SLURM_NTASKS"]))
     return 0, 1
 
