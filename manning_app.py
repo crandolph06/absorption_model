@@ -62,11 +62,7 @@ with st.sidebar.form("sim_params"):
         help="If Checked: Graduates are assigned equally (1, 2, 3...). If Unchecked: Healthiest squadrons get students first."
     )
 
-    include_upgrades = st.checkbox(
-        "Realistic Upgrade Bottlenecks", 
-        value=True,
-        help="If checked, student counts will drastically reduce flying rates (using AI Brain)."
-    )
+
     
     run_sensitivity = st.checkbox(
         "Run Detailed Intake Analysis", 
@@ -117,7 +113,7 @@ st.sidebar.caption(
 if submitted:
     with st.spinner("Running Simulation..."):
         # 1. Setup & Run
-        sim, squadrons = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades, ai_brain=cached_brain,
+        sim, squadrons = setup_simulation(round_robin=round_robin, ai_brain=cached_brain,
                                           flug_window_start=flug_start, ipug_window_start=ipug_start, annual_intake=intake,
                                           max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode,
                                           retention_rate=retention)
@@ -410,7 +406,7 @@ if submitted:
         test_range = list(range(100, 351, 25)) 
         stability_data = []
 
-        master_sim, _ = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades,
+        master_sim, _ = setup_simulation(round_robin=round_robin,
                                          ai_brain=cached_brain, flug_window_start=flug_start, annual_intake=intake,
                                          ipug_window_start= ipug_start, max_manning_pct=max_manning_pct,
                                          staff_priority_mode=staff_priority_mode, retention_rate=retention)
@@ -421,7 +417,7 @@ if submitted:
             pct_complete = (i + 1) / len(test_range)
             sensitivity_progress.progress(pct_complete, text=f"Simulating Intake: {val} pilots/yr...")
 
-            t_sim, t_sqs = setup_simulation(round_robin=round_robin, sim_upgrades=include_upgrades,
+            t_sim, t_sqs = setup_simulation(round_robin=round_robin,
                                             ai_brain=cached_brain, existing_sim=master_sim, annual_intake=val,
                                             flug_window_start=flug_start, ipug_window_start=ipug_start,
                                             max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode,
