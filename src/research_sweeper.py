@@ -3,7 +3,7 @@ import numpy as np
 import os
 from src.engine import run_phase_simulation, create_pilots
 from src.models import SquadronConfig, Qual, Upgrade
-from src.rap_state import rap_assess, rap_state_code, rap_state_label
+from src.rap_state import rap_assess, rap_state_code, rap_state_label, mqt_observed_sortie_metrics
 
 def run_research_sweep(average_iterations=True):
     # --- RANGES ---
@@ -56,6 +56,7 @@ def run_research_sweep(average_iterations=True):
                                             pilots = create_pilots(cfg)
                                             final_pilots = run_phase_simulation(cfg, pilots, allocation_noise=0.0)
                                             rap_dict, blue_rap_dict, red_dict = rap_assess(final_pilots)
+                                            mqt_sorties = mqt_observed_sortie_metrics(final_pilots)
 
                                             r_code = rap_state_code(rap_dict)
                                             b_code = rap_state_code(blue_rap_dict)
@@ -67,7 +68,7 @@ def run_research_sweep(average_iterations=True):
                                                 "mqt_qty": mqt, "flug_qty": flug, "ipug_qty": ipug,
                                                 "rap_state_code": r_code, "rap_state_label": rap_state_label(r_code),
                                                 "blue_rap_state_code": b_code, "blue_rap_state_label": rap_state_label(b_code),
-                                                "mqt_monthly": rap_dict["MQT"][1], "wg_monthly": rap_dict["WG"][1],
+                                                "mqt_monthly": mqt_sorties["sortie_mo"], "wg_monthly": rap_dict["WG"][1],
                                                 "fl_monthly": rap_dict["FL"][1], "ip_monthly": rap_dict["IP"][1],
                                                 "wg_blue_monthly": blue_rap_dict["WG"][1], 
                                                 "fl_blue_monthly": blue_rap_dict["FL"][1], 
