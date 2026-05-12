@@ -497,6 +497,21 @@ def allocate_continuation_training(
     total_capacity: int,
     noise: float
 ):
+    """
+    Spend remaining nominal wing sorties (``total_capacity`` minus syllabus usage) on CT.
+
+    **Eligibility** (``syllabus_upgrade=None`` via ``can_fill_seat``):
+
+    - **MQT**: not in the CT pool (only upgrade syllabus sorties).
+    - **IP**: may fill any bucket seat (WG or FL minimum qual) on Blue or Red—i.e. fly as
+      instructor-capable crew for that line, including roles labeled FL/WG in the profile.
+    - **FL** (incl. FLUG/IPUG when allowed): FL or WG seats, Blue or Red.
+    - **WG** (incl. FLUG when allowed): WG seats only, Blue or Red.
+
+    Each draw uses ``assign_sortie``: lowest phase sortie count wins among eligibles
+    (ties + noise), so IPs who are already heavy from upgrade instructor seats rarely
+    absorb extra CT until line pilots catch up.
+    """
     # Calculate how much capacity is left
     used_sorties = sum(p.sortie_phase for p in pilots)
     remaining_capacity = max(0, total_capacity - used_sorties)
@@ -526,7 +541,7 @@ def allocate_continuation_training(
     for bucket, qty in base_qty.items():
         # Find eligible pilots for this specific CT bucket
         # We access the internal hierarchy check from rules since CT doesn't have a syllabus upgrade type
-        eligible = [p for p in ct_candidates if rules._qual_hierarchy_check(p.qual, bucket.min_qual)]
+        eligible = [p for p in ct_candidates if rules.can_fill_seat(p, bucket.min_qual, None)]
         
         for _ in range(qty):
             assign_sortie(eligible, bucket.side, noise, cfg.avg_sortie_dur)
@@ -704,7 +719,7 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
 # ----------------------
 def print_phase_summary(pilots: List[Pilot], cfg: SquadronConfig, verbose: bool = True):
     print(f"\n=== Phase Summary ({cfg.phase_length_days} d ≈ {cfg.phase_length_months:.2f} mo) ===")
-    
+
     groups = {
         "MQT Students": [p for p in pilots if p.upgrade == Upgrade.MQT],
         "FLUG Students": [p for p in pilots if p.upgrade == Upgrade.FLUG],
