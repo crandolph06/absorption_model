@@ -6,11 +6,14 @@ from src.manning_gym import ManningEnv
 from src.models import PriorityMode
 import joblib
 
-def evaluate():
-    # 1. Setup the Environment (Must match training config)
+def run_evaluation(run_mode="pragmatic", reward_mode="readiness_first"):
     print("🚀 Initializing Evaluation Engine...")
-    brain = joblib.load("brains/hpc_sortie_brain_multi_output_mlp.pkl") # For PC
-    # brain = joblib.load("outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl") # For HPC
+    brain_path = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
+    
+    if not os.path.exists(brain_path):
+        raise FileNotFoundError(f"Could not find brain at {brain_path}")
+        
+    brain = joblib.load(brain_path)
     
     sim_engine = CAFSimulation(
         sim_upgrades=True,
@@ -25,37 +28,62 @@ def evaluate():
         round_robin=False
     )
     
-    env = ManningEnv(sim_engine, run_mode="pragmatic", reward_mode="readiness_first")
+    env = ManningEnv(sim_engine, run_mode=run_mode, reward_mode=reward_mode)
 
-    # 2. Load the Trained RL Agent
-    model_path = "saved_models/ppo_manning_agent_pragmatic_readiness"
+    # Standardized to match the exact save structure from your training loop
+    model_path = f"rl_agents/ppo_manning_agent_{reward_mode}_{run_mode}"
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Could not find RL agent at {model_path}")
     print(f"🧠 Loading RL Brain from {model_path}...")
     model = PPO.load(model_path)
 
-    # 3. Run the "20-Year Test Flight"
     obs, info = env.reset()
     terminated = False
     truncated = False
-    total_reward = 0
     
-    print("\n📅 --- 20-YEAR OPERATIONAL LOG ---")
-    print(f"{'Year':<6} | {'Phase':<6} | {'Action (PAA/UTE)':<18} | {'Avg Manning':<12} | {'Reward':<8}")
-    print("-" * 70)
-
+    history = []
+    
+    # Map the action indices to actual meanings for the pragmatic mode
+    action_names = ["Intake", "FLUG", "IPUG", "Max Manning"]
+    if run_mode in ["current", "ideal", "optimistic"]:
+        action_names.append("UTE")
+        action_names.append("Retention")
+    if run_mode in ["ideal", "optimistic"]:
+        action_names.append("PAA")
+        
     while not (terminated or truncated):
-        # Predict the best action (deterministic=True is key for evaluation!)
+        # deterministic=True forces the agent to take what it believes is the optimal path
         action, _states = model.predict(obs, deterministic=True)
-        
-        # Take the step
         obs, reward, terminated, truncated, info = env.step(action)
-        total_reward += reward
         
-        # Log the state
-        avg_manning = sum([sq.manning_pct for sq in sim_engine.squadrons]) / len(sim_engine.squadrons)
-        print(f"{sim_engine.current_year:<6} | {sim_engine.current_phase:<6} | {str(action):<18} | {avg_manning:<12.1f} | {reward:<8.1f}")
+        # Calculate real shortfalls for the log
+        total_shortfall = (sim_engine.current_wg_shortfall + 
+                           sim_engine.current_fl_shortfall + 
+                           sim_engine.current_ip_shortfall)
+                           
+        avg_ute = sum(sq.ute for sq in sim_engine.squadrons) / max(len(sim_engine.squadrons), 1) if sim_engine.squadrons else 0
+        
+        # Build the phase record
+        record = {
+            "Year": sim_engine.current_year,
+            "Phase": sim_engine.current_phase,
+            "Reward": reward,
+            "Total Pilots": sim_engine.total_active_pilot_count,
+            "Total Shortfall": total_shortfall,
+            "Intake Target": sim_engine.annual_intake,
+            "Retention Rate": sim_engine.retention_rate,
+            "Max Manning": sim_engine.max_manning,
+            "Avg UTE": avg_ute
+        }
+        
+        # Map the 0,1,2 actions to -1,0,1 so they plot cleanly on a chart (-1=Decrease, 0=Hold, 1=Increase)
+        for i, name in enumerate(action_names):
+            record[f"Action: {name}"] = action[i] - 1 
+            
+        history.append(record)
 
-    print("-" * 70)
-    print(f"✅ Evaluation Complete. Total 20-Year Score: {total_reward:.2f}")
+    return pd.DataFrame(history)
 
 if __name__ == "__main__":
-    evaluate()
+    df_results = run_evaluation()
+    print(df_results.head())
