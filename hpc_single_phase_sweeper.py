@@ -1,8 +1,10 @@
-import pandas as pd
-import numpy as np
+import math
 import os
 import itertools
 from concurrent.futures import ProcessPoolExecutor
+
+import numpy as np
+import pandas as pd
 from src.engine import run_phase_simulation, create_pilots
 from src.models import SquadronConfig, Upgrade
 from src.rap_state import (
@@ -23,6 +25,60 @@ OUTPUT_DIR = "outputs/single_phase/parquet"
 CHUNK_SIZE = 500000 
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def _sweep_rank_and_size():
+    """
+    Multi-task (e.g. Slurm ``srun -n 16``): ``SLURM_PROCID`` and ``SLURM_NTASKS`` are set.
+
+    Override with ``SWEEP_TASK_ID`` / ``SWEEP_NUM_TASKS`` for testing. If Slurm ntasks
+    is set but you are not inside ``srun`` (no ``SLURM_PROCID``), returns (0, 1) so a
+    single ``python`` process does not accidentally shard.
+    """
+    if "SWEEP_TASK_ID" in os.environ and "SWEEP_NUM_TASKS" in os.environ:
+        return int(os.environ["SWEEP_TASK_ID"]), max(1, int(os.environ["SWEEP_NUM_TASKS"]))
+    if "SLURM_PROCID" in os.environ and "SLURM_NTASKS" in os.environ:
+        return int(os.environ["SLURM_PROCID"]), max(1, int(os.environ["SLURM_NTASKS"]))
+    return 0, 1
+
+
+def _sweep_lists_and_shape():
+    """Same parameter order as ``itertools.product`` in ``get_sweep_configs``."""
+    ute_values = list(range(6, 21))
+    ip_qty_values = list(range(3, 10))
+    exp_ratios = list(np.linspace(0.0, 1.0, 21).round(2))
+    paa_values = list(range(18, 24))
+    mqt_students = list(range(0, 15))
+    flug_students = list(range(0, 15))
+    ipug_students = list(range(0, 15))
+    total_pilots = list(range(25, 50))
+    lists = [
+        ute_values,
+        ip_qty_values,
+        exp_ratios,
+        paa_values,
+        mqt_students,
+        flug_students,
+        ipug_students,
+        total_pilots,
+    ]
+    shape = tuple(len(x) for x in lists)
+    return lists, shape
+
+
+def _config_at_flat_index(g: int, lists, shape) -> tuple:
+    """One full-grid tuple (same ordering as ``itertools.product(*lists)``)."""
+    idxs = np.unravel_index(g, shape)
+    return tuple(lists[d][idxs[d]] for d in range(len(lists)))
+
+
+def iter_sharded_raw_configs(rank: int, size: int):
+    """Stride the flat grid so each rank touches ~1/size of all raw combos (no 16× scan)."""
+    lists, shape = _sweep_lists_and_shape()
+    total = int(math.prod(shape))
+    for g in range(rank, total, size):
+        yield _config_at_flat_index(g, lists, shape)
+
 
 def get_sweep_configs():
     ute_values = range(6, 21)
@@ -165,81 +221,122 @@ def process_single_config(args):
         "deferred_syllabus_lines_ipug_mean": avg["deferred_ipug_lines"],
     }
 
+def iter_valid_configs_sharded(rank: int, size: int):
+    """Valid configs for this rank only; each raw grid point visited by exactly one rank."""
+    for c in iter_sharded_raw_configs(rank, size):
+        if is_valid_config(c[7], c[2], c[1], c[4], c[5]):
+            yield c
+
+
+def _max_workers_local() -> int:
+    for env in ("SWEEP_WORKERS", "SLURM_CPUS_PER_TASK"):
+        v = os.environ.get(env)
+        if v:
+            return max(1, int(v))
+    return max(1, (os.cpu_count() or 1))
+
+
 def run_parallel_sweep():
-    
-    print("Generating parameter space...")
-    keys, param_generator = get_sweep_configs()
+    rank, size = _sweep_rank_and_size()
+    parallel_tasks = size > 1
+    work_dir = os.path.join(OUTPUT_DIR, f"rank_{rank:03d}") if parallel_tasks else OUTPUT_DIR
+    os.makedirs(work_dir, exist_ok=True)
+
+    print(
+        f"Sweep rank {rank}/{size} | work_dir={work_dir} | "
+        f"{'Slurm tasks (no nested pool)' if parallel_tasks else 'local ProcessPoolExecutor'}"
+    )
 
     completed_batches = {
-        int(f.split('_')[1].split('.')[0]) 
-        for f in os.listdir(OUTPUT_DIR) 
-        if f.startswith('batch_') and f.endswith('.parquet')
+        int(f.split("_")[1].split(".")[0])
+        for f in os.listdir(work_dir)
+        if f.startswith("batch_") and f.endswith(".parquet")
     }
 
     if completed_batches:
         last_batch = max(completed_batches)
-        last_file = os.path.join(OUTPUT_DIR, f"batch_{last_batch:04d}.parquet")
+        last_file = os.path.join(work_dir, f"batch_{last_batch:04d}.parquet")
         print(f"Clean-up: Removing potentially partial file {last_file}")
-        if os.path.exists(last_file): 
+        if os.path.exists(last_file):
             os.remove(last_file)
-        completed_batches.remove(last_batch)
+        completed_batches.discard(last_batch)
 
     num_completed = len(completed_batches)
     rows_to_skip = num_completed * CHUNK_SIZE
 
-    skipped_count = 0
-    if rows_to_skip > 0:
-        print(f"⏩ Fast-forwarding: Skipping {rows_to_skip:,} VALID configurations...")
-        for c in param_generator:
-            if is_valid_config(c[7], c[2], c[1], c[4], c[5]):
-                skipped_count += 1
-            if skipped_count >= rows_to_skip:
-                break
-
-        print(f"⏩ Fast-forward complete. Ready to generate Batch {num_completed + 1}")
-
-    print("🎯 Pre-filtering valid configurations...")
-    valid_configs = (
-        c for c in param_generator 
-        if is_valid_config(c[7], c[2], c[1], c[4], c[5])
+    if parallel_tasks:
+        config_iter = iter_valid_configs_sharded(rank, size)
+    else:
+        keys, param_generator = get_sweep_configs()
+        config_iter = (
+            c
+            for c in param_generator
+            if is_valid_config(c[7], c[2], c[1], c[4], c[5])
         )
 
-    print(f"🚀 Launching Parallel Sweep on {os.cpu_count()} cores...")
+    skipped_count = 0
+    if rows_to_skip > 0:
+        print(f"⏩ Fast-forwarding: Skipping {rows_to_skip:,} VALID configs for this rank...")
+        for _ in range(rows_to_skip):
+            try:
+                next(config_iter)
+            except StopIteration:
+                print("⏩ End of stream while skipping; nothing left to run.")
+                if not parallel_tasks:
+                    with open("SWEEP_COMPLETE.txt", "w") as f:
+                        f.write("Done")
+                return
+            skipped_count += 1
+        print(f"⏩ Fast-forward complete. Ready to generate Batch {num_completed + 1}")
 
     batch_index = num_completed
     count = rows_to_skip
     buffer = []
 
-    print(f"Writing batches to: {OUTPUT_DIR}") 
+    print(f"Writing batches under: {work_dir}")
 
-    with ProcessPoolExecutor() as executor:
-        for result in executor.map(process_single_config, valid_configs, chunksize=2000):
+    if parallel_tasks:
+        for c in config_iter:
+            result = process_single_config(c)
             if result:
                 buffer.append(result)
-
             if len(buffer) >= CHUNK_SIZE:
                 batch_index += 1
-                batch_file = os.path.join(OUTPUT_DIR, f"batch_{batch_index:04d}.parquet")
-                
-                # Convert buffer to DataFrame and save to Parquet
-                df_chunk = pd.DataFrame(buffer)
-                df_chunk.to_parquet(batch_file, index=False) 
-                
-                count += len(buffer)
-                print(f"Saved {batch_file} | Total processed: {count}", end='\r')
-                buffer = [] # Clear RAM
-
-        # Final Flush
-        if buffer:
-            batch_index += 1
-            if batch_index not in completed_batches:
-                batch_file = os.path.join(OUTPUT_DIR, f"batch_{batch_index:04d}.parquet")
+                batch_file = os.path.join(work_dir, f"batch_{batch_index:04d}.parquet")
                 pd.DataFrame(buffer).to_parquet(batch_file, index=False)
                 count += len(buffer)
+                print(f"Saved {batch_file} | Total processed (rank): {count}", end="\r")
+                buffer = []
+        if buffer:
+            batch_index += 1
+            batch_file = os.path.join(work_dir, f"batch_{batch_index:04d}.parquet")
+            pd.DataFrame(buffer).to_parquet(batch_file, index=False)
+            count += len(buffer)
+    else:
+        workers = _max_workers_local()
+        print(f"🚀 ProcessPoolExecutor max_workers={workers}")
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            for result in executor.map(process_single_config, config_iter, chunksize=2000):
+                if result:
+                    buffer.append(result)
+                if len(buffer) >= CHUNK_SIZE:
+                    batch_index += 1
+                    batch_file = os.path.join(work_dir, f"batch_{batch_index:04d}.parquet")
+                    pd.DataFrame(buffer).to_parquet(batch_file, index=False)
+                    count += len(buffer)
+                    print(f"Saved {batch_file} | Total processed: {count}", end="\r")
+                    buffer = []
+        if buffer:
+            batch_index += 1
+            batch_file = os.path.join(work_dir, f"batch_{batch_index:04d}.parquet")
+            pd.DataFrame(buffer).to_parquet(batch_file, index=False)
+            count += len(buffer)
 
-    with open("SWEEP_COMPLETE.txt", "w") as f:
-        f.write("Done")
-    print(f"\n✅ Sweep Complete. Total valid configs: {count}")
+    if not parallel_tasks:
+        with open("SWEEP_COMPLETE.txt", "w") as f:
+            f.write("Done")
+    print(f"\n✅ Rank {rank} done. Valid configs processed (this rank): {count}")
+
 
 if __name__ == "__main__":
     run_parallel_sweep()
