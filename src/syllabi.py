@@ -131,6 +131,7 @@ class ContinuationProfile:
 CONTINUATION_PROFILE = ContinuationProfile(
     name="Continuation Training",
     buckets=[
+        # Seat min_qual is crew requirement; IPs may fill FL/WG seats (``can_fill_seat`` / hierarchy).
         ContinuationBucket("Blue FL", Qual.FL, "Blue", 0.425),
         ContinuationBucket("Blue WG", Qual.WG, "Blue", 0.425),
         ContinuationBucket("Red FL", Qual.FL, "Red", 0.075),
