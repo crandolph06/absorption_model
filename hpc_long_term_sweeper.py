@@ -61,7 +61,6 @@ def process_single_config(args):
         sim, squadrons = setup_simulation(
             round_robin=True,
             ai_brain=brain,
-            sim_upgrades=True,
             flug_window_start=flug_start_sorties,
             ipug_window_start=ipug_start_hours,
             max_manning_pct=max_manning,
