@@ -129,6 +129,16 @@ class AgingRate:
     fl_blue_phase: float = 0.0
     ip_blue_phase: float = 0.0
 
+    # Phase-level sim event totals (manning / future brain). When zero, only sortie fields are used.
+    mqt_sim_phase: float = 0.0
+    wg_sim_phase: float = 0.0
+    fl_sim_phase: float = 0.0
+    ip_sim_phase: float = 0.0
+    mqt_sim_blue_phase: float = 0.0
+    wg_sim_blue_phase: float = 0.0
+    fl_sim_blue_phase: float = 0.0
+    ip_sim_blue_phase: float = 0.0
+
     def monthly_to_phase(self, phase_length_days: float):
         phase_length_months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
 
@@ -141,7 +151,16 @@ class AgingRate:
             mqt_blue_phase=self.mqt_blue_phase * phase_length_months,
             wg_blue_phase=self.wg_blue_phase * phase_length_months,
             fl_blue_phase=self.fl_blue_phase * phase_length_months,
-            ip_blue_phase=self.ip_blue_phase * phase_length_months
+            ip_blue_phase=self.ip_blue_phase * phase_length_months,
+
+            mqt_sim_phase=self.mqt_sim_phase * phase_length_months,
+            wg_sim_phase=self.wg_sim_phase * phase_length_months,
+            fl_sim_phase=self.fl_sim_phase * phase_length_months,
+            ip_sim_phase=self.ip_sim_phase * phase_length_months,
+            mqt_sim_blue_phase=self.mqt_sim_blue_phase * phase_length_months,
+            wg_sim_blue_phase=self.wg_sim_blue_phase * phase_length_months,
+            fl_sim_blue_phase=self.fl_sim_blue_phase * phase_length_months,
+            ip_sim_blue_phase=self.ip_sim_blue_phase * phase_length_months,
         )
     
     def phase_to_monthly(self, phase_length_days: float):
@@ -156,7 +175,16 @@ class AgingRate:
             mqt_blue_phase=self.mqt_blue_phase / phase_length_months,
             wg_blue_phase=self.wg_blue_phase / phase_length_months,
             fl_blue_phase=self.fl_blue_phase / phase_length_months,
-            ip_blue_phase=self.ip_blue_phase / phase_length_months
+            ip_blue_phase=self.ip_blue_phase / phase_length_months,
+
+            mqt_sim_phase=self.mqt_sim_phase / phase_length_months,
+            wg_sim_phase=self.wg_sim_phase / phase_length_months,
+            fl_sim_phase=self.fl_sim_phase / phase_length_months,
+            ip_sim_phase=self.ip_sim_phase / phase_length_months,
+            mqt_sim_blue_phase=self.mqt_sim_blue_phase / phase_length_months,
+            wg_sim_blue_phase=self.wg_sim_blue_phase / phase_length_months,
+            fl_sim_blue_phase=self.fl_sim_blue_phase / phase_length_months,
+            ip_sim_blue_phase=self.ip_sim_blue_phase / phase_length_months,
         )
 # ----------------------
 # Pilot Entity
@@ -190,7 +218,7 @@ class Pilot:
     squadron_id: int = 99
     sorties_flown: int = 0
     sorties_at_upgrade_start: int = 0
-    sims_flown: int = 0
+    sims_flown: float = 0.0
     sims_at_upgrade_start: int = 0
     flight_hours_flown: float = 0.0
     sim_hours_flown: float = 0.0
@@ -198,7 +226,7 @@ class Pilot:
     active: bool = True
     separation_date: tuple = (9999, 0)
     current_assignment: Assignment = Assignment.LINE
-    
+
     def set_rap_requirement(self):
         """Monthly sortie and sim RAP targets (single source: ``monthly_*_rap_target``)."""
         if self.upgrade == Upgrade.MQT:
@@ -277,7 +305,15 @@ class Pilot:
         
         if self.adsc_remaining > 0:
             self.adsc_remaining -= phase_length_months
-    
+
+    def age_sim_phase_with_rates(self, sim_rate: float, avg_event_dur: float) -> None:
+        """Fractional sim phase credit (manning when brain supplies ``*_sim_phase``), mirroring sortie aging."""
+        if not self.active:
+            return
+        self.sims_flown += float(sim_rate)
+        self.sim_hours_flown += float(sim_rate) * float(avg_event_dur)
+        self.sim_phase += float(sim_rate)
+
     def check_retention(self, current_year, current_phase, retention_pct: float):
         """
         If ADSC is 0 or less, roll to see if the pilot stays.
@@ -387,7 +423,7 @@ class SquadronConfig:
             count_sortie_student_slots,
         )
 
-        dirty = False
+        graduated_count = 0
 
         for pilot in self.pilots:
             if pilot.upgrade == Upgrade.NONE:
@@ -406,12 +442,16 @@ class SquadronConfig:
             since_sim = pilot.sims_flown - pilot.sims_at_upgrade_start
             if since_sort >= need_sort and since_sim >= need_sim:
                 pilot.graduate()
-                dirty = True
+                graduated_count += 1
 
-        if dirty:
-            self.update_stats()
-        if self.mqt_students > 0 or self.flug_students > 0 or self.ipug_students > 0:
-            raise AssertionError(f'Graduation logic not functioning properly.')
+        self.update_stats()
+        still_upgrade = self.mqt_students + self.flug_students + self.ipug_students
+        if graduated_count or still_upgrade:
+            print(
+                f"Squadron {self.id} graduation: {graduated_count} pilot(s) graduated; "
+                f"{still_upgrade} still in upgrade (did not meet sortie+sim syllabus this phase) "
+                f"[MQT={self.mqt_students}, FLUG={self.flug_students}, IPUG={self.ipug_students}]."
+            )
 
     def new_phase_upgrades(self, flug_window_start:int, ipug_window_start:int,
                            use_upgrade_quotas: bool = False, flug_quota: int = 999,
@@ -451,9 +491,49 @@ class SquadronConfig:
             p.sims_at_upgrade_start = p.sims_flown
 
         self.update_stats()
-        
-    def apply_phase_aging(self, rates: AgingRate):
-        "Ages pilots by adding phase sortie rate (flight hours) and subtracts phase length from ADSC remaining."
+
+    def _phase_sim_rate_for_pilot(self, p: Pilot, rates: AgingRate) -> float:
+        """Phase sim rate bucket mirroring ``apply_phase_aging`` sortie branch."""
+        if p.qual == Qual.IP:
+            return rates.ip_sim_phase
+        if p.qual == Qual.FL:
+            return rates.fl_sim_phase
+        if p.upgrade == Upgrade.MQT:
+            return rates.mqt_sim_phase
+        return rates.wg_sim_phase
+
+    def apply_phase_aging(self, rates: AgingRate, brain_includes_sim_outputs: bool = False):
+        """Sortie aging from ``rates``; sims depend on ``brain_includes_sim_outputs``.
+
+        When ``brain_includes_sim_outputs`` is False (current single-phase brain): sortie rates
+        come from the ML model; sim RAP uses ``SIM_RAP_MONTHLY`` × phase length for everyone;
+        student upgrade syllabus sim lines are topped up to completion with integer ``add_sim``.
+
+        When True: phase sim totals use ``rates.*_sim_phase`` (fractional, like sorties) via
+        ``Pilot.age_sim_phase_with_rates`` until a dedicated sim-aware brain replaces the placeholder.
+        """
+        from src.syllabi import (
+            FLUG_SYLLABUS,
+            IPUG_SYLLABUS,
+            MQT_SYLLABUS,
+            count_sim_student_slots,
+            count_sortie_student_slots,
+        )
+
+        syllabus_needs = {
+            Upgrade.MQT: (
+                count_sortie_student_slots(MQT_SYLLABUS),
+                count_sim_student_slots(MQT_SYLLABUS),
+            ),
+            Upgrade.FLUG: (
+                count_sortie_student_slots(FLUG_SYLLABUS),
+                count_sim_student_slots(FLUG_SYLLABUS),
+            ),
+            Upgrade.IPUG: (
+                count_sortie_student_slots(IPUG_SYLLABUS),
+                count_sim_student_slots(IPUG_SYLLABUS),
+            ),
+        }
         phase_length_months = self.phase_length_months
 
         for p in self.pilots:
@@ -467,6 +547,28 @@ class SquadronConfig:
                 p_rate = rates.wg_phase
 
             p.age_one_phase_with_rates(p_rate, self.avg_sortie_dur, phase_length_months)
+
+            if not p.active:
+                continue
+
+            if brain_includes_sim_outputs:
+                sim_rate = self._phase_sim_rate_for_pilot(p, rates)
+                p.age_sim_phase_with_rates(sim_rate, self.avg_sortie_dur)
+                continue
+
+            n_rap = max(0, int(round(SIM_RAP_MONTHLY * phase_length_months)))
+            for _ in range(n_rap):
+                p.add_sim(self.avg_sortie_dur)
+
+            if (
+                p.current_assignment == Assignment.LINE
+                and p.upgrade in syllabus_needs
+            ):
+                _, need_sim = syllabus_needs[p.upgrade]
+                if need_sim <= 0:
+                    continue
+                while int(p.sims_flown) - int(p.sims_at_upgrade_start) < need_sim:
+                    p.add_sim(self.avg_sortie_dur)
 
     def calc_analytic_aging_rate(self) -> AgingRate:
         """
