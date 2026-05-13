@@ -446,7 +446,7 @@ class SquadronConfig:
 
         self.update_stats()
         still_upgrade = self.mqt_students + self.flug_students + self.ipug_students
-        if graduated_count or still_upgrade:
+        if still_upgrade:
             print(
                 f"Squadron {self.id} graduation: {graduated_count} pilot(s) graduated; "
                 f"{still_upgrade} still in upgrade (did not meet sortie+sim syllabus this phase) "
@@ -477,6 +477,8 @@ class SquadronConfig:
             p for p in self.pilots if p.qual == Qual.FL and p.upgrade == Upgrade.NONE 
             and ipug_window_start <= p.flight_hours_flown 
         ]
+
+        print(f"Squadron {self.id} | FLUG Eligible: {len(flug_eligible)} | IPUG Eligible: {len(ipug_eligible)}")
         
         if use_upgrade_quotas:
             ipug_eligible.sort(key=lambda x: x.flight_hours_flown, reverse=True)
@@ -586,11 +588,11 @@ class SquadronConfig:
         exp_rate = ((ute * paa) / 2) / ((self.fl_qty + self.ip_qty) / 2)
 
         return AgingRate(
-            mqt_phase=2.2 * phase_months,
+            mqt_phase= 4.0 * phase_months,
             wg_phase=wg_rate * phase_months,
             fl_phase=exp_rate * phase_months,
             ip_phase=exp_rate * phase_months,
-            mqt_blue_phase=2.2 * phase_months,
+            mqt_blue_phase= 4.0 * phase_months,
             wg_blue_phase=None, # TODO figure out this proportion...
             fl_blue_phase=None,
             ip_blue_phase=None

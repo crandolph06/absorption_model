@@ -206,6 +206,7 @@ class CAFSimulation:
             remainder = self.annual_intake % 3
 
             for phase_num in range(1, 4): 
+                print(f"Running phase {phase_num} of {year}")
                 current_batch = self.phase_intake + (remainder if phase_num == 3 else 0)
                 self.add_new_bcourse_graduates(year, current_batch, self.round_robin) 
 
