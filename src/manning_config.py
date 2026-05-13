@@ -1,4 +1,4 @@
-from src.models import SquadronConfig, Qual, Pilot, Assignment
+from src.models import SquadronConfig, Qual, Pilot, Assignment, Upgrade
 import random
 
 IP_YEAR_RANGE = (2010, 2014); IP_HOUR_RANGE = (400, 1500); IP_SORTIE_RANGE = (300, 1200)
@@ -24,7 +24,7 @@ def get_initial_squadrons(current_year: int):
         # 1. Seed IPs
         while sum(1 for p in sq.pilots if p.qual == Qual.IP) < ip_qty:
             yg = random.randint(*IP_YEAR_RANGE)
-            sq.pilots.append(Pilot(qual=Qual.IP, year_group=yg, adsc_remaining=max(0, 120-((current_year-yg-2)*12)), 
+            sq.pilots.append(Pilot(qual=Qual.IP, upgrade=Upgrade.NONE, year_group=yg, adsc_remaining=max(0, 120-((current_year-yg-2)*12)), 
                              sorties_flown=random.randint(*IP_SORTIE_RANGE), flight_hours_flown=random.randint(*IP_HOUR_RANGE), 
                              squadron_id=sq_id, current_assignment=Assignment.LINE, active=True))
         
@@ -32,7 +32,7 @@ def get_initial_squadrons(current_year: int):
         target_exp = int(target_total * 0.5)
         while sum(1 for p in sq.pilots if p.qual in [Qual.IP, Qual.FL]) < target_exp:
             yg = random.randint(*FL_YEAR_RANGE)
-            sq.pilots.append(Pilot(qual=Qual.FL, year_group=yg, adsc_remaining=max(0, 120-((current_year-yg-2)*12)), 
+            sq.pilots.append(Pilot(qual=Qual.FL, upgrade=Upgrade.NONE, year_group=yg, adsc_remaining=max(0, 120-((current_year-yg-2)*12)), 
                              sorties_flown=random.randint(*FL_SORTIE_RANGE), flight_hours_flown=random.randint(*FL_HOUR_RANGE), 
                              squadron_id=sq_id, current_assignment=Assignment.LINE, active=True))
 
