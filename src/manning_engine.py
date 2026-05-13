@@ -11,7 +11,8 @@ class CAFSimulation:
                  round_robin: bool, brain = None, flug_window_start: int = 250, 
                  ipug_window_start: int = 400, max_manning_pct: int = 150, 
                  staff_priority_mode: PriorityMode = PriorityMode.RANDOM,
-                 use_upgrade_quotas: bool = False):
+                 use_upgrade_quotas: bool = False,
+                 brain_includes_sim_outputs: bool = False):
         self.history = []
         self.current_year = 2026
         self.current_phase = 1
@@ -23,7 +24,8 @@ class CAFSimulation:
         self.annual_intake = annual_intake
         self.phase_intake = annual_intake // 3 # APPROXIMATE +/- 2
         self.retention_rate = retention_rate
-        self.use_upgrade_quotas = use_upgrade_quotas 
+        self.use_upgrade_quotas = use_upgrade_quotas
+        self.brain_includes_sim_outputs = brain_includes_sim_outputs 
         if self.use_upgrade_quotas == False:
             self.sq_phase_flug_intake = 999
             self.sq_phase_ipug_intake = 999
@@ -39,6 +41,30 @@ class CAFSimulation:
         else:
             raise FileNotFoundError(f"Could not find brains/hpc_sortie_brain_multi_output_mlp. Please confirm file path first.")
         self.round_robin = round_robin
+
+    def _phase_rates_from_brain_row(
+        self, mqt_mo: float, row: np.ndarray, phase_length_days: float
+    ) -> AgingRate:
+        """Monthly ``AgingRate`` from one brain row, scaled to a phase (sorties + optional sim mirror)."""
+        if self.brain_includes_sim_outputs:
+            monthly = AgingRate(
+                mqt_mo, row[0], row[1], row[2],
+                mqt_mo, row[3], row[4], row[5],
+                mqt_sim_phase=mqt_mo,
+                wg_sim_phase=row[0],
+                fl_sim_phase=row[1],
+                ip_sim_phase=row[2],
+                mqt_sim_blue_phase=mqt_mo,
+                wg_sim_blue_phase=row[3],
+                fl_sim_blue_phase=row[4],
+                ip_sim_blue_phase=row[5],
+            )
+        else:
+            monthly = AgingRate(
+                mqt_mo, row[0], row[1], row[2],
+                mqt_mo, row[3], row[4], row[5],
+            )
+        return monthly.monthly_to_phase(phase_length_days)
 
     @property
     def all_pilots(self):
@@ -192,18 +218,14 @@ class CAFSimulation:
                 for i, sq in enumerate(self.squadrons):
                     row = preds[i]
                     mqt_mo = self._resolve_mqt_monthly(sq)
-                    monthly_rates = AgingRate(
-                        mqt_mo, row[0], row[1], row[2],
-                        mqt_mo, row[3], row[4], row[5],
-                    )
-                    rates = monthly_rates.monthly_to_phase(sq.phase_length_days)
+                    rates = self._phase_rates_from_brain_row(mqt_mo, row, sq.phase_length_days)
                     mqt_baseline = {
                         id(p): p.sorties_flown
                         for p in sq.pilots
                         if p.upgrade == Upgrade.MQT and p.active
                     }
 
-                    sq.apply_phase_aging(rates)
+                    sq.apply_phase_aging(rates, self.brain_includes_sim_outputs)
 
                     if mqt_baseline:
                         months = sq.phase_length_months
@@ -444,18 +466,14 @@ class CAFSimulation:
 
             row = preds[i]
             mqt_mo = self._resolve_mqt_monthly(sq)
-            monthly_rates = AgingRate(
-                mqt_mo, row[0], row[1], row[2],
-                mqt_mo, row[3], row[4], row[5],
-            )
-            rates = monthly_rates.monthly_to_phase(sq.phase_length_days)
+            rates = self._phase_rates_from_brain_row(mqt_mo, row, sq.phase_length_days)
             mqt_baseline = {
                 id(p): p.sorties_flown
                 for p in sq.pilots
                 if p.upgrade == Upgrade.MQT and p.active
             }
 
-            sq.apply_phase_aging(rates)
+            sq.apply_phase_aging(rates, self.brain_includes_sim_outputs)
 
             if mqt_baseline:
                 months = sq.phase_length_months
