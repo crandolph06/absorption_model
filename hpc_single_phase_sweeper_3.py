@@ -173,12 +173,12 @@ def run_parallel_sweep():
     completed_batches = {
         int(f.split('_')[1].split('.')[0]) 
         for f in os.listdir(OUTPUT_DIR) 
-        if f.startswith('batch_') and f.endswith('.parquet')
+        if f.startswith('batch_3_') and f.endswith('.parquet')
     }
 
     if completed_batches:
         last_batch = max(completed_batches)
-        last_file = os.path.join(OUTPUT_DIR, f"batch_{last_batch:04d}.parquet")
+        last_file = os.path.join(OUTPUT_DIR, f"batch_3_{last_batch:04d}.parquet")
         print(f"Clean-up: Removing potentially partial file {last_file}")
         if os.path.exists(last_file): 
             os.remove(last_file)

@@ -173,7 +173,7 @@ def run_parallel_sweep():
     completed_batches = {
         int(f.split('_')[1].split('.')[0]) 
         for f in os.listdir(OUTPUT_DIR) 
-        if f.startswith('batch_') and f.endswith('.parquet')
+        if f.startswith('batch_1_') and f.endswith('.parquet')
     }
 
     if completed_batches:
