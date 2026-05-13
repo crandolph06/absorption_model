@@ -24,21 +24,24 @@ def get_initial_squadrons(current_year: int):
         # 1. Seed IPs
         while sum(1 for p in sq.pilots if p.qual == Qual.IP) < ip_qty:
             yg = random.randint(*IP_YEAR_RANGE)
-            sq.pilots.append(Pilot(Qual.IP, yg, max(0, 120-((current_year-yg-2)*12)), 
-                             random.randint(*IP_SORTIE_RANGE), random.randint(*IP_HOUR_RANGE), sq_id, Assignment.LINE))
+            sq.pilots.append(Pilot(qual=Qual.IP, year_group=yg, adsc_remaining=max(0, 120-((current_year-yg-2)*12)), 
+                             sorties_flown=random.randint(*IP_SORTIE_RANGE), flight_hours_flown=random.randint(*IP_HOUR_RANGE), 
+                             squadron_id=sq_id, current_assignment=Assignment.LINE, active=True))
         
         # 2. Seed FLs (target 50% experience ratio)
         target_exp = int(target_total * 0.5)
         while sum(1 for p in sq.pilots if p.qual in [Qual.IP, Qual.FL]) < target_exp:
             yg = random.randint(*FL_YEAR_RANGE)
-            sq.pilots.append(Pilot(Qual.FL, yg, max(0, 120-((current_year-yg-2)*12)), 
-                             random.randint(*FL_SORTIE_RANGE), random.randint(*FL_HOUR_RANGE), sq_id, Assignment.LINE))
+            sq.pilots.append(Pilot(qual=Qual.FL, year_group=yg, adsc_remaining=max(0, 120-((current_year-yg-2)*12)), 
+                             sorties_flown=random.randint(*FL_SORTIE_RANGE), flight_hours_flown=random.randint(*FL_HOUR_RANGE), 
+                             squadron_id=sq_id, current_assignment=Assignment.LINE, active=True))
 
         # 3. Seed WGs to hit total
         while len(sq.pilots) < target_total:
             yg = random.randint(*WG_YEAR_RANGE)
-            sq.pilots.append(Pilot(Qual.WG, yg, max(0, 120-((current_year-yg-2)*12)), 
-                             random.randint(*WG_SORTIE_RANGE), random.randint(*WG_HOUR_RANGE), sq_id, Assignment.LINE))
+            sq.pilots.append(Pilot(qual=Qual.WG, year_group=yg, adsc_remaining=max(0, 120-((current_year-yg-2)*12)), 
+                             sorties_flown=random.randint(*WG_SORTIE_RANGE), flight_hours_flown=random.randint(*WG_HOUR_RANGE), 
+                             squadron_id=sq_id, current_assignment=Assignment.LINE, active=True))
         
         sq.update_stats()
         squadrons.append(sq)
