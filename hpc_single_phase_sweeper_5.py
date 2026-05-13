@@ -25,7 +25,7 @@ CHUNK_SIZE = 500000
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def get_sweep_configs():
-    ute_values = range(18, 21)
+    ute_values = (18,)
     ip_qty_values = range(3, 10)
     exp_ratios = np.linspace(0.0, 1.0, 21).round(2)
     paa_values = range(18, 24)
@@ -170,21 +170,25 @@ def run_parallel_sweep():
     print("Generating parameter space...")
     keys, param_generator = get_sweep_configs()
 
-    completed_batches = {
-        int(f.split('_')[1].split('.')[0]) 
-        for f in os.listdir(OUTPUT_DIR) 
-        if f.startswith('batch_5_') and f.endswith('.parquet')
-    }
+    batch_prefix = "batch_5_"
+    completed_batches: set[int] = set()
+    for f in os.listdir(OUTPUT_DIR):
+        if f.startswith(batch_prefix) and f.endswith('.parquet'):
+            stem = f[len(batch_prefix) : -len('.parquet')]
+            if stem.isdigit():
+                completed_batches.add(int(stem))
 
+
+    num_completed = 0
     if completed_batches:
         last_batch = max(completed_batches)
-        last_file = os.path.join(OUTPUT_DIR, f"batch_5_{last_batch:04d}.parquet")
+        last_file = os.path.join(OUTPUT_DIR, f"{batch_prefix}{last_batch:04d}.parquet")
         print(f"Clean-up: Removing potentially partial file {last_file}")
-        if os.path.exists(last_file): 
+        if os.path.exists(last_file):
             os.remove(last_file)
         completed_batches.remove(last_batch)
+        num_completed = last_batch - 1
 
-    num_completed = len(completed_batches)
     rows_to_skip = num_completed * CHUNK_SIZE
 
     skipped_count = 0

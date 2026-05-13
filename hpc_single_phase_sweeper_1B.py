@@ -25,7 +25,7 @@ CHUNK_SIZE = 500000
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def get_sweep_configs():
-    ute_values = (9,)
+    ute_values = (8,)
     ip_qty_values = range(3, 10)
     exp_ratios = np.linspace(0.0, 1.0, 21).round(2)
     paa_values = range(18, 24)
@@ -170,7 +170,7 @@ def run_parallel_sweep():
     print("Generating parameter space...")
     keys, param_generator = get_sweep_configs()
 
-    batch_prefix = "batch_2_"
+    batch_prefix = "batch_1B_"
     completed_batches: set[int] = set()
     for f in os.listdir(OUTPUT_DIR):
         if f.startswith(batch_prefix) and f.endswith('.parquet'):
@@ -223,7 +223,7 @@ def run_parallel_sweep():
 
             if len(buffer) >= CHUNK_SIZE:
                 batch_index += 1
-                batch_file = os.path.join(OUTPUT_DIR, f"batch_2_{batch_index:04d}.parquet")
+                batch_file = os.path.join(OUTPUT_DIR, f"batch_1B_{batch_index:04d}.parquet")
                 
                 # Convert buffer to DataFrame and save to Parquet
                 df_chunk = pd.DataFrame(buffer)
@@ -237,13 +237,13 @@ def run_parallel_sweep():
         if buffer:
             batch_index += 1
             if batch_index not in completed_batches:
-                batch_file = os.path.join(OUTPUT_DIR, f"batch_2_{batch_index:04d}.parquet")
+                batch_file = os.path.join(OUTPUT_DIR, f"batch_1B_{batch_index:04d}.parquet")
                 pd.DataFrame(buffer).to_parquet(batch_file, index=False)
                 count += len(buffer)
 
-    with open("SWEEP_2_COMPLETE.txt", "w") as f:
+    with open("SWEEP_1B_COMPLETE.txt", "w") as f:
         f.write("Done")
-    print(f"\n✅ Sweep 2 Complete. Total valid configs: {count}")
+    print(f"\n✅ Sweep 1B Complete. Total valid configs: {count}")
 
 if __name__ == "__main__":
     run_parallel_sweep()
