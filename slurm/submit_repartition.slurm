@@ -6,6 +6,8 @@
 #SBATCH --qos=background
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --exclusive
+#SBATCH --mem=64G
 #SBATCH --time=04:00:00
 #
 ## Optional Slurm Directives --------------------------------------
