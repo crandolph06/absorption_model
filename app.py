@@ -64,18 +64,20 @@ def predict_metrics(df_inputs):
     
     df = df.replace([np.inf, -np.inf], 0)
 
+    # Column order must match training / ``CAFSimulation._PREDICT_FEATURE_COLS`` (multi-output MLP).
     features = [
-                # 'paa', 'ute', 'mqt_load', 'flug_load', 'ipug_load', 
-                'exp_ratio', 'ip_ratio', 'fl_congestion',
-                'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio'
-            ]
-    
-    targets = [
-        'wg_monthly', 'fl_monthly', 'ip_monthly', 
-        'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
+        'paa', 'ute',
+        'exp_ratio', 'ip_ratio', 'fl_congestion',
+        'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio',
     ]
-    
-    preds = brain.predict(df[features])
+
+    targets = [
+        'wg_monthly', 'fl_monthly', 'ip_monthly',
+        'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly',
+    ]
+
+    X = df[features].fillna(0)
+    preds = brain.predict(X)
 
 
     for i, t in enumerate(targets):
