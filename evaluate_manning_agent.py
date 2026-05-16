@@ -6,6 +6,21 @@ from src.manning_gym import ManningEnv
 from src.models import PriorityMode
 import joblib
 
+
+def _reraise_numpy_pickle_hint(where: str, exc: BaseException) -> None:
+    """NumPy 1.x vs 2.x changes BitGenerator pickling; brain/PPO pickles fail across versions."""
+    msg = str(exc)
+    if "BitGenerator" in msg or "MT19937" in msg:
+        raise RuntimeError(
+            f"{where}: NumPy / pickle mismatch ({msg}). "
+            "Install the same NumPy major line used when the files were saved "
+            "(this repo pins numpy==2.4.4 in requirements.txt), e.g. in rl_manning: "
+            "`pip install 'numpy>=2,<3'` then retry; or re-export the brain / re-save the PPO "
+            "model from an environment that matches rl_manning's NumPy."
+        ) from exc
+    raise exc
+
+
 def run_evaluation(run_mode="pragmatic", reward_mode="readiness_first"):
     print("🚀 Initializing Evaluation Engine...")
     brain_path = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
@@ -13,7 +28,10 @@ def run_evaluation(run_mode="pragmatic", reward_mode="readiness_first"):
     if not os.path.exists(brain_path):
         raise FileNotFoundError(f"Could not find brain at {brain_path}")
         
-    brain = joblib.load(brain_path)
+    try:
+        brain = joblib.load(brain_path)
+    except Exception as e:
+        _reraise_numpy_pickle_hint("joblib.load(brain)", e)
     
     sim_engine = CAFSimulation(
         annual_intake=200,
@@ -31,7 +49,10 @@ def run_evaluation(run_mode="pragmatic", reward_mode="readiness_first"):
 
     model_path = f"saved_models/ppo_manning_agent_{reward_mode}_{run_mode}"
     print(f"🧠 Loading RL Brain from {model_path}...")
-    model = PPO.load(model_path)
+    try:
+        model = PPO.load(model_path)
+    except Exception as e:
+        _reraise_numpy_pickle_hint("PPO.load", e)
 
     obs, info = env.reset()
     terminated = False
