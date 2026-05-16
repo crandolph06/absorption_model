@@ -1,4 +1,4 @@
-
+import dask
 import dask.dataframe as dd
 from dask.distributed import Client, LocalCluster
 import glob
@@ -8,9 +8,19 @@ INPUT_PATH = "outputs/single_phase/parquet/*.parquet"
 OUTPUT_DIR = "outputs/single_phase/repart_parquet"
 
 def repartition_data():
-    # 1. Start a strict memory-managed cluster
-    # 4 workers at 14GB each = 56GB total (Leaving 8GB for OS overhead to prevent OOM)
-    cluster = LocalCluster(n_workers=4, threads_per_worker=2, memory_limit='14GB')
+    # 1. Aggressive Memory Management (CRITICAL)
+    # Forces Dask to spill to disk at 70% instead of crashing
+    dask.config.set({
+        'distributed.worker.memory.target': 0.60,
+        'distributed.worker.memory.spill': 0.70,
+        'distributed.worker.memory.pause': 0.80,
+        'distributed.worker.memory.terminate': 0.95
+    })
+    
+    # 2. One massive worker
+    # 50GB gives it plenty of room to breathe inside your 64GB Slurm limit
+    # 8 threads let it read/write files much faster
+    cluster = LocalCluster(n_workers=1, threads_per_worker=8, memory_limit='50GB')
     client = Client(cluster)
     
     n_files = len(glob.glob(INPUT_PATH))
