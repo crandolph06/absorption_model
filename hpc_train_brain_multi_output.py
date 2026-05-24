@@ -5,6 +5,8 @@ import joblib
 import glob
 import os
 
+from src.syllabi import SORTIE_SLOTS_MQT, SORTIE_SLOTS_FLUG, SORTIE_SLOTS_IPUG
+
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
@@ -52,18 +54,27 @@ def train_hpc_multi_brain():
     df['total_students'] = df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']
     df['ip_ratio'] = df['ip_qty'] / df['total_pilots'].replace(0, 1)
     df['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
-    
+
+    if "incomplete_mqt_students_mean" in df.columns:
+        df["deferred_mqt_students"] = df["incomplete_mqt_students_mean"]
+        df["deferred_flug_students"] = df["incomplete_flug_students_mean"]
+        df["deferred_ipug_students"] = df["incomplete_ipug_students_mean"]
+    else:
+        df["deferred_mqt_students"] = df["deferred_mqt_lines_mean"] / SORTIE_SLOTS_MQT
+        df["deferred_flug_students"] = df["deferred_flug_lines_mean"] / SORTIE_SLOTS_FLUG
+        df["deferred_ipug_students"] = df["deferred_ipug_lines_mean"] / SORTIE_SLOTS_IPUG
+
     df = df.replace([np.inf, -np.inf], 0)
 
     features = [
-        'paa', 'ute',
-        'exp_ratio', 'ip_ratio', 'fl_congestion',
+        'paa', 'ute', 'exp_ratio', 'ip_ratio', 'fl_congestion',
         'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio',
     ]
     
     targets = [
         'wg_monthly', 'fl_monthly', 'ip_monthly', 
-        'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly'
+        'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly',
+        'deferred_mqt_students', 'deferred_flug_students', 'deferred_ipug_students'
     ]
 
     X = df[features].fillna(0)

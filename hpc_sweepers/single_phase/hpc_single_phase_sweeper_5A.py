@@ -4,7 +4,8 @@ import os
 import itertools
 from concurrent.futures import ProcessPoolExecutor
 from src.engine import run_phase_simulation, create_pilots
-from src.models import SquadronConfig, Upgrade
+from src.models import SquadronConfig
+from src.single_phase_handoff_metrics import handoff_iteration_metrics, handoff_parquet_columns
 from src.rap_state import (
     rap_assess,
     rap_state_code,
@@ -82,9 +83,7 @@ def process_single_config(args):
             final_pilots = run_phase_simulation(cfg, pilots, allocation_noise=0.0)
             
             # Extract metrics + upgrade syllabus handoff (same cfg object updated each iteration)
-            h = cfg.last_phase_upgrade_handoff
-            if h is None:
-                raise ValueError("last_phase_upgrade_handoff not set after run_phase_simulation")
+            pending = cfg.pending_deferred_requirements
 
             rap, blue_rap, red = rap_assess(final_pilots)
             simm = sim_rap_metrics(final_pilots)
@@ -108,13 +107,7 @@ def process_single_config(args):
                 "wg_sim_rap_sf": simm["WG"]["sim_rap_shortfall"],
                 "fl_sim_rap_sf": simm["FL"]["sim_rap_shortfall"],
                 "ip_sim_rap_sf": simm["IP"]["sim_rap_shortfall"],
-                "mqt_syllabus_complete": float(h.mqt_syllabus_complete),
-                "flug_syllabus_complete": float(h.flug_syllabus_complete),
-                "ipug_syllabus_complete": float(h.ipug_syllabus_complete),
-                "deferred_syllabus_lines": len(h.deferred_requirements),
-                "deferred_mqt_lines": sum(1 for d in h.deferred_requirements if d.upgrade == Upgrade.MQT),
-                "deferred_flug_lines": sum(1 for d in h.deferred_requirements if d.upgrade == Upgrade.FLUG),
-                "deferred_ipug_lines": sum(1 for d in h.deferred_requirements if d.upgrade == Upgrade.IPUG),
+                **handoff_iteration_metrics(pending),
             })
 
         except ValueError:
@@ -153,16 +146,7 @@ def process_single_config(args):
         "wg_sim_rap_shortfall_mean": avg["wg_sim_rap_sf"],
         "fl_sim_rap_shortfall_mean": avg["fl_sim_rap_sf"],
         "ip_sim_rap_shortfall_mean": avg["ip_sim_rap_sf"],
-        "mqt_syllabus_complete_frac": avg["mqt_syllabus_complete"],
-        "flug_syllabus_complete_frac": avg["flug_syllabus_complete"],
-        "ipug_syllabus_complete_frac": avg["ipug_syllabus_complete"],
-        "deferred_syllabus_lines_mean": avg["deferred_syllabus_lines"],
-        "deferred_mqt_lines_mean": avg["deferred_mqt_lines"],
-        "deferred_flug_lines_mean": avg["deferred_flug_lines"],
-        "deferred_ipug_lines_mean": avg["deferred_ipug_lines"],
-        "deferred_syllabus_lines_mqt_mean": avg["deferred_mqt_lines"],
-        "deferred_syllabus_lines_flug_mean": avg["deferred_flug_lines"],
-        "deferred_syllabus_lines_ipug_mean": avg["deferred_ipug_lines"],
+        **handoff_parquet_columns(avg),
     }
 
 def run_parallel_sweep():

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 import random
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 # ----------------------
 # Math
@@ -73,6 +73,23 @@ class PriorityMode(Enum):
     RANDOM = 'random'
 
 
+_next_pilot_id: int = 0
+
+
+def allocate_pilot_id() -> int:
+    """Return a new unique pilot id for the current process."""
+    global _next_pilot_id
+    pilot_id = _next_pilot_id
+    _next_pilot_id += 1
+    return pilot_id
+
+
+def reset_pilot_id_counter(start: int = 0) -> None:
+    """Reset the id counter (tests / deterministic sweeps)."""
+    global _next_pilot_id
+    _next_pilot_id = start
+
+
 @dataclass
 class DeferredSyllabusItem:
     """
@@ -88,33 +105,21 @@ class DeferredSyllabusItem:
     ``student_event_repetition`` is the index within ``range(event.num_student)``
     for this student/event (usually 0).
 
-    Next-phase logic (not implemented yet) must merge this queue with any new
-    syllabus tail so training cannot substitute low-support early events for
-    deferred high-support lines.
+    ``student_pilot_id`` identifies the student across phases (stable ``Pilot.pilot_id``).
+    ``student_year_group`` / ``student_squadron_id`` are informational only.
     """
     upgrade: Upgrade
     event_name: str
     event_type: EventType
     syllabus_event_index: int
     student_event_repetition: int
-    student_year_group: int
-    student_squadron_id: int
+    student_pilot_id: int
+    student_year_group: int = 9999
+    student_squadron_id: int = 99
 
 
-@dataclass
-class PhaseUpgradeHandoff:
-    """
-    Snapshot after a phase for downstream multi-phase logic.
-
-    ``deferred_requirements`` lists exact syllabus rows (SORTIE or SIM) that failed this phase.
-    A future phase runner must consume them in curriculum order (by
-    ``syllabus_event_index``, then student identity) rather than re-running only
-    the beginning of the syllabus.
-    """
-    mqt_syllabus_complete: bool
-    flug_syllabus_complete: bool
-    ipug_syllabus_complete: bool
-    deferred_requirements: List[DeferredSyllabusItem] = field(default_factory=list)
+# (upgrade, syllabus_event_index, student_pilot_id, student_event_repetition)
+DeferralSignature = Tuple[Upgrade, int, int, int]
 
 
 @dataclass 
@@ -193,6 +198,7 @@ class AgingRate:
 class Pilot:
     qual: Qual = Qual.WG 
     upgrade: Upgrade = Upgrade.NONE
+    pilot_id: int = field(default_factory=allocate_pilot_id)
     sortie_phase: float = 0 
     flight_hours_phase: float = 0.0
     sim_hours_phase: float = 0.0
@@ -216,6 +222,7 @@ class Pilot:
 
     year_group: int = 9999
     squadron_id: int = 99
+    upgrade_syllabus_done: Set[Tuple[int, int]] = field(default_factory=set)
     sorties_flown: int = 0
     sorties_at_upgrade_start: int = 0
     sims_flown: float = 0.0
@@ -295,6 +302,7 @@ class Pilot:
             self.qual = Qual.IP
             
         self.upgrade = Upgrade.NONE
+        self.upgrade_syllabus_done.clear()
 
     def age_one_phase_with_rates(self, aging_rate: float, asd: float, phase_length_months: int):  
         if not self.active:
@@ -359,7 +367,7 @@ class SquadronConfig:
     sim_bays_per_session: int = SIM_BAYS_PER_SESSION
 
     pilots: List[Pilot] = field(default_factory=list)
-    last_phase_upgrade_handoff: Optional["PhaseUpgradeHandoff"] = None
+    # Remaining syllabus rows carried into the next phase (sole deferral handoff store).
     pending_deferred_requirements: List["DeferredSyllabusItem"] = field(default_factory=list)
     observed_mqt_monthly: Optional[float] = None
 

@@ -1,5 +1,6 @@
-from src.models import SquadronConfig
+from src.models import EventType, SquadronConfig, Upgrade
 from src.engine import create_pilots, run_phase_simulation, print_phase_summary
+from src.single_phase_handoff_metrics import handoff_iteration_metrics
 
 if __name__ == "__main__":
     cfg = SquadronConfig(
@@ -20,12 +21,31 @@ if __name__ == "__main__":
 
     run_phase_simulation(cfg, pilots)
 
-    h = cfg.last_phase_upgrade_handoff
-    if h is not None:
-        print(
-            f"Upgrade handoff — MQT complete: {h.mqt_syllabus_complete}, "
-            f"FLUG complete: {h.flug_syllabus_complete}, IPUG complete: {h.ipug_syllabus_complete}, "
-            f"deferred syllabus lines: {len(h.deferred_requirements)}"
-        )
+    pending = cfg.pending_deferred_requirements
+    metrics = handoff_iteration_metrics(pending)
+    print(
+        f"Upgrade carryover — incomplete students: "
+        f"MQT={int(metrics['incomplete_mqt_students'])}, "
+        f"FLUG={int(metrics['incomplete_flug_students'])}, "
+        f"IPUG={int(metrics['incomplete_ipug_students'])}; "
+        f"syllabus lines: {len(pending)}"
+    )
+    for upgrade in (Upgrade.MQT, Upgrade.FLUG, Upgrade.IPUG):
+        by_pilot: dict[int, dict[str, int]] = {}
+        for item in pending:
+            if item.upgrade != upgrade:
+                continue
+            row = by_pilot.setdefault(item.student_pilot_id, {"sorties": 0, "sims": 0})
+            if item.event_type == EventType.SIM:
+                row["sims"] += 1
+            else:
+                row["sorties"] += 1
+        if by_pilot:
+            print(f"  {upgrade.value}: {len(by_pilot)} student(s)")
+            for pilot_id, counts in sorted(by_pilot.items()):
+                print(
+                    f"    pilot_id={pilot_id}: "
+                    f"{counts['sorties']} sorties, {counts['sims']} sims remaining"
+                )
 
     print_phase_summary(pilots, cfg, verbose=False)
