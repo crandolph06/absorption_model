@@ -220,6 +220,8 @@ class CAFSimulation:
                     row = preds[i]
                     mqt_mo = self._resolve_mqt_monthly(sq)
                     rates = self._phase_rates_from_brain_row(mqt_mo, row, sq.phase_length_days)
+                    for p in sq.pilots:
+                        p.sorties_at_phase_start = p.sorties_flown
                     mqt_baseline = {
                         id(p): p.sorties_flown
                         for p in sq.pilots
@@ -253,6 +255,7 @@ class CAFSimulation:
         separated_count = 0
         retained_count = 0
 
+        sq.update_stats()
         sq.graduate_current_upgrades()
 
         sq.send_to_staff(priority_mode=self.staff_priority)
@@ -468,6 +471,8 @@ class CAFSimulation:
             row = preds[i]
             mqt_mo = self._resolve_mqt_monthly(sq)
             rates = self._phase_rates_from_brain_row(mqt_mo, row, sq.phase_length_days)
+            for p in sq.pilots:
+                p.sorties_at_phase_start = p.sorties_flown
             mqt_baseline = {
                 id(p): p.sorties_flown
                 for p in sq.pilots
