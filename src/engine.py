@@ -331,8 +331,8 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
 
     # 4. Full syllabus for new students only
     run_upgrade_program(MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise, cfg=cfg, total_capacity=total_capacity)
-    run_upgrade_program(FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise, cfg=cfg, total_capacity=total_capacity)
     run_upgrade_program(IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise, cfg=cfg, total_capacity=total_capacity)
+    run_upgrade_program(FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise, cfg=cfg, total_capacity=total_capacity)
 
     # 5. Continuation Training
     allocate_continuation_training(pilots, CONTINUATION_PROFILE, total_capacity, allocation_noise, cfg=cfg)
