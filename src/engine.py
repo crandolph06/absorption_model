@@ -157,12 +157,12 @@ def check_syllabus_resources(
     total_capacity: int,
 ) -> bool:
     """Enough support pilots and (for sorties) iron capacity for one student line."""
-    if len([p for p in all_pilots if rules.can_fill_seat(p, Qual.IP, syllabus_upgrade_type)]) < event.num_instructor:
+    if len([p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.IP)]) < event.num_instructor:
         return False
-    wg_pool = len([p for p in all_pilots if rules.can_fill_seat(p, Qual.WG, syllabus_upgrade_type)])
+    wg_pool = len([p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)])
     if wg_pool < event.num_blue_wg or wg_pool < event.num_red_wg:
         return False
-    fl_pool = len([p for p in all_pilots if rules.can_fill_seat(p, Qual.FL, syllabus_upgrade_type)])
+    fl_pool = len([p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)])
     if fl_pool < event.num_blue_fl or fl_pool < event.num_red_fl:
         return False
     if event.event_type == EventType.SORTIE:
@@ -199,43 +199,43 @@ def process_syllabus_event(
             if event.event_type == EventType.SIM:
                 student.add_sim(cfg.avg_sortie_dur)
                 for _ in range(event.num_instructor):
-                    ips = [p for p in all_pilots if rules.can_fill_seat(p, Qual.IP, syllabus_upgrade_type)]
+                    ips = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.IP)]
                     assign_sim(cfg, ips, noise)
                 for _ in range(event.num_blue_wg):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.WG, syllabus_upgrade_type)]
+                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
                     candidates = [p for p in candidates if p is not student]
                     assign_sim(cfg, candidates, noise)
                 for _ in range(event.num_blue_fl):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.FL, syllabus_upgrade_type)]
+                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
                     candidates = [p for p in candidates if p is not student]
                     assign_sim(cfg, candidates, noise)
                 for _ in range(event.num_red_wg):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.WG, syllabus_upgrade_type)]
+                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
                     candidates = [p for p in candidates if p is not student]
                     assign_sim(cfg, candidates, noise)
                 for _ in range(event.num_red_fl):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.FL, syllabus_upgrade_type)]
+                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
                     candidates = [p for p in candidates if p is not student]
                     assign_sim(cfg, candidates, noise)
             else:
                 student.add_sortie(cfg.avg_sortie_dur, "Blue")
                 for _ in range(event.num_instructor):
-                    ips = [p for p in all_pilots if rules.can_fill_seat(p, Qual.IP, syllabus_upgrade_type)]
+                    ips = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.IP)]
                     assign_sortie(cfg, ips, "Blue", noise)
                 for _ in range(event.num_blue_wg):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.WG, syllabus_upgrade_type)]
+                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
                     candidates = [p for p in candidates if p is not student]
                     assign_sortie(cfg, candidates, "Blue", noise)
                 for _ in range(event.num_blue_fl):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.FL, syllabus_upgrade_type)]
+                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
                     candidates = [p for p in candidates if p is not student]
                     assign_sortie(cfg, candidates, "Blue", noise)
                 for _ in range(event.num_red_wg):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.WG, syllabus_upgrade_type)]
+                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
                     candidates = [p for p in candidates if p is not student]
                     assign_sortie(cfg, candidates, "Red", noise)
                 for _ in range(event.num_red_fl):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(p, Qual.FL, syllabus_upgrade_type)]
+                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
                     candidates = [p for p in candidates if p is not student]
                     assign_sortie(cfg, candidates, "Red", noise)
 
@@ -292,7 +292,7 @@ def allocate_continuation_training(
         # We access the internal hierarchy check from rules since CT doesn't have a syllabus upgrade type
         eligible = [
             p for p in ct_candidates
-            if rules.can_fill_seat(p, bucket.min_qual, None)
+            if rules.can_fill_seat(pilot=p, min_qual=bucket.min_qual)
         ]
 
         for _ in range(qty):
