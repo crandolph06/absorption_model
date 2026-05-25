@@ -54,11 +54,10 @@ def phase_upgrade_metrics(pilots: List[Pilot]) -> dict:
     deferred_mqt_sorties = deferred_flug_sorties = deferred_ipug_sorties = 0
     deferred_mqt_sims = deferred_flug_sims = deferred_ipug_sims = 0
     for p in pilots:
-        n_sorties = len(p for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE)
-        n_sims = len(p for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM)
-        n = n_sorties + n_sims
-        if not n:
-            continue
+        n_sorties = sum(
+            1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE
+        )
+        n_sims = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM)
         if p.upgrade == Upgrade.MQT:
             deferred_mqt_sorties += n_sorties
             deferred_mqt_sims += n_sims
@@ -88,7 +87,7 @@ def phase_upgrade_metrics(pilots: List[Pilot]) -> dict:
         "deferred_ipug_sorties": deferred_ipug_sorties,
         "deferred_mqt_sims": deferred_mqt_sims,
         "deferred_flug_sims": deferred_flug_sims,
-        "deferred_ipug_sims": deferred_ipug_sims,    
+        "deferred_ipug_sims": deferred_ipug_sims,
         "incomplete_mqt_students": incomplete_mqt,
         "incomplete_flug_students": incomplete_flug,
         "incomplete_ipug_students": incomplete_ipug,
