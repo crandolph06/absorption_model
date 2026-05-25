@@ -18,16 +18,6 @@ class SyllabusEvent:
     num_red_wg: int = 0
     num_red_fl: int = 0
 
-    def total_slots(self):
-        return self.num_student + self.num_instructor + self.num_blue_wg + self.num_blue_fl + self.num_red_wg + self.num_red_fl
-
-@dataclass
-class UpgradeProgram:
-    name: str # "MQT", "FLUG", "IPUG"
-    syllabus: List[SyllabusEvent]
-    student_qual: Qual
-    num_students: int
-
 # ----------------------
 # Tiny Test Syllabi
 # ----------------------
