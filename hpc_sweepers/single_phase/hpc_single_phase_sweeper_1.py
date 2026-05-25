@@ -3,9 +3,8 @@ import numpy as np
 import os
 import itertools
 from concurrent.futures import ProcessPoolExecutor
-from src.engine import run_phase_simulation, create_pilots
+from src.engine import run_phase_simulation, create_pilots, phase_upgrade_metrics
 from src.models import SquadronConfig
-from src.single_phase_handoff_metrics import handoff_iteration_metrics, handoff_parquet_columns
 from src.rap_state import (
     rap_assess,
     rap_state_code,
@@ -82,14 +81,11 @@ def process_single_config(args):
             pilots = create_pilots(cfg)
             final_pilots = run_phase_simulation(cfg, pilots, allocation_noise=0.0)
             
-            # Extract metrics + upgrade syllabus handoff (same cfg object updated each iteration)
-            pending = cfg.pending_deferred_requirements
-
             rap, blue_rap, red = rap_assess(final_pilots)
             simm = sim_rap_metrics(final_pilots)
             mqt_sorties = mqt_observed_sortie_metrics(final_pilots)
             mqt_sims = mqt_observed_sim_metrics(final_pilots)
-
+            u = phase_upgrade_metrics(final_pilots)
             results.append({
                 "r_code": rap_state_code(rap),
                 "b_code": rap_state_code(blue_rap),
@@ -107,7 +103,18 @@ def process_single_config(args):
                 "wg_sim_rap_sf": simm["WG"]["sim_rap_shortfall"],
                 "fl_sim_rap_sf": simm["FL"]["sim_rap_shortfall"],
                 "ip_sim_rap_sf": simm["IP"]["sim_rap_shortfall"],
-                **handoff_iteration_metrics(pending),
+                "mqt_syllabus_complete": float(u["mqt_syllabus_complete"]),
+                "flug_syllabus_complete": float(u["flug_syllabus_complete"]),
+                "ipug_syllabus_complete": float(u["ipug_syllabus_complete"]),
+                "incomplete_mqt_students": float(u["incomplete_mqt_students"]),
+                "incomplete_flug_students": float(u["incomplete_flug_students"]),
+                "incomplete_ipug_students": float(u["incomplete_ipug_students"]),
+                "deferred_mqt_sorties": float(u["deferred_mqt_sorties"]),
+                "deferred_flug_sorties": float(u["deferred_flug_sorties"]),
+                "deferred_ipug_sorties": float(u["deferred_ipug_sorties"]),
+                "deferred_mqt_sims": float(u["deferred_mqt_sims"]),
+                "deferred_flug_sims": float(u["deferred_flug_sims"]),
+                "deferred_ipug_sims": float(u["deferred_ipug_sims"]),
             })
 
         except ValueError:
@@ -146,7 +153,12 @@ def process_single_config(args):
         "wg_sim_rap_shortfall_mean": avg["wg_sim_rap_sf"],
         "fl_sim_rap_shortfall_mean": avg["fl_sim_rap_sf"],
         "ip_sim_rap_shortfall_mean": avg["ip_sim_rap_sf"],
-        **handoff_parquet_columns(avg),
+        "incomplete_mqt_students_mean": avg["incomplete_mqt_students"],
+        "incomplete_flug_students_mean": avg["incomplete_flug_students"],
+        "incomplete_ipug_students_mean": avg["incomplete_ipug_students"],
+        "mqt_syllabus_complete_frac": avg["mqt_syllabus_complete"],
+        "flug_syllabus_complete_frac": avg["flug_syllabus_complete"],
+        "ipug_syllabus_complete_frac": avg["ipug_syllabus_complete"],
     }
 
 def run_parallel_sweep():
