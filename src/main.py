@@ -19,5 +19,11 @@ if __name__ == "__main__":
     pilots = create_pilots(cfg)
 
     run_phase_simulation(cfg, pilots)
-
     print_phase_summary(pilots, cfg, verbose=False)
+
+    # Optional: second phase on same roster — carryover retries incomplete_syllabus_items
+    RUN_SECOND_PHASE = False
+    if RUN_SECOND_PHASE:
+        print("\n--- Phase 2 (carryover) ---")
+        run_phase_simulation(cfg, pilots)
+        print_phase_summary(pilots, cfg, verbose=False)
