@@ -148,6 +148,7 @@ class Pilot:
     year_group: int = 9999
     squadron_id: int = 99
     sorties_flown: int = 0
+    sorties_at_phase_start: int = 0
     sorties_at_upgrade_start: int = 0
     sims_flown: float = 0.0
     sims_at_upgrade_start: int = 0
@@ -226,6 +227,7 @@ class Pilot:
             self.qual = Qual.IP
             
         self.upgrade = Upgrade.NONE
+        self.incomplete_syllabus_items.clear()
 
     def age_one_phase_with_rates(self, aging_rate: float, asd: float, phase_length_months: int):  
         if not self.active:
@@ -329,42 +331,23 @@ class SquadronConfig:
         self.ipug_students = sum(1 for p in line_pilots if p.upgrade == Upgrade.IPUG)
 
     def graduate_current_upgrades(self):
-        """Graduate pilots when SORTIE and SIM student syllabus requirements are met."""
-        from src.syllabi import (
-            FLUG_SYLLABUS,
-            IPUG_SYLLABUS,
-            MQT_SYLLABUS,
-            count_sim_student_slots,
-            count_sortie_student_slots,
-        )
-
+        """Graduate pilots with no remaining deferred syllabus lines (see ``reconcile_upgrade_syllabus_deferrals``)."""
         graduated_count = 0
 
         for pilot in self.pilots:
             if pilot.upgrade == Upgrade.NONE:
                 continue
-            if pilot.upgrade == Upgrade.MQT:
-                syllabus = MQT_SYLLABUS
-            elif pilot.upgrade == Upgrade.FLUG:
-                syllabus = FLUG_SYLLABUS
-            elif pilot.upgrade == Upgrade.IPUG:
-                syllabus = IPUG_SYLLABUS
-            else:
+            if pilot.incomplete_syllabus_items:
                 continue
-            need_sort = count_sortie_student_slots(syllabus)
-            need_sim = count_sim_student_slots(syllabus)
-            since_sort = pilot.sorties_flown - pilot.sorties_at_upgrade_start
-            since_sim = pilot.sims_flown - pilot.sims_at_upgrade_start
-            if since_sort >= need_sort and since_sim >= need_sim:
-                pilot.graduate()
-                graduated_count += 1
+            pilot.graduate()
+            graduated_count += 1
 
         self.update_stats()
         still_upgrade = self.mqt_students + self.flug_students + self.ipug_students
         if still_upgrade:
             print(
                 f"Squadron {self.id} graduation: {graduated_count} pilot(s) graduated; "
-                f"{still_upgrade} still in upgrade (did not meet sortie+sim syllabus this phase) "
+                f"{still_upgrade} still in upgrade (deferred syllabus lines remain) "
                 f"[MQT={self.mqt_students}, FLUG={self.flug_students}, IPUG={self.ipug_students}]."
             )
 
