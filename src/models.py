@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 import random
-from typing import Dict, List, Optional, Set, Tuple
+from typing import List, Optional, Tuple
 
 # ----------------------
 # Math
@@ -17,9 +17,6 @@ SIM_EP_MONTHLY: float = 1.0
 SIM_SESSIONS_MONTHLY: float = 30.0
 SIM_BAYS_PER_SESSION: int = 4
 
-
-def inv(x): return 1/x if x != 0 else 0
-def square(x): return x**2
 
 # ----------------------
 # Enums & Simple Classes
@@ -73,55 +70,6 @@ class PriorityMode(Enum):
     RANDOM = 'random'
 
 
-_next_pilot_id: int = 0
-
-
-def allocate_pilot_id() -> int:
-    """Return a new unique pilot id for the current process."""
-    global _next_pilot_id
-    pilot_id = _next_pilot_id
-    _next_pilot_id += 1
-    return pilot_id
-
-
-def reset_pilot_id_counter(start: int = 0) -> None:
-    """Reset the id counter (tests / deterministic sweeps)."""
-    global _next_pilot_id
-    _next_pilot_id = start
-
-
-@dataclass
-class DeferredSyllabusItem:
-    """
-    One syllabus line item that did not execute this phase (e.g. missing IP).
-
-    ``syllabus_event_index`` is the 0-based index into the **full** upgrade syllabus
-    (``MQT_SYLLABUS``, ``FLUG_SYLLABUS``, or ``IPUG_SYLLABUS``), including SIM rows. It
-    disambiguates duplicate ``event_name`` strings and fixes curriculum order for
-    the next phase: carry-forward work must replay **these** rows (and remaining
-    later indices), **not** restart the full syllabus from index 0 while skipping
-    high-support events.
-
-    ``student_event_repetition`` is the index within ``range(event.num_student)``
-    for this student/event (usually 0).
-
-    ``student_pilot_id`` identifies the student across phases (stable ``Pilot.pilot_id``).
-    ``student_year_group`` / ``student_squadron_id`` are informational only.
-    """
-    upgrade: Upgrade
-    event_name: str
-    event_type: EventType
-    syllabus_event_index: int
-    student_event_repetition: int
-    student_pilot_id: int
-    student_year_group: int = 9999
-    student_squadron_id: int = 99
-
-
-# (upgrade, syllabus_event_index, student_pilot_id, student_event_repetition)
-DeferralSignature = Tuple[Upgrade, int, int, int]
-
-
 @dataclass 
 class AgingRate:
     mqt_phase: float = 0.0
@@ -168,29 +116,6 @@ class AgingRate:
             ip_sim_blue_phase=self.ip_sim_blue_phase * phase_length_months,
         )
     
-    def phase_to_monthly(self, phase_length_days: float):
-        phase_length_months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
-
-        return AgingRate(
-            mqt_phase=self.mqt_phase / phase_length_months,
-            wg_phase=self.wg_phase / phase_length_months,
-            fl_phase=self.fl_phase / phase_length_months,
-            ip_phase=self.ip_phase / phase_length_months,
-
-            mqt_blue_phase=self.mqt_blue_phase / phase_length_months,
-            wg_blue_phase=self.wg_blue_phase / phase_length_months,
-            fl_blue_phase=self.fl_blue_phase / phase_length_months,
-            ip_blue_phase=self.ip_blue_phase / phase_length_months,
-
-            mqt_sim_phase=self.mqt_sim_phase / phase_length_months,
-            wg_sim_phase=self.wg_sim_phase / phase_length_months,
-            fl_sim_phase=self.fl_sim_phase / phase_length_months,
-            ip_sim_phase=self.ip_sim_phase / phase_length_months,
-            mqt_sim_blue_phase=self.mqt_sim_blue_phase / phase_length_months,
-            wg_sim_blue_phase=self.wg_sim_blue_phase / phase_length_months,
-            fl_sim_blue_phase=self.fl_sim_blue_phase / phase_length_months,
-            ip_sim_blue_phase=self.ip_sim_blue_phase / phase_length_months,
-        )
 # ----------------------
 # Pilot Entity
 # ----------------------
@@ -198,7 +123,7 @@ class AgingRate:
 class Pilot:
     qual: Qual = Qual.WG 
     upgrade: Upgrade = Upgrade.NONE
-    pilot_id: int = field(default_factory=allocate_pilot_id)
+    incomplete_syllabus_items: List["SyllabusEvent"] = field(default_factory=list)
     sortie_phase: float = 0 
     flight_hours_phase: float = 0.0
     sim_hours_phase: float = 0.0
@@ -222,7 +147,6 @@ class Pilot:
 
     year_group: int = 9999
     squadron_id: int = 99
-    upgrade_syllabus_done: Set[Tuple[int, int]] = field(default_factory=set)
     sorties_flown: int = 0
     sorties_at_upgrade_start: int = 0
     sims_flown: float = 0.0
@@ -302,7 +226,6 @@ class Pilot:
             self.qual = Qual.IP
             
         self.upgrade = Upgrade.NONE
-        self.upgrade_syllabus_done.clear()
 
     def age_one_phase_with_rates(self, aging_rate: float, asd: float, phase_length_months: int):  
         if not self.active:
@@ -367,8 +290,6 @@ class SquadronConfig:
     sim_bays_per_session: int = SIM_BAYS_PER_SESSION
 
     pilots: List[Pilot] = field(default_factory=list)
-    # Remaining syllabus rows carried into the next phase (sole deferral handoff store).
-    pending_deferred_requirements: List["DeferredSyllabusItem"] = field(default_factory=list)
     observed_mqt_monthly: Optional[float] = None
 
     @property
@@ -383,20 +304,6 @@ class SquadronConfig:
     @property
     def max_manning(self) -> int:
         return int(self.desired_manning * self.manning_pct)
-    
-    def get_feature_vector(self) -> list:
-        """Returns the ordered list of features expected by the AI Brain."""
-
-        return [
-            self.paa,
-            self.ute,
-            self.experience_ratio,
-            self.line_pilots,       
-            self.mqt_students,
-            self.flug_students,
-            self.ipug_students,
-            self.ip_qty
-        ]
     
     def update_stats(self):
         # 1. Filter for Active Line Pilots (The only ones who count for stats)
@@ -580,31 +487,7 @@ class SquadronConfig:
                 while int(p.sims_flown) - int(p.sims_at_upgrade_start) < need_sim:
                     p.add_sim(self.avg_sortie_dur)
 
-    def calc_analytic_aging_rate(self) -> AgingRate:
-        """
-        Closed-form jet sortie rates by qual (WG vs experienced split).
 
-        Retained only as a fallback for MQT monthly when ``observed_mqt_monthly`` is unset;
-        the live manning loop always uses ``CAFSimulation.predict_rates_fast`` for WG/FL/IP.
-        """
-        phase_months = self.phase_length_months
-
-        ute = self.ute
-        paa = self.paa
-
-        wg_rate = ((ute * paa) / 2) / self.wg_qty
-        exp_rate = ((ute * paa) / 2) / ((self.fl_qty + self.ip_qty) / 2)
-
-        return AgingRate(
-            mqt_phase= 4.0 * phase_months,
-            wg_phase=wg_rate * phase_months,
-            fl_phase=exp_rate * phase_months,
-            ip_phase=exp_rate * phase_months,
-            mqt_blue_phase= 4.0 * phase_months,
-            wg_blue_phase=None, # TODO figure out this proportion...
-            fl_blue_phase=None,
-            ip_blue_phase=None
-        )
     def store_stats(self, year: int, phase_num: int, rates: AgingRate):
         months = self.phase_length_months
         if months <= 0:
