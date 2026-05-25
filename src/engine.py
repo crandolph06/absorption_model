@@ -47,17 +47,20 @@ def phase_upgrade_metrics(pilots: List[Pilot]) -> dict:
     End-of-phase syllabus stats read from ``Pilot.incomplete_syllabus_items``
     and ``Pilot.upgrade`` — same state the simulator uses for carryover (lines 289–295).
     """
-    def syllabus_complete(upgrade: Upgrade) -> bool:
-        students = [p for p in pilots if p.upgrade == upgrade]
-        return all(not p.incomplete_syllabus_items for p in students) if students else True
-
     deferred_mqt_sorties = deferred_flug_sorties = deferred_ipug_sorties = 0
     deferred_mqt_sims = deferred_flug_sims = deferred_ipug_sims = 0
+
+    mqt_syllabus_sorties = sum(1 for e in MQT_SYLLABUS if e.event_type == EventType.SORTIE)
+    mqt_syllabus_sims = sum(1 for e in MQT_SYLLABUS if e.event_type == EventType.SIM)
+    flug_syllabus_sorties = sum(1 for e in FLUG_SYLLABUS if e.event_type == EventType.SORTIE)
+    flug_syllabus_sims = sum(1 for e in FLUG_SYLLABUS if e.event_type == EventType.SIM)
+    ipug_syllabus_sorties = sum(1 for e in IPUG_SYLLABUS if e.event_type == EventType.SORTIE)
+    ipug_syllabus_sims = sum(1 for e in IPUG_SYLLABUS if e.event_type == EventType.SIM)
+
     for p in pilots:
-        n_sorties = sum(
-            1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE
-        )
+        n_sorties = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE)
         n_sims = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM)
+
         if p.upgrade == Upgrade.MQT:
             deferred_mqt_sorties += n_sorties
             deferred_mqt_sims += n_sims
@@ -68,29 +71,26 @@ def phase_upgrade_metrics(pilots: List[Pilot]) -> dict:
             deferred_ipug_sorties += n_sorties
             deferred_ipug_sims += n_sims
 
-    incomplete_mqt = sum(
-        1 for p in pilots if p.upgrade == Upgrade.MQT and p.incomplete_syllabus_items
-    )
-    incomplete_flug = sum(
-        1 for p in pilots if p.upgrade == Upgrade.FLUG and p.incomplete_syllabus_items
-    )
-    incomplete_ipug = sum(
-        1 for p in pilots if p.upgrade == Upgrade.IPUG and p.incomplete_syllabus_items
-    )
+    remaining_mqt_syllabi = (deferred_mqt_sorties + deferred_mqt_sims) / (mqt_syllabus_sorties + mqt_syllabus_sims)
+    remaining_mqt_syllabi_sorties_only = deferred_mqt_sorties / mqt_syllabus_sorties
+    remaining_flug_syllabi = (deferred_flug_sorties + deferred_flug_sims) / (flug_syllabus_sorties + flug_syllabus_sims)
+    remaining_flug_syllabi_sorties_only = deferred_flug_sorties / flug_syllabus_sorties
+    remaining_ipug_syllabi = (deferred_ipug_sorties + deferred_ipug_sims) / (ipug_syllabus_sorties + ipug_syllabus_sims)
+    remaining_ipug_syllabi_sorties_only = deferred_ipug_sorties / ipug_syllabus_sorties
 
     return {
-        "mqt_syllabus_complete": syllabus_complete(Upgrade.MQT),
-        "flug_syllabus_complete": syllabus_complete(Upgrade.FLUG),
-        "ipug_syllabus_complete": syllabus_complete(Upgrade.IPUG),
         "deferred_mqt_sorties": deferred_mqt_sorties,
         "deferred_flug_sorties": deferred_flug_sorties,
         "deferred_ipug_sorties": deferred_ipug_sorties,
         "deferred_mqt_sims": deferred_mqt_sims,
         "deferred_flug_sims": deferred_flug_sims,
         "deferred_ipug_sims": deferred_ipug_sims,
-        "incomplete_mqt_students": incomplete_mqt,
-        "incomplete_flug_students": incomplete_flug,
-        "incomplete_ipug_students": incomplete_ipug,
+        "remaining_mqt_syllabi": remaining_mqt_syllabi,
+        "remaining_flug_syllabi": remaining_flug_syllabi,
+        "remaining_ipug_syllabi": remaining_ipug_syllabi,
+        "remaining_mqt_syllabi_sorties_only": remaining_mqt_syllabi_sorties_only,
+        "remaining_flug_syllabi_sorties_only": remaining_flug_syllabi_sorties_only,
+        "remaining_ipug_syllabi_sorties_only": remaining_ipug_syllabi_sorties_only,
     }
 
 
