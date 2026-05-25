@@ -123,7 +123,7 @@ class AgingRate:
 class Pilot:
     qual: Qual = Qual.WG 
     upgrade: Upgrade = Upgrade.NONE
-    incomplete_syllabus_items: List["SyllabusEvent"] = field(default_factory=list)
+    incomplete_syllabus_items: List = field(default_factory=list)
     sortie_phase: float = 0 
     flight_hours_phase: float = 0.0
     sim_hours_phase: float = 0.0
