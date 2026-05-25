@@ -75,23 +75,6 @@ class PriorityMode(Enum):
 
 @dataclass
 class DeferredSyllabusItem:
-    """
-    One syllabus line item that did not execute this phase (e.g. missing IP).
-
-    ``syllabus_event_index`` is the 0-based index into the **full** upgrade syllabus
-    (``MQT_SYLLABUS``, ``FLUG_SYLLABUS``, or ``IPUG_SYLLABUS``), including SIM rows. It
-    disambiguates duplicate ``event_name`` strings and fixes curriculum order for
-    the next phase: carry-forward work must replay **these** rows (and remaining
-    later indices), **not** restart the full syllabus from index 0 while skipping
-    high-support events.
-
-    ``student_event_repetition`` is the index within ``range(event.num_student)``
-    for this student/event (usually 0).
-
-    Next-phase logic (not implemented yet) must merge this queue with any new
-    syllabus tail so training cannot substitute low-support early events for
-    deferred high-support lines.
-    """
     upgrade: Upgrade
     event_name: str
     event_type: EventType
@@ -99,23 +82,6 @@ class DeferredSyllabusItem:
     student_event_repetition: int
     student_year_group: int
     student_squadron_id: int
-
-
-@dataclass
-class PhaseUpgradeHandoff:
-    """
-    Snapshot after a phase for downstream multi-phase logic.
-
-    ``deferred_requirements`` lists exact syllabus rows (SORTIE or SIM) that failed this phase.
-    A future phase runner must consume them in curriculum order (by
-    ``syllabus_event_index``, then student identity) rather than re-running only
-    the beginning of the syllabus.
-    """
-    mqt_syllabus_complete: bool
-    flug_syllabus_complete: bool
-    ipug_syllabus_complete: bool
-    deferred_requirements: List[DeferredSyllabusItem] = field(default_factory=list)
-
 
 @dataclass 
 class AgingRate:
@@ -193,6 +159,7 @@ class AgingRate:
 class Pilot:
     qual: Qual = Qual.WG 
     upgrade: Upgrade = Upgrade.NONE
+    incomplete_syllabus_items: List[DeferredSyllabusItem] = field(default_factory=list)
     sortie_phase: float = 0 
     flight_hours_phase: float = 0.0
     sim_hours_phase: float = 0.0
