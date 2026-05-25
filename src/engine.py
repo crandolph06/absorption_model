@@ -39,9 +39,7 @@ def total_phase_capacity(cfg: SquadronConfig) -> float:
 # Selection Phase
 # ----------------------
 def select_upgrade_students(pilots: List[Pilot], upgrade_type: Upgrade, count: int) -> List[Pilot]:
-    """
-    Identifies eligible pilots and marks them for upgrade.
-    """
+    """Pick up to ``count`` new students (``upgrade == NONE``). Carryover students stay in upgrade."""
     candidates = [p for p in pilots if rules.can_start_upgrade(p, upgrade_type)]
     
     # Simple selection: take the first available 
@@ -132,8 +130,13 @@ def process_syllabus_event(
     for student in upgrade_students:
         for _ in range(event.num_student):
             if not check_syllabus_resources(event, all_pilots, syllabus_upgrade_type, total_capacity):
-                student.incomplete_syllabus_items.append(event)
+                # Already deferred: leave list unchanged (no duplicate)
+                if event not in student.incomplete_syllabus_items:
+                    student.incomplete_syllabus_items.append(event)
                 continue
+            # Retry succeeded: drop from deferral queue before crediting the line
+            if event in student.incomplete_syllabus_items:
+                student.incomplete_syllabus_items.remove(event)
             if event.event_type == EventType.SIM:
                 student.add_sim(cfg.avg_sortie_dur)
                 for _ in range(event.num_instructor):
@@ -248,9 +251,7 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
             p.sortie_red_phase = 0
             p.sim_phase = 0
 
-    # 2. Select Students
-    # Note: If pilots were already assigned upgrades in a previous phase, 
-    # you might want to adjust this logic.
+    # 2. New students only (carryover already have upgrade MQT/FLUG/IPUG)
     mqt_students = select_upgrade_students(pilots, Upgrade.MQT, cfg.mqt_students)
     flug_students = select_upgrade_students(pilots, Upgrade.FLUG, cfg.flug_students)
     ipug_students = select_upgrade_students(pilots, Upgrade.IPUG, cfg.ipug_students)
@@ -258,16 +259,23 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
     phase_months = cfg.phase_length_days / 30.0
     total_capacity = int(total_phase_capacity(cfg) * phase_months)
 
-    # 3. Execute Syllabi
+    # 3. Carryover: incomplete lines only (not a full new syllabus)
+    for upgrade_type in (Upgrade.MQT, Upgrade.FLUG, Upgrade.IPUG):
+        for student in [p for p in pilots if p.upgrade == upgrade_type and p.incomplete_syllabus_items]:
+            for event in list(student.incomplete_syllabus_items):
+                process_syllabus_event(
+                    event, [student], pilots, upgrade_type, allocation_noise, cfg, total_capacity
+                )
 
+    # 4. Full syllabus for new students only
     run_upgrade_program(MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise, cfg=cfg, total_capacity=total_capacity)
     run_upgrade_program(FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise, cfg=cfg, total_capacity=total_capacity)
     run_upgrade_program(IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise, cfg=cfg, total_capacity=total_capacity)
 
-    # 4. Continuation Training
+    # 5. Continuation Training
     allocate_continuation_training(pilots, CONTINUATION_PROFILE, total_capacity, allocation_noise, cfg=cfg)
 
-    # 5. Finalize Stats
+    # 6. Finalize Stats (no graduation here — incomplete students keep upgrade status)
     for p in pilots:
         months = cfg.phase_length_days / 30.0
         p.sim_phase = SIM_RAP_MONTHLY * months
