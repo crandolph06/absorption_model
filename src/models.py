@@ -18,9 +18,6 @@ SIM_SESSIONS_MONTHLY: float = 30.0
 SIM_BAYS_PER_SESSION: int = 4
 
 
-def inv(x): return 1/x if x != 0 else 0
-def square(x): return x**2
-
 # ----------------------
 # Enums & Simple Classes
 # ----------------------
@@ -119,29 +116,6 @@ class AgingRate:
             ip_sim_blue_phase=self.ip_sim_blue_phase * phase_length_months,
         )
     
-    def phase_to_monthly(self, phase_length_days: float):
-        phase_length_months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
-
-        return AgingRate(
-            mqt_phase=self.mqt_phase / phase_length_months,
-            wg_phase=self.wg_phase / phase_length_months,
-            fl_phase=self.fl_phase / phase_length_months,
-            ip_phase=self.ip_phase / phase_length_months,
-
-            mqt_blue_phase=self.mqt_blue_phase / phase_length_months,
-            wg_blue_phase=self.wg_blue_phase / phase_length_months,
-            fl_blue_phase=self.fl_blue_phase / phase_length_months,
-            ip_blue_phase=self.ip_blue_phase / phase_length_months,
-
-            mqt_sim_phase=self.mqt_sim_phase / phase_length_months,
-            wg_sim_phase=self.wg_sim_phase / phase_length_months,
-            fl_sim_phase=self.fl_sim_phase / phase_length_months,
-            ip_sim_phase=self.ip_sim_phase / phase_length_months,
-            mqt_sim_blue_phase=self.mqt_sim_blue_phase / phase_length_months,
-            wg_sim_blue_phase=self.wg_sim_blue_phase / phase_length_months,
-            fl_sim_blue_phase=self.fl_sim_blue_phase / phase_length_months,
-            ip_sim_blue_phase=self.ip_sim_blue_phase / phase_length_months,
-        )
 # ----------------------
 # Pilot Entity
 # ----------------------
@@ -330,20 +304,6 @@ class SquadronConfig:
     @property
     def max_manning(self) -> int:
         return int(self.desired_manning * self.manning_pct)
-    
-    def get_feature_vector(self) -> list:
-        """Returns the ordered list of features expected by the AI Brain."""
-
-        return [
-            self.paa,
-            self.ute,
-            self.experience_ratio,
-            self.line_pilots,       
-            self.mqt_students,
-            self.flug_students,
-            self.ipug_students,
-            self.ip_qty
-        ]
     
     def update_stats(self):
         # 1. Filter for Active Line Pilots (The only ones who count for stats)
