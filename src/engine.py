@@ -1,9 +1,17 @@
 import random
-from typing import List, Dict
-from src.models import EventType, SquadronConfig, Pilot, Qual, Upgrade, SIM_RAP_MONTHLY
-from src.syllabi import SyllabusEvent, ContinuationProfile, UpgradeProgram
+from typing import List
+from src.models import (
+    EventType,
+    SquadronConfig,
+    Pilot,
+    Qual,
+    Upgrade,
+    SIM_RAP_MONTHLY,
+    PhaseUpgradeHandoff,
+    DeferredLine,
+)
+from src.syllabi import SyllabusEvent, ContinuationProfile
 from src import rules
-# from src.syllabi import TEST_MQT_SYLLABUS, TEST_FLUG_SYLLABUS, TEST_IPUG_SYLLABUS, CONTINUATION_PROFILE
 from src.syllabi import MQT_SYLLABUS, FLUG_SYLLABUS, IPUG_SYLLABUS, CONTINUATION_PROFILE
 
 # ----------------------
@@ -34,6 +42,25 @@ def create_pilots(cfg: SquadronConfig) -> List[Pilot]:
 
 def total_phase_capacity(cfg: SquadronConfig) -> float:
     return cfg.ute * cfg.paa
+
+
+def build_phase_upgrade_handoff(pilots: List[Pilot]) -> PhaseUpgradeHandoff:
+    def syllabus_complete(upgrade: Upgrade) -> bool:
+        students = [p for p in pilots if p.upgrade == upgrade]
+        return all(not p.incomplete_syllabus_items for p in students) if students else True
+
+    deferred = [
+        DeferredLine(upgrade=p.upgrade)
+        for p in pilots
+        for _ in p.incomplete_syllabus_items
+    ]
+    return PhaseUpgradeHandoff(
+        mqt_syllabus_complete=syllabus_complete(Upgrade.MQT),
+        flug_syllabus_complete=syllabus_complete(Upgrade.FLUG),
+        ipug_syllabus_complete=syllabus_complete(Upgrade.IPUG),
+        deferred_requirements=deferred,
+    )
+
 
 # ----------------------
 # Selection Phase
@@ -282,6 +309,7 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
         p.update_total()
         p.update_monthly(cfg.phase_length_days)
 
+    cfg.last_phase_upgrade_handoff = build_phase_upgrade_handoff(pilots)
     return pilots
 
 # ----------------------
