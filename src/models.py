@@ -73,16 +73,6 @@ class PriorityMode(Enum):
     RANDOM = 'random'
 
 
-@dataclass
-class DeferredSyllabusItem:
-    upgrade: Upgrade
-    event_name: str
-    event_type: EventType
-    syllabus_event_index: int
-    student_event_repetition: int
-    student_year_group: int
-    student_squadron_id: int
-
 @dataclass 
 class AgingRate:
     mqt_phase: float = 0.0
@@ -159,7 +149,7 @@ class AgingRate:
 class Pilot:
     qual: Qual = Qual.WG 
     upgrade: Upgrade = Upgrade.NONE
-    incomplete_syllabus_items: List[DeferredSyllabusItem] = field(default_factory=list)
+    incomplete_syllabus_items: List["SyllabusEvent"] = field(default_factory=list)
     sortie_phase: float = 0 
     flight_hours_phase: float = 0.0
     sim_hours_phase: float = 0.0
@@ -326,8 +316,6 @@ class SquadronConfig:
     sim_bays_per_session: int = SIM_BAYS_PER_SESSION
 
     pilots: List[Pilot] = field(default_factory=list)
-    last_phase_upgrade_handoff: Optional["PhaseUpgradeHandoff"] = None
-    pending_deferred_requirements: List["DeferredSyllabusItem"] = field(default_factory=list)
     observed_mqt_monthly: Optional[float] = None
 
     @property
@@ -539,31 +527,7 @@ class SquadronConfig:
                 while int(p.sims_flown) - int(p.sims_at_upgrade_start) < need_sim:
                     p.add_sim(self.avg_sortie_dur)
 
-    def calc_analytic_aging_rate(self) -> AgingRate:
-        """
-        Closed-form jet sortie rates by qual (WG vs experienced split).
 
-        Retained only as a fallback for MQT monthly when ``observed_mqt_monthly`` is unset;
-        the live manning loop always uses ``CAFSimulation.predict_rates_fast`` for WG/FL/IP.
-        """
-        phase_months = self.phase_length_months
-
-        ute = self.ute
-        paa = self.paa
-
-        wg_rate = ((ute * paa) / 2) / self.wg_qty
-        exp_rate = ((ute * paa) / 2) / ((self.fl_qty + self.ip_qty) / 2)
-
-        return AgingRate(
-            mqt_phase= 4.0 * phase_months,
-            wg_phase=wg_rate * phase_months,
-            fl_phase=exp_rate * phase_months,
-            ip_phase=exp_rate * phase_months,
-            mqt_blue_phase= 4.0 * phase_months,
-            wg_blue_phase=None, # TODO figure out this proportion...
-            fl_blue_phase=None,
-            ip_blue_phase=None
-        )
     def store_stats(self, year: int, phase_num: int, rates: AgingRate):
         months = self.phase_length_months
         if months <= 0:
