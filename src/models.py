@@ -348,7 +348,7 @@ class SquadronConfig:
         }
 
     def graduate_current_upgrades(self):
-        """Graduate pilots with no remaining deferred syllabus lines (see ``reconcile_upgrade_syllabus_deferrals``)."""
+        """Graduate upgrade students with no deferred syllabus lines."""
         graduated_count = 0
 
         for pilot in self.pilots:
