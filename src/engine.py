@@ -1,6 +1,6 @@
 import random
 from typing import List, Dict
-from src.models import EventType, SquadronConfig, Pilot, Qual, Upgrade, SIM_RAP_MONTHLY, DeferredSyllabusItem
+from src.models import EventType, SquadronConfig, Pilot, Qual, Upgrade, SIM_RAP_MONTHLY
 from src.syllabi import SyllabusEvent, ContinuationProfile, UpgradeProgram
 from src import rules
 # from src.syllabi import TEST_MQT_SYLLABUS, TEST_FLUG_SYLLABUS, TEST_IPUG_SYLLABUS, CONTINUATION_PROFILE
@@ -132,7 +132,7 @@ def process_syllabus_event(
     for student in upgrade_students:
         for _ in range(event.num_student):
             if not check_syllabus_resources(event, all_pilots, syllabus_upgrade_type, total_capacity):
-                student.incomplete_syllabus_items.append(DeferredSyllabusItem(upgrade=student.upgrade, event_name=event.name, event_type=event.event_type, syllabus_event_index=event.index, student_year_group=student.year_group, student_squadron_id=student.squadron_id))
+                student.incomplete_syllabus_items.append(event)
                 continue
             if event.event_type == EventType.SIM:
                 student.add_sim(cfg.avg_sortie_dur)
