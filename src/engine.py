@@ -7,8 +7,6 @@ from src.models import (
     Qual,
     Upgrade,
     SIM_RAP_MONTHLY,
-    PhaseUpgradeHandoff,
-    DeferredLine,
 )
 from src.syllabi import SyllabusEvent, ContinuationProfile
 from src import rules
@@ -44,22 +42,57 @@ def total_phase_capacity(cfg: SquadronConfig) -> float:
     return cfg.ute * cfg.paa
 
 
-def build_phase_upgrade_handoff(pilots: List[Pilot]) -> PhaseUpgradeHandoff:
+def phase_upgrade_metrics(pilots: List[Pilot]) -> dict:
+    """
+    End-of-phase syllabus stats read from ``Pilot.incomplete_syllabus_items``
+    and ``Pilot.upgrade`` — same state the simulator uses for carryover (lines 289–295).
+    """
     def syllabus_complete(upgrade: Upgrade) -> bool:
         students = [p for p in pilots if p.upgrade == upgrade]
         return all(not p.incomplete_syllabus_items for p in students) if students else True
 
-    deferred = [
-        DeferredLine(upgrade=p.upgrade)
-        for p in pilots
-        for _ in p.incomplete_syllabus_items
-    ]
-    return PhaseUpgradeHandoff(
-        mqt_syllabus_complete=syllabus_complete(Upgrade.MQT),
-        flug_syllabus_complete=syllabus_complete(Upgrade.FLUG),
-        ipug_syllabus_complete=syllabus_complete(Upgrade.IPUG),
-        deferred_requirements=deferred,
+    deferred_mqt_sorties = deferred_flug_sorties = deferred_ipug_sorties = 0
+    deferred_mqt_sims = deferred_flug_sims = deferred_ipug_sims = 0
+    for p in pilots:
+        n_sorties = len(p for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE)
+        n_sims = len(p for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM)
+        n = n_sorties + n_sims
+        if not n:
+            continue
+        if p.upgrade == Upgrade.MQT:
+            deferred_mqt_sorties += n_sorties
+            deferred_mqt_sims += n_sims
+        elif p.upgrade == Upgrade.FLUG:
+            deferred_flug_sorties += n_sorties
+            deferred_flug_sims += n_sims
+        elif p.upgrade == Upgrade.IPUG:
+            deferred_ipug_sorties += n_sorties
+            deferred_ipug_sims += n_sims
+
+    incomplete_mqt = sum(
+        1 for p in pilots if p.upgrade == Upgrade.MQT and p.incomplete_syllabus_items
     )
+    incomplete_flug = sum(
+        1 for p in pilots if p.upgrade == Upgrade.FLUG and p.incomplete_syllabus_items
+    )
+    incomplete_ipug = sum(
+        1 for p in pilots if p.upgrade == Upgrade.IPUG and p.incomplete_syllabus_items
+    )
+
+    return {
+        "mqt_syllabus_complete": syllabus_complete(Upgrade.MQT),
+        "flug_syllabus_complete": syllabus_complete(Upgrade.FLUG),
+        "ipug_syllabus_complete": syllabus_complete(Upgrade.IPUG),
+        "deferred_mqt_sorties": deferred_mqt_sorties,
+        "deferred_flug_sorties": deferred_flug_sorties,
+        "deferred_ipug_sorties": deferred_ipug_sorties,
+        "deferred_mqt_sims": deferred_mqt_sims,
+        "deferred_flug_sims": deferred_flug_sims,
+        "deferred_ipug_sims": deferred_ipug_sims,    
+        "incomplete_mqt_students": incomplete_mqt,
+        "incomplete_flug_students": incomplete_flug,
+        "incomplete_ipug_students": incomplete_ipug,
+    }
 
 
 # ----------------------
@@ -309,7 +342,6 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
         p.update_total()
         p.update_monthly(cfg.phase_length_days)
 
-    cfg.last_phase_upgrade_handoff = build_phase_upgrade_handoff(pilots)
     return pilots
 
 # ----------------------
