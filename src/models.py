@@ -330,6 +330,23 @@ class SquadronConfig:
         self.flug_students = sum(1 for p in line_pilots if p.upgrade == Upgrade.FLUG)
         self.ipug_students = sum(1 for p in line_pilots if p.upgrade == Upgrade.IPUG)
 
+    def deferral_metrics_snapshot(self) -> dict:
+        """Squadron deferral counts (same definitions as ``engine.phase_upgrade_metrics``)."""
+        from src.engine import phase_upgrade_metrics
+
+        u = phase_upgrade_metrics(self.pilots)
+        return {
+            "incomplete_mqt_students": u["incomplete_mqt_students"],
+            "incomplete_flug_students": u["incomplete_flug_students"],
+            "incomplete_ipug_students": u["incomplete_ipug_students"],
+            "deferred_mqt_sorties": u["deferred_mqt_sorties"],
+            "deferred_flug_sorties": u["deferred_flug_sorties"],
+            "deferred_ipug_sorties": u["deferred_ipug_sorties"],
+            "deferred_mqt_sims": u["deferred_mqt_sims"],
+            "deferred_flug_sims": u["deferred_flug_sims"],
+            "deferred_ipug_sims": u["deferred_ipug_sims"],
+        }
+
     def graduate_current_upgrades(self):
         """Graduate pilots with no remaining deferred syllabus lines (see ``reconcile_upgrade_syllabus_deferrals``)."""
         graduated_count = 0
@@ -508,16 +525,8 @@ class SquadronConfig:
             'wg_blue_shortfall': monthly_sortie_rap_target(Qual.WG) - (rates.wg_blue_phase / months),
             'fl_blue_shortfall': monthly_sortie_rap_target(Qual.FL) - (rates.fl_blue_phase / months),
             'ip_blue_shortfall': monthly_sortie_rap_target(Qual.IP) - (rates.ip_blue_phase / months),
-            'incomplete_mqt_students': sum(1 for p in self.pilots if p.upgrade == Upgrade.MQT and p.incomplete_syllabus_items),
-            'deferred_mqt_sorties': sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE and e.upgrade == Upgrade.MQT),
-            'deferred_mqt_sims': sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM and e.upgrade == Upgrade.MQT),
-            'incomplete_flug_students': sum(1 for p in self.pilots if p.upgrade == Upgrade.FLUG and p.incomplete_syllabus_items),
-            'deferred_flug_sorties': sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE and e.upgrade == Upgrade.FLUG),
-            'deferred_flug_sims': sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM and e.upgrade == Upgrade.FLUG),
-            'incomplete_ipug_students': sum(1 for p in self.pilots if p.upgrade == Upgrade.IPUG and p.incomplete_syllabus_items),
-            'deferred_ipug_sorties': sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE and e.upgrade == Upgrade.IPUG),
-            'deferred_ipug_sims': sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM and e.upgrade == Upgrade.IPUG),
         }
+        current_stats.update(self.deferral_metrics_snapshot())
     
         return current_stats
     
