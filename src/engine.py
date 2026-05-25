@@ -290,8 +290,11 @@ def allocate_continuation_training(
     for bucket, qty in base_qty.items():
         # Find eligible pilots for this specific CT bucket
         # We access the internal hierarchy check from rules since CT doesn't have a syllabus upgrade type
-        eligible = [p for p in ct_candidates if rules._qual_hierarchy_check(p.qual, bucket.min_qual)]
-        
+        eligible = [
+            p for p in ct_candidates
+            if rules.can_fill_seat(p, bucket.min_qual, None)
+        ]
+
         for _ in range(qty):
             assign_sortie(cfg=cfg, candidates=eligible, side=bucket.side, noise=noise)
 
