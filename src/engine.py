@@ -1,6 +1,6 @@
 import random
 from typing import List, Dict
-from src.models import EventType, SquadronConfig, Pilot, Qual, Upgrade, SIM_RAP_MONTHLY
+from src.models import EventType, SquadronConfig, Pilot, Qual, Upgrade, SIM_RAP_MONTHLY, DeferredSyllabusItem
 from src.syllabi import SyllabusEvent, ContinuationProfile, UpgradeProgram
 from src import rules
 # from src.syllabi import TEST_MQT_SYLLABUS, TEST_FLUG_SYLLABUS, TEST_IPUG_SYLLABUS, CONTINUATION_PROFILE
@@ -93,6 +93,26 @@ def assign_sim(cfg: SquadronConfig, candidates: List[Pilot], noise: float = 0.0)
     candidates[0].add_sim(cfg.avg_sortie_dur)
     return True
 
+def check_syllabus_resources(
+    event: SyllabusEvent,
+    all_pilots: List[Pilot],
+    syllabus_upgrade_type: Upgrade,
+    total_capacity: int,
+) -> bool:
+    """Enough support pilots and (for sorties) iron capacity for one student line."""
+    if len([p for p in all_pilots if rules.can_fill_seat(p, Qual.IP, syllabus_upgrade_type)]) < event.num_instructor:
+        return False
+    wg_pool = len([p for p in all_pilots if rules.can_fill_seat(p, Qual.WG, syllabus_upgrade_type)])
+    if wg_pool < event.num_blue_wg or wg_pool < event.num_red_wg:
+        return False
+    fl_pool = len([p for p in all_pilots if rules.can_fill_seat(p, Qual.FL, syllabus_upgrade_type)])
+    if fl_pool < event.num_blue_fl or fl_pool < event.num_red_fl:
+        return False
+    if event.event_type == EventType.SORTIE:
+        slots = 1 + event.num_instructor + event.num_blue_wg + event.num_blue_fl + event.num_red_wg + event.num_red_fl
+        if sum(p.sortie_phase for p in all_pilots) + slots > total_capacity:
+            return False
+    return True
 # ----------------------
 # Syllabus Execution
 # ----------------------
@@ -102,7 +122,8 @@ def process_syllabus_event(
     all_pilots: List[Pilot], 
     syllabus_upgrade_type: Upgrade,
     noise: float,
-    cfg: SquadronConfig
+    cfg: SquadronConfig,
+    total_capacity: int,
 ):
     """
     Allocates sorties for a specific syllabus event.
@@ -110,6 +131,9 @@ def process_syllabus_event(
     """
     for student in upgrade_students:
         for _ in range(event.num_student):
+            if not check_syllabus_resources(event, all_pilots, syllabus_upgrade_type, total_capacity):
+                student.incomplete_syllabus_items.append(DeferredSyllabusItem(upgrade=student.upgrade, event_name=event.name, event_type=event.event_type, syllabus_event_index=event.index, student_year_group=student.year_group, student_squadron_id=student.squadron_id))
+                continue
             if event.event_type == EventType.SIM:
                 student.add_sim(cfg.avg_sortie_dur)
                 for _ in range(event.num_instructor):
@@ -159,10 +183,11 @@ def run_upgrade_program(
     all_pilots: List[Pilot],
     upgrade_type: Upgrade,
     noise: float,
-    cfg: SquadronConfig
+    cfg: SquadronConfig,
+    total_capacity: int,
 ):
     for event in syllabus:
-        process_syllabus_event(event, students, all_pilots, upgrade_type, noise, cfg=cfg)
+        process_syllabus_event(event, students, all_pilots, upgrade_type, noise, cfg=cfg, total_capacity=total_capacity)
 
 # ----------------------
 # Continuation Training (CT)
@@ -230,24 +255,16 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
     flug_students = select_upgrade_students(pilots, Upgrade.FLUG, cfg.flug_students)
     ipug_students = select_upgrade_students(pilots, Upgrade.IPUG, cfg.ipug_students)
 
-    # 3. Execute Syllabi
-    # Import these from your syllabi file
-
-    # run_upgrade_program(TEST_MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise)
-    # run_upgrade_program(TEST_FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise)
-    # run_upgrade_program(TEST_IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise)
-
-
-    run_upgrade_program(MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise, cfg=cfg)
-    run_upgrade_program(FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise, cfg=cfg)
-    run_upgrade_program(IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise, cfg=cfg)
-
-
-    # 4. Continuation Training
-    # Scale capacity to phase length (e.g. 1 month vs 4 months)
     phase_months = cfg.phase_length_days / 30.0
     total_capacity = int(total_phase_capacity(cfg) * phase_months)
-    
+
+    # 3. Execute Syllabi
+
+    run_upgrade_program(MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise, cfg=cfg, total_capacity=total_capacity)
+    run_upgrade_program(FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise, cfg=cfg, total_capacity=total_capacity)
+    run_upgrade_program(IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise, cfg=cfg, total_capacity=total_capacity)
+
+    # 4. Continuation Training
     allocate_continuation_training(pilots, CONTINUATION_PROFILE, total_capacity, allocation_noise, cfg=cfg)
 
     # 5. Finalize Stats
@@ -267,8 +284,11 @@ def print_phase_summary(pilots: List[Pilot], cfg: SquadronConfig, verbose: bool 
     
     groups = {
         "MQT Students": [p for p in pilots if p.upgrade == Upgrade.MQT],
+        "Incomplete MQT Students": [p for p in pilots if p.upgrade == Upgrade.MQT and p.incomplete_syllabus_items],
         "FLUG Students": [p for p in pilots if p.upgrade == Upgrade.FLUG],
+        "Incomplete FLUG Students": [p for p in pilots if p.upgrade == Upgrade.FLUG and p.incomplete_syllabus_items],
         "IPUG Students": [p for p in pilots if p.upgrade == Upgrade.IPUG],
+        "Incomplete IPUG Students": [p for p in pilots if p.upgrade == Upgrade.IPUG and p.incomplete_syllabus_items],
         "Line Wingmen": [p for p in pilots if p.qual == Qual.WG and p.upgrade == Upgrade.NONE],
         "Line FLs": [p for p in pilots if p.qual == Qual.FL and p.upgrade == Upgrade.NONE],
         "IPs": [p for p in pilots if p.qual == Qual.IP]
