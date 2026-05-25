@@ -507,7 +507,16 @@ class SquadronConfig:
             'ip_rap_shortfall': monthly_sortie_rap_target(Qual.IP) - (rates.ip_phase / months),
             'wg_blue_shortfall': monthly_sortie_rap_target(Qual.WG) - (rates.wg_blue_phase / months),
             'fl_blue_shortfall': monthly_sortie_rap_target(Qual.FL) - (rates.fl_blue_phase / months),
-            'ip_blue_shortfall': monthly_sortie_rap_target(Qual.IP) - (rates.ip_blue_phase / months)
+            'ip_blue_shortfall': monthly_sortie_rap_target(Qual.IP) - (rates.ip_blue_phase / months),
+            'incomplete_mqt_students': sum(1 for p in self.pilots if p.upgrade == Upgrade.MQT and p.incomplete_syllabus_items),
+            'deferred_mqt_sorties': sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE and e.upgrade == Upgrade.MQT),
+            'deferred_mqt_sims': sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM and e.upgrade == Upgrade.MQT),
+            'incomplete_flug_students': sum(1 for p in self.pilots if p.upgrade == Upgrade.FLUG and p.incomplete_syllabus_items),
+            'deferred_flug_sorties': sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE and e.upgrade == Upgrade.FLUG),
+            'deferred_flug_sims': sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM and e.upgrade == Upgrade.FLUG),
+            'incomplete_ipug_students': sum(1 for p in self.pilots if p.upgrade == Upgrade.IPUG and p.incomplete_syllabus_items),
+            'deferred_ipug_sorties': sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE and e.upgrade == Upgrade.IPUG),
+            'deferred_ipug_sims': sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM and e.upgrade == Upgrade.IPUG),
         }
     
         return current_stats
