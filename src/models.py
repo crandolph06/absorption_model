@@ -353,19 +353,36 @@ class SquadronConfig:
 
         if deferrals == (0, 0, 0, 0, 0, 0):
             for pilot in self.pilots:
-                if pilot.upgrade == Upgrade.NONE:
-                    continue
-                if pilot.incomplete_syllabus_items:
-                    continue
-                pilot.graduate()
-                graduated_count += 1
+                if pilot.upgrade != Upgrade.NONE:
+                    pilot.graduate()
+                    graduated_count += 1
         else:
             if sorties_only:
                 deferrals = deferrals[3:]
             else:
                 deferrals = deferrals[:3]
             mqt_deferrals, flug_deferrals, ipug_deferrals = deferrals
-            
+            mqt_pilots = [p for p in self.pilots if p.upgrade == Upgrade.MQT]
+            flug_pilots = [p for p in self.pilots if p.upgrade == Upgrade.FLUG]
+            ipug_pilots = [p for p in self.pilots if p.upgrade == Upgrade.IPUG]
+
+            mqt_pilots.sort(key=lambda x: x.sorties_flown, reverse=False)
+            flug_pilots.sort(key=lambda x: x.sorties_flown, reverse=False)
+            ipug_pilots.sort(key=lambda x: x.sorties_flown, reverse=False)
+
+            mqt_limit = len(mqt_pilots) - mqt_deferrals
+            flug_limit = len(flug_pilots) - flug_deferrals
+            ipug_limit = len(ipug_pilots) - ipug_deferrals
+
+            for i in range(mqt_limit):
+                mqt_pilots[i].graduate()
+                graduated_count += 1
+            for i in range(flug_limit):
+                flug_pilots[i].graduate()
+                graduated_count += 1
+            for i in range(ipug_limit):
+                ipug_pilots[i].graduate()
+                graduated_count += 1
 
         self.update_stats()
         still_upgrade = self.mqt_students + self.flug_students + self.ipug_students
