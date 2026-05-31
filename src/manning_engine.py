@@ -316,8 +316,6 @@ class CAFSimulation:
     _PREDICT_FEATURE_COLS = [
         'paa', 'ute', 'exp_ratio', 'ip_ratio', 'fl_congestion',
         'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio',
-        'remaining_mqt_syllabi_mean', 'remaining_flug_syllabi_mean', 'remaining_ipug_syllabi_mean',
-        'remaining_mqt_syllabi_sorties_only_mean', 'remaining_flug_syllabi_sorties_only_mean', 'remaining_ipug_syllabi_sorties_only_mean',
     ]
 
     def predict_rates_fast(self) -> np.ndarray:
