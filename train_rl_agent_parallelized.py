@@ -63,8 +63,8 @@ def main():
     print(f"📡 Slurm allocated {n_procs} tasks. Launching parallel environments...")
     timesteps = int(os.getenv("TIMESTEPS", 1_000_000))
 
-    for run_mode in run_modes[:1]:
-        for reward_mode in reward_modes[:1]:
+    for run_mode in run_modes[:1]: # TODO: Run all modes
+        for reward_mode in reward_modes[:1]: # TODO: Run all modes
             print(f"🚀 Training combination: run_mode='{run_mode}', reward_mode='{reward_mode}'")
             env_functions = [make_env(i, run_mode, reward_mode) for i in range(n_procs)]
             env = SubprocVecEnv(env_functions)
