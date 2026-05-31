@@ -279,6 +279,9 @@ class SquadronConfig:
     mqt_students: int = 0 
     flug_students: int = 0
     ipug_students: int = 0
+    mqt_carry: float = 0.0
+    flug_carry: float = 0.0
+    ipug_carry: float = 0.0
     wg_qty: int = 0
     fl_qty: int = 0
     ip_qty: int = 0
@@ -358,7 +361,9 @@ class SquadronConfig:
                 if pilot.upgrade != Upgrade.NONE:
                     pilot.graduate()
                     graduated_count += 1
-            output = (0, 0, 0) # MQT remainder, FLUG remainder, IPUG remainder
+            self.mqt_carry = 0.0
+            self.flug_carry = 0.0
+            self.ipug_carry = 0.0
 
         else:
             if sorties_only:
@@ -371,9 +376,9 @@ class SquadronConfig:
             flug_whole = int(flug_deferrals)
             ipug_whole = int(ipug_deferrals)
 
-            mqt_remainder = mqt_deferrals - mqt_whole
-            flug_remainder = flug_deferrals - flug_whole
-            ipug_remainder = ipug_deferrals - ipug_whole
+            self.mqt_carry = mqt_deferrals - mqt_whole
+            self.flug_carry = flug_deferrals - flug_whole
+            self.ipug_carry = ipug_deferrals - ipug_whole
 
             mqt_pilots = [p for p in self.pilots if p.upgrade == Upgrade.MQT]
             flug_pilots = [p for p in self.pilots if p.upgrade == Upgrade.FLUG]
@@ -410,8 +415,6 @@ class SquadronConfig:
                 ipug_pilots[i].graduate()
                 graduated_count += 1
                 
-            output = (mqt_remainder, flug_remainder, ipug_remainder)
-
         self.update_stats()
         still_upgrade = self.mqt_students + self.flug_students + self.ipug_students
         if still_upgrade:
@@ -420,7 +423,6 @@ class SquadronConfig:
                 f"{still_upgrade} still in upgrade (deferred syllabus lines remain) "
                 f"[MQT={self.mqt_students}, FLUG={self.flug_students}, IPUG={self.ipug_students}]."
             )
-        return output
 
     def new_phase_upgrades(self, flug_window_start:int, ipug_window_start:int,
                            use_upgrade_quotas: bool = False, flug_quota: int = 999,
