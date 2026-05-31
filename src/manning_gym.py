@@ -54,9 +54,9 @@ class ManningEnv(gym.Env):
 
         # B-Course Intake (Phase) 
         if intake_act == 0: 
-            self.sim.annual_intake = max(10, self.sim.phase_intake - 10)
+            self.sim.annual_intake = max(10, self.sim.annual_intake - 10)
         elif intake_act ==2: 
-            self.sim.annual_intake = min(350, self.sim.phase_intake + 10)
+            self.sim.annual_intake = min(350, self.sim.annual_intake + 10)
 
         # FLUG Intake (Phase)
         if flug_act == 0: 
