@@ -333,23 +333,6 @@ class SquadronConfig:
         self.flug_students = sum(1 for p in line_pilots if p.upgrade == Upgrade.FLUG)
         self.ipug_students = sum(1 for p in line_pilots if p.upgrade == Upgrade.IPUG)
 
-    def deferral_metrics_snapshot(self) -> dict:
-        """Squadron deferral counts (same definitions as ``engine.phase_upgrade_metrics``)."""
-        from src.engine import phase_upgrade_metrics
-
-        u = phase_upgrade_metrics(self.pilots)
-        return {
-            "incomplete_mqt_students": u["incomplete_mqt_students"],
-            "incomplete_flug_students": u["incomplete_flug_students"],
-            "incomplete_ipug_students": u["incomplete_ipug_students"],
-            "deferred_mqt_sorties": u["deferred_mqt_sorties"],
-            "deferred_flug_sorties": u["deferred_flug_sorties"],
-            "deferred_ipug_sorties": u["deferred_ipug_sorties"],
-            "deferred_mqt_sims": u["deferred_mqt_sims"],
-            "deferred_flug_sims": u["deferred_flug_sims"],
-            "deferred_ipug_sims": u["deferred_ipug_sims"],
-        }
-
     def graduate_current_upgrades(self, deferrals: Tuple[int, int, int, int, int, int], sorties_only: bool = True):
         """Graduate upgrade students with no deferred syllabus lines. """
         
