@@ -351,8 +351,7 @@ class SquadronConfig:
         }
 
     def graduate_current_upgrades(self, deferrals: Tuple[int, int, int, int, int, int], sorties_only: bool = True):
-        """Graduate upgrade students with no deferred syllabus lines. 
-        Returns tuple of MQT remainder, FLUG remainder, IPUG remainder."""
+        """Graduate upgrade students with no deferred syllabus lines. """
         
         graduated_count = 0
 
@@ -560,6 +559,9 @@ class SquadronConfig:
             'mqt_qty': self.mqt_students,
             'flug_qty': self.flug_students,
             'ipug_qty': self.ipug_students,
+            'mqt_carry': self.mqt_carry,
+            'flug_carry': self.flug_carry,
+            'ipug_carry': self.ipug_carry,
             'percent_manned': self.line_pilots / self.desired_manning,
             'line_pilots': self.line_pilots,
             'total_pilots': self.total_pilots,
