@@ -463,38 +463,6 @@ class SquadronConfig:
 
         self.update_stats()
 
-    def detect_deferrals(self, sorties_only: bool = True):
-        additional_mqts = 0
-        additional_flugs = 0
-        additional_ipugs = 0
-
-        for p in self.pilots:
-            if p.upgrade == Upgrade.MQT and p.incomplete_syllabus_items:
-                mqt_sorties = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE)
-                mqt_sims = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM)
-                if sorties_only:
-                    additional_mqts += (mqt_sorties/9) # Hard coded from src.syllabi.MQT_SYLLABUS
-                else:
-                    additional_mqts += (mqt_sorties/9) + (mqt_sims/7) # Hard coded from src.syllabi.MQT_SYLLABUS
-
-            elif p.upgrade == Upgrade.FLUG and p.incomplete_syllabus_items:
-                flug_sorties = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE)
-                flug_sims = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM)
-                if sorties_only:
-                    additional_flugs += (flug_sorties/9) # Hard coded from src.syllabi.FLUG_SYLLABUS
-                else:
-                    additional_flugs += (flug_sorties/9) + (flug_sims/7) # Hard coded from src.syllabi.FLUG_SYLLABUS
-
-            elif p.upgrade == Upgrade.IPUG and p.incomplete_syllabus_items:
-                ipug_sorties = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE)
-                ipug_sims = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM)
-                if sorties_only:
-                    additional_ipugs += (ipug_sorties/9) # Hard coded from src.syllabi.IPUG_SYLLABUS
-                else:
-                    additional_ipugs += (ipug_sorties/9) + (ipug_sims/7) # Hard coded from src.syllabi.IPUG_SYLLABUS
-
-        return additional_mqts, additional_flugs, additional_ipugs
-
     def _phase_sim_rate_for_pilot(self, p: Pilot, rates: AgingRate) -> float:
         """Phase sim rate bucket mirroring ``apply_phase_aging`` sortie branch."""
         if p.qual == Qual.IP:

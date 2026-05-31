@@ -1,5 +1,5 @@
 import pandas as pd
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, PriorityMode, AgingRate
 import os
 import numpy as np
@@ -223,9 +223,8 @@ class CAFSimulation:
 
                 for sq in self.squadrons:
                     sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
-                    additional_mqts, additional_flugs, additional_ipugs = sq.detect_deferrals(sorties_only=True)
 
-                preds = self.predict_rates_fast(additional_mqts=additional_mqts, additional_flugs=additional_flugs, additional_ipugs=additional_ipugs)
+                preds = self.predict_rates_fast()
 
                 for i, sq in enumerate(self.squadrons):
                     row = preds[i]
@@ -265,7 +264,7 @@ class CAFSimulation:
         separated_count = 0
         retained_count = 0
 
-        sq.graduate_current_upgrades()
+        mqt_remainder, flug_remainder, ipug_remainder = sq.graduate_current_upgrades(deferrals, sorties_only=True)
 
         sq.send_to_staff(priority_mode=self.staff_priority)
 
@@ -409,7 +408,7 @@ class CAFSimulation:
         'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio',
     ]
 
-    def predict_rates_fast(self, additional_mqts: Optional[int] = 0, additional_flugs: Optional[int] = 0, additional_ipugs: Optional[int] = 0) -> np.ndarray:
+    def predict_rates_fast(self) -> np.ndarray:
         """One DataFrame build per call; same feature math as legacy predict_rates."""
         batch_records = []
 
@@ -419,9 +418,9 @@ class CAFSimulation:
             # Training uses column name total_pilots but value is line pilot count (cockpit strength).
             total_pilots = sq.line_pilots
             exp_ratio = sq.experience_ratio
-            mqt_qty = sq.mqt_students + additional_mqts
-            flug_qty = sq.flug_students + additional_flugs
-            ipug_qty = sq.ipug_students + additional_ipugs
+            mqt_qty = sq.mqt_students 
+            flug_qty = sq.flug_students 
+            ipug_qty = sq.ipug_students 
             wg_qty = sq.wg_qty
             fl_qty = sq.fl_qty
             ip_qty = sq.ip_qty
