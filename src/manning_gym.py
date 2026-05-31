@@ -18,7 +18,7 @@ class ManningEnv(gym.Env):
         self.initial_intake = sim_engine.annual_intake
         self.initial_retention = sim_engine.retention_rate
 
-        if run_mode == "ideal":
+        if run_mode == "ideal":  
             # [B-Course, FLUG, IPUG, max manning, UTE, retention, PAA] -> increase, maintain, decrease for each
             self.action_space = spaces.MultiDiscrete([3, 3, 3, 3, 3, 3, 3])
 
@@ -115,11 +115,10 @@ class ManningEnv(gym.Env):
     def reset(self, seed=None):
         super().reset(seed=seed)
 
+        self.sim.reset()
         self.sim.annual_intake = self.initial_intake
         self.sim.retention_rate = self.initial_retention
-
-        self.sim.current_year = 2026
-        self.sim.current_phase = 1
+        self.sim.phase_intake = self.initial_intake // 3
 
         self.sim.squadrons = get_initial_squadrons(self.sim.current_year)
 
@@ -129,10 +128,11 @@ class ManningEnv(gym.Env):
     def step(self, action):
             self._apply_current_logic(action, self.run_mode)
 
-            self.sim.run_phase() 
+            self.sim.run_phase(self.sim.current_phase, self.sim.current_year)
             observation = self._get_obs()
 
             reward = self._calculate_reward()
+            self.sim.advance_clock()
 
             terminated = self.sim.current_year >= 2046 
             truncated = False
