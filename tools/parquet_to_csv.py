@@ -1,8 +1,8 @@
 import pandas as pd
 import os
 
-PATH="outputs/hpc"
-FILE_NAME="batch_0450"
+PATH="outputs/single_phase/parquet"
+FILE_NAME="batch_1_0001"
 
 df = pd.read_parquet(os.path.join(PATH, f'{FILE_NAME}.parquet'))
 
