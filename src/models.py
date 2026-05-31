@@ -566,7 +566,6 @@ class SquadronConfig:
             'fl_blue_shortfall': monthly_sortie_rap_target(Qual.FL) - (rates.fl_blue_phase / months),
             'ip_blue_shortfall': monthly_sortie_rap_target(Qual.IP) - (rates.ip_blue_phase / months),
         }
-        current_stats.update(self.deferral_metrics_snapshot())
     
         return current_stats
     
