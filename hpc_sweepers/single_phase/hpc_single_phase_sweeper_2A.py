@@ -39,13 +39,14 @@ def get_sweep_configs():
     
     return keys, itertools.product(*values)
 
-def is_valid_config(total, exp, ip_q, mqt, flug):
+def is_valid_config(total, exp, ip_q, mqt, flug, ipug):
     """
     Fast-fail check to skip invalid math before starting simulation objects.
     Returns True if valid, False if impossible.
     """
     experienced = int(total * exp)
     wg_count = total - experienced
+    fl_count = experienced - ip_q
     
     # Rule 1: Must have enough experienced pilots for IPs
     if ip_q > experienced: return False
@@ -54,8 +55,10 @@ def is_valid_config(total, exp, ip_q, mqt, flug):
     if experienced > total: return False
     
     # Rule 3: Cannot have more students than eligible candidates
-    # (Approximation: MQT+FLUG students come from WG pool)
+    if (mqt + flug + ipug + ip_q) > total: return False
     if (mqt + flug) > wg_count: return False
+    if ipug > fl_count: return False
+
 
     return True
 
@@ -103,18 +106,18 @@ def process_single_config(args):
                 "wg_sim_rap_sf": simm["WG"]["sim_rap_shortfall"],
                 "fl_sim_rap_sf": simm["FL"]["sim_rap_shortfall"],
                 "ip_sim_rap_sf": simm["IP"]["sim_rap_shortfall"],
-                "mqt_syllabus_complete": float(u["mqt_syllabus_complete"]),
-                "flug_syllabus_complete": float(u["flug_syllabus_complete"]),
-                "ipug_syllabus_complete": float(u["ipug_syllabus_complete"]),
-                "incomplete_mqt_students": float(u["incomplete_mqt_students"]),
-                "incomplete_flug_students": float(u["incomplete_flug_students"]),
-                "incomplete_ipug_students": float(u["incomplete_ipug_students"]),
                 "deferred_mqt_sorties": float(u["deferred_mqt_sorties"]),
                 "deferred_flug_sorties": float(u["deferred_flug_sorties"]),
                 "deferred_ipug_sorties": float(u["deferred_ipug_sorties"]),
                 "deferred_mqt_sims": float(u["deferred_mqt_sims"]),
                 "deferred_flug_sims": float(u["deferred_flug_sims"]),
                 "deferred_ipug_sims": float(u["deferred_ipug_sims"]),
+                "remaining_mqt_syllabi": float(u["remaining_mqt_syllabi"]),
+                "remaining_flug_syllabi": float(u["remaining_flug_syllabi"]),
+                "remaining_ipug_syllabi": float(u["remaining_ipug_syllabi"]),
+                "remaining_mqt_syllabi_sorties_only": float(u["remaining_mqt_syllabi_sorties_only"]),
+                "remaining_flug_syllabi_sorties_only": float(u["remaining_flug_syllabi_sorties_only"]),
+                "remaining_ipug_syllabi_sorties_only": float(u["remaining_ipug_syllabi_sorties_only"]),
             })
         except ValueError:
             return None # Catch-all for edge case logic errors
@@ -152,12 +155,18 @@ def process_single_config(args):
         "wg_sim_rap_shortfall_mean": avg["wg_sim_rap_sf"],
         "fl_sim_rap_shortfall_mean": avg["fl_sim_rap_sf"],
         "ip_sim_rap_shortfall_mean": avg["ip_sim_rap_sf"],
-        "incomplete_mqt_students_mean": avg["incomplete_mqt_students"],
-        "incomplete_flug_students_mean": avg["incomplete_flug_students"],
-        "incomplete_ipug_students_mean": avg["incomplete_ipug_students"],
-        "mqt_syllabus_complete_frac": avg["mqt_syllabus_complete"],
-        "flug_syllabus_complete_frac": avg["flug_syllabus_complete"],
-        "ipug_syllabus_complete_frac": avg["ipug_syllabus_complete"],
+        "deferred_mqt_sorties_mean": avg["deferred_mqt_sorties"],
+        "deferred_flug_sorties_mean": avg["deferred_flug_sorties"],
+        "deferred_ipug_sorties_mean": avg["deferred_ipug_sorties"],
+        "deferred_mqt_sims_mean": avg["deferred_mqt_sims"],
+        "deferred_flug_sims_mean": avg["deferred_flug_sims"],
+        "deferred_ipug_sims_mean": avg["deferred_ipug_sims"],
+        "remaining_mqt_syllabi_mean": avg["remaining_mqt_syllabi"],
+        "remaining_flug_syllabi_mean": avg["remaining_flug_syllabi"],
+        "remaining_ipug_syllabi_mean": avg["remaining_ipug_syllabi"],
+        "remaining_mqt_syllabi_sorties_only_mean": avg["remaining_mqt_syllabi_sorties_only"],
+        "remaining_flug_syllabi_sorties_only_mean": avg["remaining_flug_syllabi_sorties_only"],
+        "remaining_ipug_syllabi_sorties_only_mean": avg["remaining_ipug_syllabi_sorties_only"],
     }
 
 def run_parallel_sweep():
@@ -190,7 +199,7 @@ def run_parallel_sweep():
     if rows_to_skip > 0:
         print(f"⏩ Fast-forwarding: Skipping {rows_to_skip:,} VALID configurations...")
         for c in param_generator:
-            if is_valid_config(c[7], c[2], c[1], c[4], c[5]):
+            if is_valid_config(total=c[7], exp=c[2], ip_q=c[1], mqt=c[4], flug=c[5], ipug=c[6]):
                 skipped_count += 1
             if skipped_count >= rows_to_skip:
                 break
@@ -200,7 +209,7 @@ def run_parallel_sweep():
     print("🎯 Pre-filtering valid configurations...")
     valid_configs = (
         c for c in param_generator 
-        if is_valid_config(c[7], c[2], c[1], c[4], c[5])
+        if is_valid_config(total=c[7], exp=c[2], ip_q=c[1], mqt=c[4], flug=c[5], ipug=c[6])
         )
 
     print(f"🚀 Launching Parallel Sweep on {os.cpu_count()} cores...")
