@@ -200,60 +200,67 @@ class CAFSimulation:
             target_sq.pilots.append(new_pilot)
             target_sq.update_stats()
 
+    def run_phase(self, phase_num: int, year: int):
+
+        print(f"Running phase {phase_num} of {year}")
+
+        self.phase_intake = self.annual_intake // 3
+        remainder = self.annual_intake % 3
+        current_batch = self.phase_intake + (remainder if phase_num == 3 else 0)
+        self.add_new_bcourse_graduates(year, current_batch, self.round_robin) 
+
+
+        for sq in self.squadrons:
+            sq.manning_pct = self.max_manning
+            use_upgrade_quotas = self.use_upgrade_quotas
+            flug_quota = self.sq_phase_flug_intake
+            ipug_quota = self.sq_phase_ipug_intake
+            sq.new_phase_upgrades(
+                flug_window_start=self.flug_window_start, ipug_window_start=self.ipug_window_start, 
+                use_upgrade_quotas=use_upgrade_quotas, flug_quota=flug_quota, ipug_quota=ipug_quota)
+            sq.update_stats()            
+
+        preds = self.predict_rates_fast()
+
+        for i, sq in enumerate(self.squadrons):
+            row = preds[i]
+            mqt_mo = self._resolve_mqt_monthly(sq)
+            rates = self._phase_rates_from_brain_row(mqt_mo, row, sq.phase_length_days)
+            mqt_baseline = {
+                id(p): p.sorties_flown
+                for p in sq.pilots
+                if p.upgrade == Upgrade.MQT and p.active
+            }
+
+            sq.apply_phase_aging(rates, self.brain_includes_sim_outputs)
+
+            if mqt_baseline:
+                months = sq.phase_length_months
+                if months > 0:
+                    deltas = [
+                        p.sorties_flown - mqt_baseline[id(p)]
+                        for p in sq.pilots
+                        if p.upgrade == Upgrade.MQT and id(p) in mqt_baseline
+                    ]
+                    if deltas:
+                        sq.observed_mqt_monthly = sum(deltas) / len(deltas) / months
+
+            current_stats = sq.store_stats(year, phase_num, rates)
+
+            deferrals = self._deferrals_from_brain_row(row)
+            self.process_end_of_phase(sq, year, phase_num, self.retention_rate, current_stats, deferrals) 
+            
         
     def run_simulation(self, years_to_run: int, squadron_configs: List[SquadronConfig], ute: float = 10.0):
-        """
-        squadron_configs: list -> [Config(id=1, paa=12...), Config(id=2, paa=24...)]
-        """
         self.history = []
         self.squadrons = squadron_configs
 
         for sq in self.squadrons:
             sq.ute = ute # With current implementation all squadrons must have same UTE
-            sq.manning_pct = self.max_manning
 
         for year in range(self.current_year, self.current_year + years_to_run):
-            remainder = self.annual_intake % 3
-
             for phase_num in range(1, 4): 
-                print(f"Running phase {phase_num} of {year}")
-                current_batch = self.phase_intake + (remainder if phase_num == 3 else 0)
-                self.add_new_bcourse_graduates(year, current_batch, self.round_robin) 
-
-
-                for sq in self.squadrons:
-                    sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
-                    sq.update_stats()            
-
-                preds = self.predict_rates_fast()
-
-                for i, sq in enumerate(self.squadrons):
-                    row = preds[i]
-                    mqt_mo = self._resolve_mqt_monthly(sq)
-                    rates = self._phase_rates_from_brain_row(mqt_mo, row, sq.phase_length_days)
-                    mqt_baseline = {
-                        id(p): p.sorties_flown
-                        for p in sq.pilots
-                        if p.upgrade == Upgrade.MQT and p.active
-                    }
-
-                    sq.apply_phase_aging(rates, self.brain_includes_sim_outputs)
-
-                    if mqt_baseline:
-                        months = sq.phase_length_months
-                        if months > 0:
-                            deltas = [
-                                p.sorties_flown - mqt_baseline[id(p)]
-                                for p in sq.pilots
-                                if p.upgrade == Upgrade.MQT and id(p) in mqt_baseline
-                            ]
-                            if deltas:
-                                sq.observed_mqt_monthly = sum(deltas) / len(deltas) / months
-
-                    current_stats = sq.store_stats(year, phase_num, rates)
-
-                    deferrals = self._deferrals_from_brain_row(row)
-                    self.process_end_of_phase(sq, year, phase_num, self.retention_rate, current_stats, deferrals) 
+                self.run_phase(phase_num, year)
             
         return pd.DataFrame(self.history)
     
@@ -396,17 +403,12 @@ class CAFSimulation:
             "final_staff_pilots": round(total_staff_pilots)
         }
 
-    def calc_phase(start_year, completed_phases):
-        # start year is 2026, 3 completed phases = 2027, 0
-        new_year = start_year + completed_phases // 3
-        new_phase = completed_phases % 3
-
-        return new_year, new_phase
-    
     # Feature column order must match training / predict_rates (MLP pipeline).
     _PREDICT_FEATURE_COLS = [
         'paa', 'ute', 'exp_ratio', 'ip_ratio', 'fl_congestion',
         'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio',
+        'remaining_mqt_syllabi_mean', 'remaining_flug_syllabi_mean', 'remaining_ipug_syllabi_mean',
+        'remaining_mqt_syllabi_sorties_only_mean', 'remaining_flug_syllabi_sorties_only_mean', 'remaining_ipug_syllabi_sorties_only_mean',
     ]
 
     def predict_rates_fast(self) -> np.ndarray:
@@ -458,51 +460,3 @@ class CAFSimulation:
         X = pd.DataFrame(batch_records, columns=self._PREDICT_FEATURE_COLS)
         X = X.replace([np.inf, -np.inf], 0).fillna(0)
         return self.brain.predict(X)
-
-    def run_phase(self):
-        phase_intake = self.annual_intake // 3
-        remainder = (self.annual_intake % 3) if self.current_phase == 3 else 0 
-        current_batch = phase_intake + remainder
-
-        self.add_new_bcourse_graduates(self.current_year, current_batch, self.round_robin) 
-
-        preds = self.predict_rates_fast()
-
-        for i, sq in enumerate(self.squadrons):
-            sq.manning_pct = self.max_manning
-
-            sq.new_phase_upgrades(flug_window_start=self.flug_window_start, 
-                                  ipug_window_start=self.ipug_window_start,
-                                  use_upgrade_quotas=self.use_upgrade_quotas,
-                                  flug_quota=self.sq_phase_flug_intake,
-                                  ipug_quota=self.sq_phase_ipug_intake)
-
-            row = preds[i]
-            mqt_mo = self._resolve_mqt_monthly(sq)
-            rates = self._phase_rates_from_brain_row(mqt_mo, row, sq.phase_length_days)
-            mqt_baseline = {
-                id(p): p.sorties_flown
-                for p in sq.pilots
-                if p.upgrade == Upgrade.MQT and p.active
-            }
-
-            sq.apply_phase_aging(rates, self.brain_includes_sim_outputs)
-
-            if mqt_baseline:
-                months = sq.phase_length_months
-                if months > 0:
-                    deltas = [
-                        p.sorties_flown - mqt_baseline[id(p)]
-                        for p in sq.pilots
-                        if p.upgrade == Upgrade.MQT and id(p) in mqt_baseline
-                    ]
-                    if deltas:
-                        sq.observed_mqt_monthly = sum(deltas) / len(deltas) / months
-
-            current_stats = sq.store_stats(self.current_year, self.current_phase, rates)
-            self.process_end_of_phase(sq, self.current_year, self.current_phase, self.retention_rate, current_stats) 
-            
-        self.current_phase += 1
-        if self.current_phase > 3:
-            self.current_phase = 1
-            self.current_year += 1
