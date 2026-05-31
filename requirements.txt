@@ -1,8 +1,24 @@
+# Canonical stack for HPC, local PC, and Streamlit (Python 3.11).
+# Train/load MLP brain and PPO checkpoints in this same environment.
+
+# Core numerics & ML (sortie brain)
 pandas==2.2.2
 numpy==2.4.4
-plotly==6.5.0
-streamlit==1.52.2
-joblib==1.4.0
-altair<5
-streamlit>=1.30.0
 scikit-learn==1.8.0
+joblib==1.4.0
+
+# Streamlit apps (manning_app, app, rl_app)
+streamlit==1.52.2
+plotly==6.5.0
+altair>=5.0.0,<6
+
+# RL (manning_gym, train_rl_agent*, evaluate_manning_agent)
+gymnasium>=0.29.1,<1.0
+stable-baselines3>=2.4.0,<3.0
+torch>=2.2.0
+
+# HPC parquet / repartition (sweepers, do_repartition, verify_multi_brain)
+pyarrow>=15.0.0
+
+# Optional: only needed for tools/do_repartition.py on HPC
+# dask[distributed]>=2024.1.0
