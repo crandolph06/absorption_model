@@ -347,17 +347,25 @@ class SquadronConfig:
             "deferred_ipug_sims": u["deferred_ipug_sims"],
         }
 
-    def graduate_current_upgrades(self):
+    def graduate_current_upgrades(self, deferrals: Tuple[int, int, int, int, int, int], sorties_only: bool = True):
         """Graduate upgrade students with no deferred syllabus lines."""
         graduated_count = 0
 
-        for pilot in self.pilots:
-            if pilot.upgrade == Upgrade.NONE:
-                continue
-            if pilot.incomplete_syllabus_items:
-                continue
-            pilot.graduate()
-            graduated_count += 1
+        if deferrals == (0, 0, 0, 0, 0, 0):
+            for pilot in self.pilots:
+                if pilot.upgrade == Upgrade.NONE:
+                    continue
+                if pilot.incomplete_syllabus_items:
+                    continue
+                pilot.graduate()
+                graduated_count += 1
+        else:
+            if sorties_only:
+                deferrals = deferrals[3:]
+            else:
+                deferrals = deferrals[:3]
+            mqt_deferrals, flug_deferrals, ipug_deferrals = deferrals
+            
 
         self.update_stats()
         still_upgrade = self.mqt_students + self.flug_students + self.ipug_students
@@ -409,6 +417,38 @@ class SquadronConfig:
 
         self.update_stats()
 
+    def detect_deferrals(self, sorties_only: bool = True):
+        additional_mqts = 0
+        additional_flugs = 0
+        additional_ipugs = 0
+
+        for p in self.pilots:
+            if p.upgrade == Upgrade.MQT and p.incomplete_syllabus_items:
+                mqt_sorties = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE)
+                mqt_sims = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM)
+                if sorties_only:
+                    additional_mqts += (mqt_sorties/9) # Hard coded from src.syllabi.MQT_SYLLABUS
+                else:
+                    additional_mqts += (mqt_sorties/9) + (mqt_sims/7) # Hard coded from src.syllabi.MQT_SYLLABUS
+
+            elif p.upgrade == Upgrade.FLUG and p.incomplete_syllabus_items:
+                flug_sorties = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE)
+                flug_sims = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM)
+                if sorties_only:
+                    additional_flugs += (flug_sorties/9) # Hard coded from src.syllabi.FLUG_SYLLABUS
+                else:
+                    additional_flugs += (flug_sorties/9) + (flug_sims/7) # Hard coded from src.syllabi.FLUG_SYLLABUS
+
+            elif p.upgrade == Upgrade.IPUG and p.incomplete_syllabus_items:
+                ipug_sorties = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE)
+                ipug_sims = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM)
+                if sorties_only:
+                    additional_ipugs += (ipug_sorties/9) # Hard coded from src.syllabi.IPUG_SYLLABUS
+                else:
+                    additional_ipugs += (ipug_sorties/9) + (ipug_sims/7) # Hard coded from src.syllabi.IPUG_SYLLABUS
+
+        return additional_mqts, additional_flugs, additional_ipugs
+
     def _phase_sim_rate_for_pilot(self, p: Pilot, rates: AgingRate) -> float:
         """Phase sim rate bucket mirroring ``apply_phase_aging`` sortie branch."""
         if p.qual == Qual.IP:
@@ -454,6 +494,9 @@ class SquadronConfig:
         phase_length_months = self.phase_length_months
 
         for p in self.pilots:
+            if not p.active:
+                continue
+
             if p.qual == Qual.IP:
                 p_rate = rates.ip_phase
             elif p.qual == Qual.FL:
@@ -464,9 +507,6 @@ class SquadronConfig:
                 p_rate = rates.wg_phase
 
             p.age_one_phase_with_rates(p_rate, self.avg_sortie_dur, phase_length_months)
-
-            if not p.active:
-                continue
 
             if brain_includes_sim_outputs:
                 sim_rate = self._phase_sim_rate_for_pilot(p, rates)
@@ -486,7 +526,6 @@ class SquadronConfig:
                     continue
                 while int(p.sims_flown) - int(p.sims_at_upgrade_start) < need_sim:
                     p.add_sim(self.avg_sortie_dur)
-
 
     def store_stats(self, year: int, phase_num: int, rates: AgingRate):
         months = self.phase_length_months
