@@ -223,6 +223,7 @@ class CAFSimulation:
 
                 for sq in self.squadrons:
                     sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
+                    sq.update_stats()            
 
                 preds = self.predict_rates_fast()
 
@@ -252,7 +253,7 @@ class CAFSimulation:
                     current_stats = sq.store_stats(year, phase_num, rates)
 
                     deferrals = self._deferrals_from_brain_row(row)
-                    self.process_end_of_phase(sq, year, phase_num, self.retention_rate, current_stats) 
+                    self.process_end_of_phase(sq, year, phase_num, self.retention_rate, current_stats, deferrals) 
             
         return pd.DataFrame(self.history)
     
@@ -264,7 +265,7 @@ class CAFSimulation:
         separated_count = 0
         retained_count = 0
 
-        mqt_remainder, flug_remainder, ipug_remainder = sq.graduate_current_upgrades(deferrals, sorties_only=True)
+        sq.graduate_current_upgrades(deferrals, sorties_only=True)
 
         sq.send_to_staff(priority_mode=self.staff_priority)
 
@@ -418,9 +419,9 @@ class CAFSimulation:
             # Training uses column name total_pilots but value is line pilot count (cockpit strength).
             total_pilots = sq.line_pilots
             exp_ratio = sq.experience_ratio
-            mqt_qty = sq.mqt_students 
-            flug_qty = sq.flug_students 
-            ipug_qty = sq.ipug_students 
+            mqt_qty = sq.mqt_students + sq.mqt_carry
+            flug_qty = sq.flug_students + sq.flug_carry
+            ipug_qty = sq.ipug_students + sq.ipug_carry
             wg_qty = sq.wg_qty
             fl_qty = sq.fl_qty
             ip_qty = sq.ip_qty

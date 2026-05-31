@@ -51,12 +51,12 @@ def verify_model():
         'paa', 'ute',
         'exp_ratio', 'ip_ratio', 'fl_congestion',
         'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio',
-        'deferred_mqt_syllabi', 'deferred_flug_syllabi', 'deferred_ipug_syllabi',
-        'deferred_mqt_syllabi_sorties_only', 'deferred_flug_syllabi_sorties_only', 'deferred_ipug_syllabi_sorties_only',
     ]
     
     targets = ['wg_monthly', 'fl_monthly', 'ip_monthly', 
-               'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly']
+               'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly',
+               'remaining_mqt_syllabi_mean', 'remaining_flug_syllabi_mean', 'remaining_ipug_syllabi_mean',
+               'remaining_mqt_syllabi_sorties_only_mean', 'remaining_flug_syllabi_sorties_only_mean', 'remaining_ipug_syllabi_sorties_only_mean',]
     
     X = df[features].fillna(0)
     
