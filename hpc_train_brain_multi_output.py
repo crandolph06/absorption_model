@@ -55,15 +55,6 @@ def train_hpc_multi_brain():
     df['ip_ratio'] = df['ip_qty'] / df['total_pilots'].replace(0, 1)
     df['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
 
-    if "incomplete_mqt_students_mean" in df.columns:
-        df["deferred_mqt_students"] = df["incomplete_mqt_students_mean"]
-        df["deferred_flug_students"] = df["incomplete_flug_students_mean"]
-        df["deferred_ipug_students"] = df["incomplete_ipug_students_mean"]
-    else:
-        df["deferred_mqt_students"] = df["deferred_mqt_lines_mean"] / SORTIE_SLOTS_MQT
-        df["deferred_flug_students"] = df["deferred_flug_lines_mean"] / SORTIE_SLOTS_FLUG
-        df["deferred_ipug_students"] = df["deferred_ipug_lines_mean"] / SORTIE_SLOTS_IPUG
-
     df = df.replace([np.inf, -np.inf], 0)
 
     features = [
