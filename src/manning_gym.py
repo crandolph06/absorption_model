@@ -17,6 +17,9 @@ class ManningEnv(gym.Env):
         self.reward_mode = reward_mode
         self.initial_intake = sim_engine.annual_intake
         self.initial_retention = sim_engine.retention_rate
+        self.initial_max_manning = sim_engine.max_manning
+        self.initial_flug_quota = sim_engine.sq_phase_flug_intake
+        self.initial_ipug_quota = sim_engine.sq_phase_ipug_intake
 
         if run_mode == "ideal":  
             # [B-Course, FLUG, IPUG, max manning, UTE, retention, PAA] -> increase, maintain, decrease for each
@@ -119,6 +122,9 @@ class ManningEnv(gym.Env):
         self.sim.annual_intake = self.initial_intake
         self.sim.retention_rate = self.initial_retention
         self.sim.phase_intake = self.initial_intake // 3
+        self.sim.max_manning = self.initial_max_manning
+        self.sim.sq_phase_flug_intake = self.initial_flug_quota
+        self.sim.sq_phase_ipug_intake = self.initial_ipug_quota
 
         self.sim.squadrons = get_initial_squadrons(self.sim.current_year)
 
@@ -128,7 +134,9 @@ class ManningEnv(gym.Env):
     def step(self, action):
             self._apply_current_logic(action, self.run_mode)
 
-            self.sim.run_phase(self.sim.current_phase, self.sim.current_year)
+            simulated_year = self.sim.current_year
+            simulated_phase = self.sim.current_phase
+            self.sim.run_phase(simulated_phase, simulated_year)
             observation = self._get_obs()
 
             reward = self._calculate_reward()
@@ -137,7 +145,11 @@ class ManningEnv(gym.Env):
             terminated = self.sim.current_year >= 2046 
             truncated = False
             
-            return observation, reward, terminated, truncated, {}
+            info = {
+                "simulated_year": simulated_year,
+                "simulated_phase": simulated_phase,
+            }
+            return observation, reward, terminated, truncated, info
     
     def _calculate_reward(self): 
         current_total = self.sim.total_active_pilot_count

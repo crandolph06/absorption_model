@@ -140,10 +140,10 @@ def run_evaluation(run_mode="pragmatic", reward_mode="readiness_first"):
         avg_ute = sum(sq.ute for sq in sim_engine.squadrons) / max(len(sim_engine.squadrons), 1) if sim_engine.squadrons else 0
         total_paa = sum(sq.paa for sq in sim_engine.squadrons) if sim_engine.squadrons else 0
 
-        # Build the phase record (Added Staff Pilots, FLUG, IPUG, and PAA)
+        # Build the phase record (year/phase = CAF tick simulated this step, pre-advance_clock)
         record = {
-            "Year": sim_engine.current_year,
-            "Phase": sim_engine.current_phase,
+            "Year": info["simulated_year"],
+            "Phase": info["simulated_phase"],
             "Reward": reward,
             "Total Pilots": sim_engine.total_active_pilot_count,
             "Total Staff Pilots": sim_engine.total_staff_pilot_count,
