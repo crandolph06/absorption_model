@@ -348,31 +348,57 @@ class SquadronConfig:
         }
 
     def graduate_current_upgrades(self, deferrals: Tuple[int, int, int, int, int, int], sorties_only: bool = True):
-        """Graduate upgrade students with no deferred syllabus lines."""
+        """Graduate upgrade students with no deferred syllabus lines. 
+        Returns tuple of MQT remainder, FLUG remainder, IPUG remainder."""
+        
         graduated_count = 0
 
-        if deferrals == (0, 0, 0, 0, 0, 0):
+        if all(abs(d) < 1e-3 for d in deferrals):
             for pilot in self.pilots:
                 if pilot.upgrade != Upgrade.NONE:
                     pilot.graduate()
                     graduated_count += 1
+            output = (0, 0, 0) # MQT remainder, FLUG remainder, IPUG remainder
+
         else:
             if sorties_only:
                 deferrals = deferrals[3:]
             else:
                 deferrals = deferrals[:3]
             mqt_deferrals, flug_deferrals, ipug_deferrals = deferrals
+
+            mqt_whole = int(mqt_deferrals)
+            flug_whole = int(flug_deferrals)
+            ipug_whole = int(ipug_deferrals)
+
+            mqt_remainder = mqt_deferrals - mqt_whole
+            flug_remainder = flug_deferrals - flug_whole
+            ipug_remainder = ipug_deferrals - ipug_whole
+
             mqt_pilots = [p for p in self.pilots if p.upgrade == Upgrade.MQT]
             flug_pilots = [p for p in self.pilots if p.upgrade == Upgrade.FLUG]
             ipug_pilots = [p for p in self.pilots if p.upgrade == Upgrade.IPUG]
 
-            mqt_pilots.sort(key=lambda x: x.sorties_flown, reverse=False)
-            flug_pilots.sort(key=lambda x: x.sorties_flown, reverse=False)
-            ipug_pilots.sort(key=lambda x: x.sorties_flown, reverse=False)
+            mqt_pilots.sort(
+                key=lambda x: (x.sorties_flown - x.sorties_at_upgrade_start, 
+                x.sorties_flown), reverse=True)
+            flug_pilots.sort(
+                key=lambda x: (x.sorties_flown - x.sorties_at_upgrade_start, 
+                x.sorties_flown), reverse=True)
+            ipug_pilots.sort( 
+                key=lambda x: (x.sorties_flown - x.sorties_at_upgrade_start, 
+                x.sorties_flown), reverse=True)
 
-            mqt_limit = len(mqt_pilots) - mqt_deferrals
-            flug_limit = len(flug_pilots) - flug_deferrals
-            ipug_limit = len(ipug_pilots) - ipug_deferrals
+            mqt_limit = max(0, len(mqt_pilots) - mqt_whole)
+            flug_limit = max(0, len(flug_pilots) - flug_whole)
+            ipug_limit = max(0, len(ipug_pilots) - ipug_whole)
+
+            if len(mqt_pilots) < mqt_deferrals:
+                print(f'Error -- more MQT deferrals than MQT pilots. Check upgrade selection or valid config logic.')
+            if len(flug_pilots) < flug_deferrals:
+                print(f'Error -- more FLUG deferrals than FLUG pilots. Check upgrade selection or valid config logic.')
+            if len(ipug_pilots) < ipug_deferrals:
+                print(f'Error -- more IPUG deferrals than IPUG pilots. Check upgrade selection or valid config logic.')
 
             for i in range(mqt_limit):
                 mqt_pilots[i].graduate()
@@ -383,6 +409,8 @@ class SquadronConfig:
             for i in range(ipug_limit):
                 ipug_pilots[i].graduate()
                 graduated_count += 1
+                
+            output = (mqt_remainder, flug_remainder, ipug_remainder)
 
         self.update_stats()
         still_upgrade = self.mqt_students + self.flug_students + self.ipug_students
@@ -392,6 +420,7 @@ class SquadronConfig:
                 f"{still_upgrade} still in upgrade (deferred syllabus lines remain) "
                 f"[MQT={self.mqt_students}, FLUG={self.flug_students}, IPUG={self.ipug_students}]."
             )
+        return output
 
     def new_phase_upgrades(self, flug_window_start:int, ipug_window_start:int,
                            use_upgrade_quotas: bool = False, flug_quota: int = 999,
