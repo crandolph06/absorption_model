@@ -151,6 +151,13 @@ class CAFSimulation:
         self.current_year = 2026
         self.current_phase = 1
 
+    def advance_clock(self):
+        """Advance one CAF phase (RL gym calls after each ``run_phase``)."""
+        self.current_phase += 1
+        if self.current_phase > 3:
+            self.current_phase = 1
+            self.current_year += 1
+
     def _resolve_mqt_monthly(self, sq: SquadronConfig) -> float:
         """
         Monthly MQT sortie rate for ``AgingRate`` when blending with the sortie brain.
