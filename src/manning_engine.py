@@ -1,5 +1,5 @@
 import pandas as pd
-from typing import List
+from typing import List, Optional
 from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, PriorityMode, AgingRate
 import os
 import numpy as np
@@ -65,6 +65,16 @@ class CAFSimulation:
                 mqt_mo, row[3], row[4], row[5],
             )
         return monthly.monthly_to_phase(phase_length_days)
+
+    def _deferrals_from_brain_row(self, row: np.ndarray) -> Tuple[int, int, int, int, int, int]:
+        return (
+            row[6], # Remaining MQT full syllabi
+            row[7], # Remaining FLUG full syllabi
+            row[8], # Remaining IPUG full syllabi
+            row[9], # Remaining MQT full syllabi sorties only
+            row[10], # Remaining FLUG full syllabi sorties only
+            row[11], # Remaining IPUG full syllabi sorties only
+        )
 
     @property
     def all_pilots(self):
@@ -213,15 +223,14 @@ class CAFSimulation:
 
                 for sq in self.squadrons:
                     sq.new_phase_upgrades(self.flug_window_start, self.ipug_window_start)
+                    additional_mqts, additional_flugs, additional_ipugs = sq.detect_deferrals(sorties_only=True)
 
-                preds = self.predict_rates_fast()
+                preds = self.predict_rates_fast(additional_mqts=additional_mqts, additional_flugs=additional_flugs, additional_ipugs=additional_ipugs)
 
                 for i, sq in enumerate(self.squadrons):
                     row = preds[i]
                     mqt_mo = self._resolve_mqt_monthly(sq)
                     rates = self._phase_rates_from_brain_row(mqt_mo, row, sq.phase_length_days)
-                    for p in sq.pilots:
-                        p.sorties_at_phase_start = p.sorties_flown
                     mqt_baseline = {
                         id(p): p.sorties_flown
                         for p in sq.pilots
@@ -243,19 +252,19 @@ class CAFSimulation:
 
                     current_stats = sq.store_stats(year, phase_num, rates)
 
+                    deferrals = self._deferrals_from_brain_row(row)
                     self.process_end_of_phase(sq, year, phase_num, self.retention_rate, current_stats) 
             
         return pd.DataFrame(self.history)
     
 
-    def process_end_of_phase(self, sq: SquadronConfig, year: int, phase_num: int, retention_rate, current_stats: dict):
+    def process_end_of_phase(self, sq: SquadronConfig, year: int, phase_num: int, retention_rate, current_stats: dict, deferrals: Tuple[int, int, int, int, int, int]):
         
         staff_ips = 0
         staff_fls = 0
         separated_count = 0
         retained_count = 0
 
-        sq.update_stats()
         sq.graduate_current_upgrades()
 
         sq.send_to_staff(priority_mode=self.staff_priority)
@@ -400,7 +409,7 @@ class CAFSimulation:
         'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio',
     ]
 
-    def predict_rates_fast(self) -> np.ndarray:
+    def predict_rates_fast(self, additional_mqts: Optional[int] = 0, additional_flugs: Optional[int] = 0, additional_ipugs: Optional[int] = 0) -> np.ndarray:
         """One DataFrame build per call; same feature math as legacy predict_rates."""
         batch_records = []
 
@@ -410,9 +419,9 @@ class CAFSimulation:
             # Training uses column name total_pilots but value is line pilot count (cockpit strength).
             total_pilots = sq.line_pilots
             exp_ratio = sq.experience_ratio
-            mqt_qty = sq.mqt_students
-            flug_qty = sq.flug_students
-            ipug_qty = sq.ipug_students
+            mqt_qty = sq.mqt_students + additional_mqts
+            flug_qty = sq.flug_students + additional_flugs
+            ipug_qty = sq.ipug_students + additional_ipugs
             wg_qty = sq.wg_qty
             fl_qty = sq.fl_qty
             ip_qty = sq.ip_qty
@@ -471,8 +480,6 @@ class CAFSimulation:
             row = preds[i]
             mqt_mo = self._resolve_mqt_monthly(sq)
             rates = self._phase_rates_from_brain_row(mqt_mo, row, sq.phase_length_days)
-            for p in sq.pilots:
-                p.sorties_at_phase_start = p.sorties_flown
             mqt_baseline = {
                 id(p): p.sorties_flown
                 for p in sq.pilots
