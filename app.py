@@ -345,6 +345,134 @@ with col_main:
     fig_heat.update_layout(xaxis_title="Experience Ratio", yaxis_title="UTE", height=500)
     st.plotly_chart(fig_heat, width='stretch')
 
+    # --- CHART 4: INCOMPLETE SYLLABI ---
+    st.write("---")
+    st.subheader("📉 Incomplete Syllabi (Phase Snapshot)")
+    st.caption(
+        "Y-axis is syllabus-normalized count (not %). "
+        "1.0 ≈ one full syllabus incomplete; 0.33 ≈ one-third of a syllabus; "
+        "5.0 ≈ five students' worth of incomplete syllabus (aggregate across the cohort)."
+    )
+    col_syll_1, col_syll_2 = st.columns([2, 1])
+    with col_syll_1:
+        x_var_syll = st.selectbox("X-Axis Variable", x_options, index=0, key="chart4_x")
+    with col_syll_2:
+        st.write("")
+        sorties_only_syll = st.toggle(
+            "Sorties only",
+            value=True,
+            key="chart4_sorties_only",
+            help="On: sorties-only remainder (default). Off: sorties + sims (total syllabus).",
+        )
+
+    x_vals_syll = sweep_ranges[x_var_syll]
+    syll_sweep_min = float(np.min(x_vals_syll))
+    syll_sweep_max = float(np.max(x_vals_syll))
+    syll_default_min, syll_default_max = input_axis_bounds.get(
+        x_var_syll, (syll_sweep_min, syll_sweep_max)
+    )
+    syll_default_min = max(syll_sweep_min, float(syll_default_min))
+    syll_default_max = min(syll_sweep_max, float(syll_default_max))
+
+    if syll_default_min > syll_default_max:
+        syll_default_min, syll_default_max = syll_sweep_min, syll_sweep_max
+
+    if np.issubdtype(x_vals_syll.dtype, np.integer):
+        x_syll_min, x_syll_max = st.slider(
+            "Displayed X-Axis Range",
+            min_value=int(syll_sweep_min),
+            max_value=int(syll_sweep_max),
+            value=(int(syll_default_min), int(syll_default_max)),
+            step=1,
+            key=f"chart4_x_range_{x_var_syll}",
+        )
+    else:
+        syll_step = 0.5 if x_var_syll == "ute" else 0.02
+        x_syll_min, x_syll_max = st.slider(
+            "Displayed X-Axis Range",
+            min_value=syll_sweep_min,
+            max_value=syll_sweep_max,
+            value=(syll_default_min, syll_default_max),
+            step=syll_step,
+            key=f"chart4_x_range_{x_var_syll}",
+        )
+
+    df_syll = generate_1d_sweep(x_var_syll)
+    df_syll = df_syll[
+        (df_syll[x_var_syll] >= x_syll_min) & (df_syll[x_var_syll] <= x_syll_max)
+    ]
+
+    # 12-output brain: indices 6–11 are remaining-syllabus targets (see hpc_train_brain_multi_output.py)
+    _predict_features = [
+        "paa", "ute", "exp_ratio", "ip_ratio", "fl_congestion",
+        "wg_crowding", "sorties_avail", "pilot_to_sortie", "ip_to_stud_ratio",
+    ]
+    _remaining_total = [
+        "remaining_mqt_syllabi_mean",
+        "remaining_flug_syllabi_mean",
+        "remaining_ipug_syllabi_mean",
+    ]
+    _remaining_sorties = [
+        "remaining_mqt_syllabi_sorties_only_mean",
+        "remaining_flug_syllabi_sorties_only_mean",
+        "remaining_ipug_syllabi_sorties_only_mean",
+    ]
+    _syll_preds = brain.predict(df_syll[_predict_features].fillna(0))
+    for i, col in enumerate(_remaining_total):
+        df_syll[col] = _syll_preds[:, 6 + i]
+    for i, col in enumerate(_remaining_sorties):
+        df_syll[col] = _syll_preds[:, 9 + i]
+
+    if sorties_only_syll:
+        syll_series = [
+            ("remaining_mqt_syllabi_sorties_only_mean", "MQT"),
+            ("remaining_flug_syllabi_sorties_only_mean", "FLUG"),
+            ("remaining_ipug_syllabi_sorties_only_mean", "IPUG"),
+        ]
+        syll_mode_label = "Sorties only"
+    else:
+        syll_series = [
+            ("remaining_mqt_syllabi_mean", "MQT"),
+            ("remaining_flug_syllabi_mean", "FLUG"),
+            ("remaining_ipug_syllabi_mean", "IPUG"),
+        ]
+        syll_mode_label = "Total syllabus (sorties + sims)"
+
+    fig_syll = go.Figure()
+    colors_upgrade = {
+        "MQT": "#f59e0b",
+        "FLUG": "#ec4899",
+        "IPUG": "#6366f1",
+    }
+
+    for col, label in syll_series:
+        fig_syll.add_trace(
+            go.Scatter(
+                x=df_syll[x_var_syll],
+                y=df_syll[col],
+                name=label,
+                line=dict(color=colors_upgrade[label], width=3),
+                mode="lines",
+                hovertemplate=(
+                    f"<b>%{{x}}</b><br>{label}: %{{y:.2f}} syllabi<extra></extra>"
+                ),
+            )
+        )
+
+    fig_syll.update_layout(
+        xaxis_title=x_var_syll.upper(),
+        yaxis_title=f"Incomplete syllabi ({syll_mode_label})",
+        yaxis_tickformat=".2f",
+        hovermode="x unified",
+        margin=dict(l=20, r=20, t=30, b=20),
+        height=350,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    fig_syll.update_xaxes(range=[x_syll_min, x_syll_max], autorange=False)
+    fig_syll.update_yaxes(autorange=True, rangemode="tozero")
+
+    st.plotly_chart(fig_syll, width="stretch")
+
 # ==============================================================================
 # 6. SUMMARY SIDEBAR (Single Point Prediction)
 # ==============================================================================
