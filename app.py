@@ -417,12 +417,18 @@ with col_main:
         "remaining_flug_syllabi_sorties_only_mean",
         "remaining_ipug_syllabi_sorties_only_mean",
     ]
+    _SYLLABI_NEGLIGIBLE = 0.10  # values below this (after clipping negatives) → 0
+
+    def _clean_syllabus_preds(raw: np.ndarray) -> np.ndarray:
+        """Non-negative; treat |value| < threshold as zero (whole column at once)."""
+        vals = np.maximum(raw, 0.0)
+        return np.where(vals < _SYLLABI_NEGLIGIBLE, 0.0, vals)
+
     _syll_preds = brain.predict(df_syll[_predict_features].fillna(0))
     for i, col in enumerate(_remaining_total):
-        df_syll[col] = _syll_preds[:, 6 + i]
+        df_syll[col] = _clean_syllabus_preds(_syll_preds[:, 6 + i])
     for i, col in enumerate(_remaining_sorties):
-        df_syll[col] = _syll_preds[:, 9 + i]
-
+        df_syll[col] = _clean_syllabus_preds(_syll_preds[:, 9 + i])
     if sorties_only_syll:
         syll_series = [
             ("remaining_mqt_syllabi_sorties_only_mean", "MQT"),
