@@ -10,10 +10,10 @@
 #SBATCH --time=04:00:00
 #
 ## Optional Slurm Directives --------------------------------------
-#SBATCH --job-name=train_brain
+#SBATCH --job-name=train_rl
 #SBATCH --export=ALL
-#SBATCH --output=logs/sweep_%j.out
-#SBATCH --error=logs/sweep_%j.err
+#SBATCH --output=logs/train_rl_%j.out
+#SBATCH --error=logs/train_rl_%j.err
 #
 ## Execution Block ----------------------------------------------
 # Environment Setup
