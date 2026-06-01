@@ -294,8 +294,8 @@ class CAFSimulation:
             if p.current_assignment == Assignment.STAFF:
                 if p.qual == Qual.IP: staff_ips += 1
                 elif p.qual == Qual.FL: staff_fls += 1 
-                if p.upgrade != Upgrade.NONE:
-                    print(f"Pilot is moving to staff in an upgrade status.")
+                # if p.upgrade != Upgrade.NONE:
+                #     print(f"Pilot is moving to staff in an upgrade status.")
 
         current_stats['staff_ips'] = staff_ips
         current_stats['staff_fls'] = staff_fls
