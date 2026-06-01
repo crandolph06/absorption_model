@@ -392,12 +392,12 @@ class SquadronConfig:
                 
         self.update_stats()
         still_upgrade = self.mqt_students + self.flug_students + self.ipug_students
-        if still_upgrade:
-            print(
-                f"Squadron {self.id} graduation: {graduated_count} pilot(s) graduated; "
-                f"{still_upgrade} still in upgrade (deferred syllabus lines remain) "
-                f"[MQT={self.mqt_students}, FLUG={self.flug_students}, IPUG={self.ipug_students}]."
-            )
+        # if still_upgrade:
+        #     print(
+        #         f"Squadron {self.id} graduation: {graduated_count} pilot(s) graduated; "
+        #         f"{still_upgrade} still in upgrade (deferred syllabus lines remain) "
+        #         f"[MQT={self.mqt_students}, FLUG={self.flug_students}, IPUG={self.ipug_students}]."
+        #     )
 
     def new_phase_upgrades(self, flug_window_start:int, ipug_window_start:int,
                            use_upgrade_quotas: bool = False, flug_quota: int = 999,
@@ -424,7 +424,7 @@ class SquadronConfig:
             and ipug_window_start <= p.flight_hours_flown 
         ]
 
-        print(f"Squadron {self.id} | FLUG Eligible: {len(flug_eligible)} | IPUG Eligible: {len(ipug_eligible)}")
+        # print(f"Squadron {self.id} | FLUG Eligible: {len(flug_eligible)} | IPUG Eligible: {len(ipug_eligible)}")
         
         if use_upgrade_quotas:
             ipug_eligible.sort(key=lambda x: x.flight_hours_flown, reverse=True)
