@@ -37,9 +37,10 @@ if 'eval_df' in st.session_state:
     m1.metric("Final Line Pilots", int(df['Total Pilots'].iloc[-1]))
     m2.metric("Final Staff Pilots", int(df['Total Staff Pilots'].iloc[-1]))
     m3.metric("Final Experience Ratio", f"{df['Experience Ratio'].iloc[-1]*100:.0f}%")
-    m4.metric("Final Avg WG Shortfall", (round(df['WG Shortfall'].iloc[-1], 1) / df['Number of Squadrons'].iloc[-1]))
-    m5.metric("Final Avg FL Shortfall", (round(df['FL Shortfall'].iloc[-1], 1) / df['Number of Squadrons'].iloc[-1]))
-    m6.metric("Final Avg IP Shortfall", (round(df['IP Shortfall'].iloc[-1], 1) / df['Number of Squadrons'].iloc[-1]))
+    n_sq = df['Number of Squadrons'].iloc[-1]
+    m4.metric("Final Avg WG Shortfall", round(df['WG Shortfall'].iloc[-1] / n_sq, 2))
+    m5.metric("Final Avg FL Shortfall", round(df['FL Shortfall'].iloc[-1] / n_sq, 2))
+    m6.metric("Final Avg IP Shortfall", round(df['IP Shortfall'].iloc[-1] / n_sq, 2))
     m7.metric("Final Retention Rate", f"{df['Retention Rate'].iloc[-1]*100:.0f}%")
     m8.metric("Cumulative Reward", round(df['Reward'].sum(), 1))
     
