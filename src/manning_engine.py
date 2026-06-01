@@ -69,11 +69,11 @@ class CAFSimulation:
     def _deferrals_from_brain_row(self, row: np.ndarray) -> Tuple[int, int, int, int, int, int]:
         # Ignore negative deferrals (artifact of brain output)
         # Assume < 0.10 is negligible and set to 0
-        deferrals = row[6:12]
+        deferrals = list(row[6:12])
         for i, d in enumerate(deferrals):
             if d < 0.10:
                 deferrals[i] = 0.0
-        return tuple[float, float, float, float, float, float](deferrals)
+        return tuple(deferrals)
 
     @property
     def all_pilots(self):
@@ -208,7 +208,7 @@ class CAFSimulation:
 
     def run_phase(self, phase_num: int, year: int):
 
-        print(f"Running phase {phase_num} of {year}")
+        # print(f"Running phase {phase_num} of {year}")
 
         self.phase_intake = self.annual_intake // 3
         remainder = self.annual_intake % 3
