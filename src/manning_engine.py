@@ -67,14 +67,13 @@ class CAFSimulation:
         return monthly.monthly_to_phase(phase_length_days)
 
     def _deferrals_from_brain_row(self, row: np.ndarray) -> Tuple[int, int, int, int, int, int]:
-        return (
-            row[6], # Remaining MQT full syllabi
-            row[7], # Remaining FLUG full syllabi
-            row[8], # Remaining IPUG full syllabi
-            row[9], # Remaining MQT full syllabi sorties only
-            row[10], # Remaining FLUG full syllabi sorties only
-            row[11], # Remaining IPUG full syllabi sorties only
-        )
+        # Ignore negative deferrals (artifact of brain output)
+        # Assume < 0.10 is negligible and set to 0
+        deferrals = row[6:12]
+        for i, d in enumerate(deferrals):
+            if d < 0.10:
+                deferrals[i] = 0.0
+        return tuple[float, float, float, float, float, float](deferrals)
 
     @property
     def all_pilots(self):
