@@ -30,7 +30,8 @@ if 'eval_df' in st.session_state:
     
     # Create a continuous time axis for clean plotting
     df['Time'] = df['Year'] + (df['Phase'] - 1) / 3
-    
+    year_phase_cd = df[["Year", "Phase"]].to_numpy()
+
     # KPI Headers
     st.markdown("### Final Simulation Metrics")
     m1, m2, m3, m4, m5, m6, m7, m8 = st.columns(8)
@@ -51,11 +52,32 @@ if 'eval_df' in st.session_state:
     # ---------------------------------------------------------
     st.subheader("System Health: Population vs Shortfalls")
     fig_health = go.Figure()
-    fig_health.add_trace(go.Scatter(x=df['Time'], y=df['Total Pilots'], name='Total Line Pilots', line=dict(color='blue', width=3)))
-    fig_health.add_trace(go.Scatter(x=df['Time'], y=df['Total Staff Pilots'], name='Total Staff Pilots', line=dict(color='green', width=3)))
-    fig_health.add_trace(go.Scatter(x=df['Time'], y=df['WG Shortfall'], name='WG Shortfall', line=dict(color='red', width=3)))
-    fig_health.add_trace(go.Scatter(x=df['Time'], y=df['FL Shortfall'], name='FL Shortfall', line=dict(color='orange', width=3)))
-    fig_health.add_trace(go.Scatter(x=df['Time'], y=df['IP Shortfall'], name='IP Shortfall', line=dict(color='yellow', width=3)))
+    health_series = [
+        ("Total Pilots", "Total Line Pilots", "blue"),
+        ("Total Staff Pilots", "Total Staff Pilots", "green"),
+        ("WG Shortfall", "WG Shortfall", "red"),
+        ("FL Shortfall", "FL Shortfall", "orange"),
+        ("IP Shortfall", "IP Shortfall", "yellow"),
+    ]
+    for i, (col, name, color) in enumerate(health_series):
+        if i == 0:
+            hovertemplate = (
+                "Year: %{customdata[0]:.0f}<br>"
+                "Phase: %{customdata[1]:.0f}<br>"
+                "%{fullData.name}: %{y:.2f}<extra></extra>"
+            )
+        else:
+            hovertemplate = "%{fullData.name}: %{y:.2f}<extra></extra>"
+        fig_health.add_trace(
+            go.Scatter(
+                x=df["Time"],
+                y=df[col],
+                name=name,
+                line=dict(color=color, width=3),
+                customdata=year_phase_cd,
+                hovertemplate=hovertemplate,
+            )
+        )
 
     fig_health.update_layout(xaxis_title="Year", yaxis_title="Count", hovermode="x unified")
     st.plotly_chart(fig_health, width='stretch')
@@ -85,8 +107,21 @@ if 'eval_df' in st.session_state:
         for j, col in enumerate(cols):
             if i + j < len(control_metrics):
                 metric, title, color = control_metrics[i + j]
-                fig = px.line(df, x='Time', y=metric, title=title)
-                fig.update_traces(line_color=color)
+                fig = px.line(
+                    df,
+                    x="Time",
+                    y=metric,
+                    title=title,
+                    custom_data=["Year", "Phase"],
+                )
+                fig.update_traces(
+                    line_color=color,
+                    hovertemplate=(
+                        "Year: %{customdata[0]:.0f}<br>"
+                        "Phase: %{customdata[1]:.0f}<br>"
+                        f"{title}: %{{y:.2f}}<extra></extra>"
+                    ),
+                )
                 col.plotly_chart(fig, width='stretch')
         
     # ---------------------------------------------------------
@@ -95,20 +130,60 @@ if 'eval_df' in st.session_state:
     st.subheader("Raw Action Matrix")
     st.markdown("*Blue = Decrease (-1) | White = Hold (0) | Red = Increase (+1)*")
     
-    # Dynamically grab all columns that start with "Action: " to ensure none are missed
-    action_cols = [c for c in df.columns if "Action:" in c]
-    
-    # Transpose the data so actions are on the Y axis and time is on the X axis
-    action_data = df[action_cols].set_index(df['Time']).T
-    
-    # Clean up the Y-axis labels by stripping "Action: " from the strings
-    action_data.index = [idx.replace("Action: ", "") for idx in action_data.index]
-    
-    fig_actions = px.imshow(
-        action_data, 
-        color_continuous_scale='RdBu_r', 
-        zmin=-1, zmax=1,
-        aspect='auto'
+    # Map each action lever to the control value the agent is adjusting
+    action_value_col = {
+        "Intake": "Intake Target",
+        "FLUG": "FLUG Intake",
+        "IPUG": "IPUG Intake",
+        "Max Manning": "Max Manning",
+        "UTE": "Avg UTE",
+        "Retention": "Retention Rate",
+        "PAA": "Total PAA",
+    }
+
+    action_label = {-1: "Decrease", 0: "Hold", 1: "Increase"}
+
+    action_cols = [c for c in df.columns if c.startswith("Action: ")]
+    action_labels = [c.replace("Action: ", "") for c in action_cols]
+    times = df["Time"].tolist()
+
+    z_matrix = []
+    customdata = []
+    for col in action_cols:
+        label = col.replace("Action: ", "")
+        value_col = action_value_col[label]
+        z_matrix.append(df[col].tolist())
+        customdata.append(
+            list(
+                zip(
+                    df["Year"],
+                    df["Phase"],
+                    df[value_col],
+                    df[col].map(action_label),
+                )
+            )
+        )
+
+    fig_actions = go.Figure(
+        data=go.Heatmap(
+            x=times,
+            y=action_labels,
+            z=z_matrix,
+            customdata=customdata,
+            colorscale="RdBu_r",
+            zmin=-1,
+            zmax=1,
+            hovertemplate=(
+                "Year: %{customdata[0]:.0f}<br>"
+                "Phase: %{customdata[1]:.0f}<br>"
+                "Current Value: %{customdata[2]:.2f}<br>"
+                "Action: %{customdata[3]}<extra></extra>"
+            ),
+        )
     )
-    fig_actions.update_layout(yaxis_title="Action Space", xaxis_title="Year")
+    fig_actions.update_layout(
+        yaxis_title="Action Space",
+        xaxis_title="Year",
+        xaxis=dict(tickmode="linear"),
+    )
     st.plotly_chart(fig_actions, width='stretch')
