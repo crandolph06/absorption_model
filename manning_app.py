@@ -1,17 +1,88 @@
 from datetime import datetime
 
-import streamlit as st
+import joblib
+import numpy as np
+import os
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import joblib
-import os
+import streamlit as st
 
-from src.manning_main import setup_simulation
+from src.manning_config import SQUADRON_DATA
 from src.manning_engine import CAFSimulation
+from src.manning_main import setup_simulation
 from src.models import PriorityMode, Qual, monthly_sortie_rap_target
 
 BRAIN_PATH = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
+_PAA_BY_SQUADRON = {sq_id: paa for sq_id, paa, _, _ in SQUADRON_DATA}
+_PREDICT_FEATURES = CAFSimulation._PREDICT_FEATURE_COLS
+_SYLLABI_NEGLIGIBLE = 0.10
+_REMAINING_TOTAL = [
+    "remaining_mqt_syllabi_mean",
+    "remaining_flug_syllabi_mean",
+    "remaining_ipug_syllabi_mean",
+]
+_REMAINING_SORTIES = [
+    "remaining_mqt_syllabi_sorties_only_mean",
+    "remaining_flug_syllabi_sorties_only_mean",
+    "remaining_ipug_syllabi_sorties_only_mean",
+]
+
+
+def _clean_syllabus_preds(raw: np.ndarray) -> np.ndarray:
+    vals = np.maximum(raw, 0.0)
+    return np.where(vals < _SYLLABI_NEGLIGIBLE, 0.0, vals)
+
+
+def _brain_features_from_history(df: pd.DataFrame, ute: float) -> pd.DataFrame:
+    """Same feature math as CAFSimulation.predict_rates_fast, one row per history row."""
+    out = df.copy()
+    for col in ("mqt_carry", "flug_carry", "ipug_carry"):
+        if col not in out.columns:
+            out[col] = 0.0
+
+    out["paa"] = out["squadron_id"].map(_PAA_BY_SQUADRON)
+    out["ute"] = float(ute)
+    out["exp_ratio"] = out["exp_rat"]
+    line_pilots = out["line_pilots"]
+    mqt_qty = out["mqt_qty"] + out["mqt_carry"]
+    flug_qty = out["flug_qty"] + out["flug_carry"]
+    ipug_qty = out["ipug_qty"] + out["ipug_carry"]
+
+    fls = out["fl_qty"].replace(0, 1.0)
+    wgs = out["wg_qty"].replace(0, 1.0)
+    out["fl_congestion"] = (ipug_qty + flug_qty) / fls
+    out["wg_crowding"] = (mqt_qty + flug_qty + ipug_qty) / wgs
+    out["sorties_avail"] = out["paa"] * out["ute"]
+    out["pilot_to_sortie"] = np.where(
+        out["sorties_avail"] != 0, line_pilots / out["sorties_avail"], 0.0
+    )
+    total_students = mqt_qty + flug_qty + ipug_qty
+    denom_tp = line_pilots.replace(0, 1)
+    out["ip_ratio"] = out["ip_qty"] / denom_tp
+    denom_stud = total_students.replace(0, 0.1)
+    out["ip_to_stud_ratio"] = out["ip_qty"] / denom_stud
+    return out.replace([np.inf, -np.inf], 0).fillna(0)
+
+
+def _syllabus_preds_by_timeline(
+    df: pd.DataFrame, brain, ute: float
+) -> pd.DataFrame:
+    """Brain outputs 6–11 per squadron-phase, summed CAF-wide per timeline."""
+    feat = _brain_features_from_history(df, ute)
+    preds = brain.predict(feat[_PREDICT_FEATURES].fillna(0))
+    for i, col in enumerate(_REMAINING_TOTAL):
+        feat[col] = _clean_syllabus_preds(preds[:, 6 + i])
+    for i, col in enumerate(_REMAINING_SORTIES):
+        feat[col] = _clean_syllabus_preds(preds[:, 9 + i])
+    feat["timeline"] = feat["year"].astype(str) + " P" + feat["phase"].astype(str)
+    return (
+        feat.groupby(["year", "phase", "timeline"], as_index=False)[
+            _REMAINING_TOTAL + _REMAINING_SORTIES
+        ]
+        .sum()
+        .sort_values(["year", "phase"])
+    )
 
 
 def _pipeline_n_features_in(brain):
@@ -313,7 +384,7 @@ if submitted:
         fig_exp.add_hline(y=0.40, line_dash="dot", line_color="red", annotation_text="Broken")
 
         st.plotly_chart(fig_exp, width='stretch')
-        
+
     st.divider()
     st.subheader("Detailed Operational Health: Sortie Rates vs. Manning")
             
@@ -402,6 +473,63 @@ if submitted:
         )
 
     st.plotly_chart(fig_health, width='stretch')
+
+    if df is not None and not df.empty:
+        # --- Chart 4: Incomplete syllabi from brain (CAF aggregate over time) ---
+        st.divider()
+        st.subheader("Incomplete Syllabi (Brain Prediction)")
+        st.caption(
+            "Y-axis is syllabus-normalized count (not %), summed across squadrons each phase. "
+            "1.0 ≈ one full syllabus incomplete; values from brain outputs 6–11 (same as single-phase dashboard)."
+        )
+        sorties_only_syll = st.toggle(
+            "Sorties only",
+            value=True,
+            key="manning_chart4_sorties_only",
+            help="On: sorties-only remainder (default). Off: sorties + sims (total syllabus).",
+        )
+        df_syll = _syllabus_preds_by_timeline(df, cached_brain, ute_val)
+        if sorties_only_syll:
+            syll_series = [
+                ("remaining_mqt_syllabi_sorties_only_mean", "MQT"),
+                ("remaining_flug_syllabi_sorties_only_mean", "FLUG"),
+                ("remaining_ipug_syllabi_sorties_only_mean", "IPUG"),
+            ]
+            syll_mode_label = "Sorties only"
+        else:
+            syll_series = [
+                ("remaining_mqt_syllabi_mean", "MQT"),
+                ("remaining_flug_syllabi_mean", "FLUG"),
+                ("remaining_ipug_syllabi_mean", "IPUG"),
+            ]
+            syll_mode_label = "Total syllabus (sorties + sims)"
+
+        colors_upgrade = {"MQT": "#f59e0b", "FLUG": "#ec4899", "IPUG": "#6366f1"}
+        fig_syll = go.Figure()
+        for col, label in syll_series:
+            fig_syll.add_trace(
+                go.Scatter(
+                    x=df_syll["timeline"],
+                    y=df_syll[col],
+                    name=label,
+                    line=dict(color=colors_upgrade[label], width=3),
+                    mode="lines",
+                    hovertemplate=(
+                        f"<b>%{{x}}</b><br>{label}: %{{y:.2f}} syllabi<extra></extra>"
+                    ),
+                )
+            )
+        fig_syll.update_layout(
+            xaxis_title="Year/Phase",
+            yaxis_title=f"Incomplete syllabi ({syll_mode_label})",
+            yaxis_tickformat=".2f",
+            hovermode="x unified",
+            margin=dict(l=20, r=20, t=30, b=20),
+            height=350,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
+        fig_syll.update_yaxes(autorange=True, rangemode="tozero")
+        st.plotly_chart(fig_syll, width="stretch")
 
     # --- Stability Frontier Section ---
     if run_sensitivity:
