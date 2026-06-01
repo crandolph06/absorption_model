@@ -161,9 +161,9 @@ class CAFSimulation:
         """
         Monthly MQT sortie rate for ``AgingRate`` when blending with the sortie brain.
 
-        Uses last phase's observed rate when available. Otherwise: no line IPs means
-        MQT cannot be crewed (0). No MQT students means 0. Else fall back to the same
-        MQT monthly implied by ``calc_analytic_aging_rate()`` (not a separate magic constant).
+        Uses last phase's observed rate when available. Otherwise: no MQT students or
+        no line IPs → 0. Else use 2.2 (9 sorties / 4 month phase) (first phase before
+        ``observed_mqt_monthly`` is recorded).
         """
         if sq.observed_mqt_monthly is not None:
             return float(sq.observed_mqt_monthly)
@@ -171,11 +171,7 @@ class CAFSimulation:
             return 0.0
         if sq.ip_qty <= 0:
             return 0.0
-        months = sq.phase_length_months
-        if months <= 0:
-            return 0.0
-        baseline = sq.calc_analytic_aging_rate()
-        return baseline.mqt_phase / months
+        return 2.2 
 
     def add_new_bcourse_graduates(self, year: int, count: int, round_robin: bool): 
         num_sq = len(self.squadrons)
