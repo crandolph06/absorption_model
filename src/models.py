@@ -380,13 +380,6 @@ class SquadronConfig:
             flug_limit = max(0, len(flug_pilots) - flug_whole)
             ipug_limit = max(0, len(ipug_pilots) - ipug_whole)
 
-            if len(mqt_pilots) < mqt_deferrals:
-                print(f'Error -- more MQT deferrals than MQT pilots. Check upgrade selection or valid config logic.')
-            if len(flug_pilots) < flug_deferrals:
-                print(f'Error -- more FLUG deferrals than FLUG pilots. Check upgrade selection or valid config logic.')
-            if len(ipug_pilots) < ipug_deferrals:
-                print(f'Error -- more IPUG deferrals than IPUG pilots. Check upgrade selection or valid config logic.')
-
             for i in range(mqt_limit):
                 mqt_pilots[i].graduate()
                 graduated_count += 1
