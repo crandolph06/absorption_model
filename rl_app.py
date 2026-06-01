@@ -58,7 +58,7 @@ if 'eval_df' in st.session_state:
     fig_health.add_trace(go.Scatter(x=df['Time'], y=df['IP Shortfall'], name='IP Shortfall', line=dict(color='yellow', width=3)))
 
     fig_health.update_layout(xaxis_title="Year", yaxis_title="Count", hovermode="x unified")
-    st.plotly_chart(fig_health, use_container_width=True)
+    st.plotly_chart(fig_health, width='stretch')
     
     # ---------------------------------------------------------
     # PLOT 2: The Agent's Strategy (Levers Pulled)
@@ -87,7 +87,7 @@ if 'eval_df' in st.session_state:
                 metric, title, color = control_metrics[i + j]
                 fig = px.line(df, x='Time', y=metric, title=title)
                 fig.update_traces(line_color=color)
-                col.plotly_chart(fig, use_container_width=True)
+                col.plotly_chart(fig, width='stretch')
         
     # ---------------------------------------------------------
     # PLOT 3: Action Heatmap
@@ -111,4 +111,4 @@ if 'eval_df' in st.session_state:
         aspect='auto'
     )
     fig_actions.update_layout(yaxis_title="Action Space", xaxis_title="Year")
-    st.plotly_chart(fig_actions, use_container_width=True)
+    st.plotly_chart(fig_actions, width='stretch')
