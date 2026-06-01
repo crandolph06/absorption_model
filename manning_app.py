@@ -134,7 +134,7 @@ with st.sidebar.form("sim_params"):
     )
 
     brain_includes_sim_outputs = st.checkbox(
-        "Brain predicts sim phase rates (experimental)",
+        "Brain Predicts Sim Phase Rates (Experimental)",
         value=False,
         help="Off (default): sim RAP and sim upgrade completion assumed."
         "On: sim RAP and sim upgrades informed by single-phase brain",
