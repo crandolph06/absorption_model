@@ -200,7 +200,10 @@ def build_df_display(df: pd.DataFrame) -> pd.DataFrame:
         "wg_line": "mean",
         "fl_line": "mean",
     }
-    for col in ("wg_rate_blue", "fl_rate_blue", "ip_rate_blue"):
+    for col in (
+        "wg_rate_blue", "fl_rate_blue", "ip_rate_blue",
+        "wg_rate_sim", "fl_rate_sim", "ip_rate_sim",
+    ):
         if col in work.columns:
             agg[col] = "mean"
 
@@ -213,6 +216,9 @@ def build_df_display(df: pd.DataFrame) -> pd.DataFrame:
     out = out.merge(ip_avg, on=["year", "phase", "timeline"], how="left")
 
     for col in ("wg_rate_blue", "fl_rate_blue", "ip_rate_blue"):
+        if col not in out.columns:
+            out[col] = 0.0
+    for col in ("wg_rate_sim", "fl_rate_sim", "ip_rate_sim"):
         if col not in out.columns:
             out[col] = 0.0
     for col in ("mqt_qty", "flug_qty", "ipug_qty", "wg_line", "fl_line", "ip_qty_avg"):
@@ -469,68 +475,55 @@ def render_manning_charts(df_display: pd.DataFrame, df_hist: pd.DataFrame, brain
 
     st.divider()
     st.subheader("Detailed Operational Health: Sortie Rates vs. Manning")
-    sorties_only = st.toggle(
-        "Sorties only",
-        value=True,
-        key="rl_ops_health_sorties_only",
-        help="On: live sortie rates only. Off: also show blue/sim rates (dotted).",
+    ops_view = st.radio(
+        "Operational health view",
+        options=("Sorties only", "Sorties + Sims"),
+        index=0,
+        horizontal=True,
+        key="rl_ops_health_view",
+        help=(
+            "Sorties only: solid = all sorties, dotted = blue sorties. "
+            "Sorties + Sims: solid = sorties + sims, dotted = blue sorties + sims."
+        ),
     )
-    include_sims = not sorties_only
+    include_sims = ops_view == "Sorties + Sims"
 
     fig_ops = go.Figure()
-    fig_ops.add_trace(
-        go.Scatter(
-            x=df_display["timeline"],
-            y=df_display["wg_rate_mo"],
-            name="WG Rate",
-            line=dict(color="#636EFA"),
-            hovertemplate="%{y:.1f}",
-        )
-    )
-    fig_ops.add_trace(
-        go.Scatter(
-            x=df_display["timeline"],
-            y=df_display["fl_rate_mo"],
-            name="FL Rate",
-            line=dict(color="#EF553B"),
-            hovertemplate="%{y:.1f}",
-        )
-    )
-    fig_ops.add_trace(
-        go.Scatter(
-            x=df_display["timeline"],
-            y=df_display["ip_rate_mo"],
-            name="IP Rate",
-            line=dict(color="#00CC96"),
-            hovertemplate="%{y:.1f}",
-        )
-    )
-    if include_sims:
+    for sortie_col, blue_col, sim_col, qual_label, color in (
+        ("wg_rate_mo", "wg_rate_blue", "wg_rate_sim", "WG", "#636EFA"),
+        ("fl_rate_mo", "fl_rate_blue", "fl_rate_sim", "FL", "#EF553B"),
+        ("ip_rate_mo", "ip_rate_blue", "ip_rate_sim", "IP", "#00CC96"),
+    ):
+        sorties = df_display[sortie_col]
+        blue = df_display[blue_col]
+        sims = df_display[sim_col] if sim_col in df_display.columns else 0.0
+        if include_sims:
+            solid_y = sorties + sims
+            dotted_y = blue + sims
+            solid_name = f"{qual_label} Sorties + Sims"
+            dotted_name = f"{qual_label} Blue Sorties + Sims"
+        else:
+            solid_y = sorties
+            dotted_y = blue
+            solid_name = f"{qual_label} Rate"
+            dotted_name = f"{qual_label} Blue Sorties"
+
         fig_ops.add_trace(
             go.Scatter(
                 x=df_display["timeline"],
-                y=df_display["wg_rate_blue"],
-                name="WG Blue Rate",
-                line=dict(color="#636EFA", dash="dot"),
-                hovertemplate="%{y:.1f}",
+                y=solid_y,
+                name=solid_name,
+                line=dict(color=color),
+                hovertemplate="%{y:.2f}<extra></extra>",
             )
         )
         fig_ops.add_trace(
             go.Scatter(
                 x=df_display["timeline"],
-                y=df_display["fl_rate_blue"],
-                name="FL Blue Rate",
-                line=dict(color="#EF553B", dash="dot"),
-                hovertemplate="%{y:.1f}",
-            )
-        )
-        fig_ops.add_trace(
-            go.Scatter(
-                x=df_display["timeline"],
-                y=df_display["ip_rate_blue"],
-                name="IP Blue Rate",
-                line=dict(color="#00CC96", dash="dot"),
-                hovertemplate="%{y:.1f}",
+                y=dotted_y,
+                name=dotted_name,
+                line=dict(color=color, dash="dot"),
+                hovertemplate="%{y:.2f}<extra></extra>",
             )
         )
     fig_ops.add_hline(y=9.0, line_dash="dot", line_color="red", annotation_text="Inexp.")
@@ -557,9 +550,7 @@ def render_manning_charts(df_display: pd.DataFrame, df_hist: pd.DataFrame, brain
         )
     )
 
-    y_left_title = (
-        "Monthly Events (Sorties/Sims)" if include_sims else "Monthly Sorties"
-    )
+    y_left_title = "Monthly Sorties + Sims" if include_sims else "Monthly Sorties"
     fig_ops.update_layout(
         title="Operational Health: Sortie Rates vs. Manning",
         xaxis_title="Year/Phase",
@@ -721,16 +712,15 @@ def render_rl_charts(
 ) -> None:
     """RL-specific metrics and charts (population/shortfalls, levers, action heatmap)."""
     st.markdown("### RL Agent Metrics")
-    m1, m2, m3, m4, m5, m6, m7, m8 = st.columns(8)
+    m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
     m1.metric("Final Line Pilots", int(df["Total Pilots"].iloc[-1]))
     m2.metric("Final Staff Pilots", int(df["Total Staff Pilots"].iloc[-1]))
-    m3.metric("Final Experience Ratio", f"{df['Experience Ratio'].iloc[-1] * 100:.0f}%")
+    m3.metric("Total Pilots", int(df["Total Pilots"].iloc[-1]) + int(df["Total Staff Pilots"].iloc[-1]))
+    m4.metric("Final Experience Ratio", f"{df['Experience Ratio'].iloc[-1] * 100:.0f}%")
     n_sq = df["Number of Squadrons"].iloc[-1]
-    m4.metric("Final Avg WG Shortfall", round(df["WG Shortfall"].iloc[-1] / n_sq, 2))
-    m5.metric("Final Avg FL Shortfall", round(df["FL Shortfall"].iloc[-1] / n_sq, 2))
-    m6.metric("Final Avg IP Shortfall", round(df["IP Shortfall"].iloc[-1] / n_sq, 2))
-    m7.metric("Final Retention Rate", f"{df['Retention Rate'].iloc[-1] * 100:.0f}%")
-    m8.metric("Cumulative Reward", round(df["Reward"].sum(), 1))
+    m5.metric("Final Avg WG Shortfall", round(df["WG Shortfall"].iloc[-1] / n_sq, 2))
+    m6.metric("Final Avg FL Shortfall", round(df["FL Shortfall"].iloc[-1] / n_sq, 2))
+    m7.metric("Final Avg IP Shortfall", round(df["IP Shortfall"].iloc[-1] / n_sq, 2))
 
     st.markdown("---")
     st.subheader("System Health: Population vs Shortfalls")
