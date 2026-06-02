@@ -12,8 +12,8 @@
 ## Optional Slurm Directives --------------------------------------
 #SBATCH --job-name=single_phase_sweep_2A
 #SBATCH --export=ALL
-#SBATCH --output=logs/sweep_2A_%j.out
-#SBATCH --error=logs/sweep_2A_%j.err
+#SBATCH --output=$WORKDIR/absorption_model/logs/sweep_2A_%j.out
+#SBATCH --error=$WORKDIR/absorption_model/logs/sweep_2A_%j.err
 #
 ## Execution Block ----------------------------------------------
 JOBID=`echo $SLURM_JOB_ID`
@@ -32,7 +32,7 @@ python --version
 #
 export PYTHONUNBUFFERED=1
 #
-mkdir -p logs
+mkdir -p $WORKDIR/absorption_model/logs
 timeout 14100s python -u hpc_single_phase_sweeper_2A.py || true
 #
 

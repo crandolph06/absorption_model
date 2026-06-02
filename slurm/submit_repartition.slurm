@@ -13,8 +13,8 @@
 ## Optional Slurm Directives --------------------------------------
 #SBATCH --job-name=repartition_dataset
 #SBATCH --export=ALL
-#SBATCH --output=logs/repart_%j.out
-#SBATCH --error=logs/repart_%j.err
+#SBATCH --output=$WORKDIR/absorption_model/logs/repart_%j.out
+#SBATCH --error=$WORKDIR/absorption_model/logs/repart_%j.err
 #
 ## Execution Block ----------------------------------------------
 PROJECT_DIR="$WORKDIR/absorption_model"
@@ -34,7 +34,7 @@ export PYTHONUNBUFFERED=1
 echo "Starting Repartitioning: 996 batches -> 50 parts..."
 
 # Run the repartitioning script
-mkdir -p logs
+mkdir -p $WORKDIR/absorption_model/logs
 python -u do_repartition.py
 
 if [ $? -eq 0 ]; then

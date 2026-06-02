@@ -12,8 +12,8 @@
 ## Optional Slurm Directives --------------------------------------
 #SBATCH --job-name=train_brain
 #SBATCH --export=ALL
-#SBATCH --output=logs/sweep_%j.out
-#SBATCH --error=logs/sweep_%j.err
+#SBATCH --output=$WORKDIR/absorption_model/logs/sweep_%j.out
+#SBATCH --error=$WORKDIR/absorption_model/logs/sweep_%j.err
 #
 ## Execution Block ----------------------------------------------
 # Environment Setup

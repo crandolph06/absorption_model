@@ -12,8 +12,8 @@
 ## Optional Slurm Directives --------------------------------------
 #SBATCH --job-name=train_rl_parallelized_prag_read_book
 #SBATCH --export=ALL
-#SBATCH --output=logs/train_rl_%j.out
-#SBATCH --error=logs/train_rl_%j.err
+#SBATCH --output=$WORKDIR/absorption_model/logs/train_rl_%j.out
+#SBATCH --error=$WORKDIR/absorption_model/logs/train_rl_%j.err
 #
 ## Execution Block ----------------------------------------------
 # Environment Setup
@@ -33,7 +33,7 @@ python --version
 #
 export PYTHONUNBUFFERED=1
 #
-mkdir -p logs
+mkdir -p $WORKDIR/absorption_model/logs
 #
 python -u train_rl_parallelized_prag_read_book.py
 #

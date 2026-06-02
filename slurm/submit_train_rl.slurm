@@ -12,8 +12,8 @@
 ## Optional Slurm Directives --------------------------------------
 #SBATCH --job-name=train_rl
 #SBATCH --export=ALL
-#SBATCH --output=logs/train_rl_%j.out
-#SBATCH --error=logs/train_rl_%j.err
+#SBATCH --output=$WORKDIR/absorption_model/logs/train_rl_%j.out
+#SBATCH --error=$WORKDIR/absorption_model/logs/train_rl_%j.err
 #
 ## Execution Block ----------------------------------------------
 # Environment Setup
