@@ -43,7 +43,7 @@ class ManningEnv(gym.Env):
             raise ValueError(f"Invalid run mode: {run_mode}")
 
         self.observation_space = spaces.Box(
-            low=0, high=np.inf, shape=(13,), dtype=np.float32 
+            low=0, high=np.inf, shape=(15,), dtype=np.float32 
         )
 
     def _apply_current_logic(self, action, run_mode):
