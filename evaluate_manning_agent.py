@@ -142,14 +142,6 @@ def run_evaluation(run_mode="pragmatic", reward_mode="readiness_first"):
 
         avg_ute = sum(sq.ute for sq in sim_engine.squadrons) / max(len(sim_engine.squadrons), 1) if sim_engine.squadrons else 0
         total_paa = sum(sq.paa for sq in sim_engine.squadrons) if sim_engine.squadrons else 0
-        # Display metric in rl_app: line FL+IP divided by total line pilots.
-        line_experienced = sum(
-            1
-            for p in sim_engine.line_pilots
-            if p.qual.name in ("FL", "IP")
-        )
-        experience_ratio_display = line_experienced / max(sim_engine.total_line_pilot_count, 1)
-
         # Build the phase record (year/phase = CAF tick simulated this step, pre-advance_clock)
         record = {
             "Year": info["simulated_year"],
@@ -167,7 +159,7 @@ def run_evaluation(run_mode="pragmatic", reward_mode="readiness_first"):
             "Max Manning": sim_engine.max_manning,
             "Avg UTE": avg_ute,
             "Total PAA": total_paa,
-            "Experience Ratio": experience_ratio_display,
+            "Experience Ratio": sim_engine.experience_ratio,
             "Number of Squadrons": len(sim_engine.squadrons)
         }
 
