@@ -197,15 +197,45 @@ _LINE_MIX_STACK = [
 ]
 _LINE_MIX_COLORS = ["#f59e0b", "#93c5fd", "#ec4899", "#fda4af", "#6366f1", "#00CC96"]
 
+_GATE_TYPES = {
+    "Book Gates": {
+        "models_dir": "saved_models/book_gates",
+        "flug_window_start": 250,
+        "ipug_window_start": 400,
+        "help": (
+            'Reflects "by-the-book" FLUG and IPUG entry requirements of 250 sorties '
+            "and 400 hours, respectively."
+        ),
+    },
+    "Real Gates": {
+        "models_dir": "saved_models/real_gates",
+        "flug_window_start": 150,
+        "ipug_window_start": 300,
+        "help": (
+            "Reflects typical FLUG and IPUG entry requirements of 150 sorties "
+            "and 300 hours, respectively."
+        ),
+    },
+}
 
-def run_rl_evaluation(run_mode: str, reward_mode: str, brain) -> tuple[pd.DataFrame, pd.DataFrame]:
+
+def model_path_for_gate(gate_type: str, reward_mode: str, run_mode: str) -> str:
+    """Path prefix for PPO checkpoint (Stable-Baselines appends ``.zip``)."""
+    models_dir = _GATE_TYPES[gate_type]["models_dir"]
+    return os.path.join(models_dir, f"ppo_manning_agent_{reward_mode}_{run_mode}")
+
+
+def run_rl_evaluation(
+    run_mode: str, reward_mode: str, gate_type: str, brain
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run the RL policy and return per-step controls plus squadron-phase history."""
+    gate = _GATE_TYPES[gate_type]
     sim_engine = CAFSimulation(
         annual_intake=200,
         retention_rate=0.40,
         brain=brain,
-        flug_window_start=250,
-        ipug_window_start=400,
+        flug_window_start=gate["flug_window_start"],
+        ipug_window_start=gate["ipug_window_start"],
         max_manning_pct=125,
         staff_priority_mode=PriorityMode.RANDOM,
         use_upgrade_quotas=True,
@@ -213,7 +243,12 @@ def run_rl_evaluation(run_mode: str, reward_mode: str, brain) -> tuple[pd.DataFr
     )
     env = ManningEnv(sim_engine, run_mode=run_mode, reward_mode=reward_mode)
 
-    model_path = f"saved_models/ppo_manning_agent_{reward_mode}_{run_mode}"
+    model_path = model_path_for_gate(gate_type, reward_mode, run_mode)
+    if not os.path.exists(f"{model_path}.zip"):
+        raise FileNotFoundError(
+            f"No trained model at `{model_path}.zip`. "
+            f"Place the {gate_type} checkpoint in `{gate['models_dir']}/`."
+        )
     try:
         model = PPO.load(model_path)
     except Exception as e:
@@ -810,7 +845,7 @@ if not os.path.exists(BRAIN_PATH):
 _brain_mtime = os.path.getmtime(BRAIN_PATH)
 cached_brain = load_sortie_brain(BRAIN_PATH, _brain_mtime)
 
-col1, col2, col3 = st.columns([1, 1, 2])
+col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 with col1:
     run_mode = st.selectbox("Run Mode", ["pragmatic", "optimistic", "current", "ideal"])
 with col2:
@@ -818,20 +853,34 @@ with col2:
         "Reward Mode", ["readiness_first", "quantity_first", "key_staff_first"]
     )
 with col3:
+    gate_type = st.selectbox("Gate Type", list(_GATE_TYPES.keys()), index=0)
+    st.caption(_GATE_TYPES[gate_type]["help"])
+with col4:
     st.write("")
     st.write("")
     run_button = st.button("🚀 Run 20-Year Simulation")
 
+_expected_model = model_path_for_gate(gate_type, reward_mode, run_mode)
+if not os.path.exists(f"{_expected_model}.zip"):
+    st.warning(
+        f"No model file at `{_expected_model}.zip`. "
+        f"Copy the trained checkpoint into `{_GATE_TYPES[gate_type]['models_dir']}/`."
+    )
+
 if run_button:
-    with st.spinner(f"Evaluating {run_mode} / {reward_mode} agent..."):
+    with st.spinner(f"Evaluating {gate_type} / {run_mode} / {reward_mode}..."):
         try:
             step_df, hist_df = run_rl_evaluation(
-                run_mode=run_mode, reward_mode=reward_mode, brain=cached_brain
+                run_mode=run_mode,
+                reward_mode=reward_mode,
+                gate_type=gate_type,
+                brain=cached_brain,
             )
             st.session_state["eval_df"] = step_df
             st.session_state["hist_df"] = hist_df
             st.session_state["run_mode"] = run_mode
             st.session_state["reward_mode"] = reward_mode
+            st.session_state["gate_type"] = gate_type
         except Exception as e:
             st.error(f"Error loading model or running simulation: {e}")
 
