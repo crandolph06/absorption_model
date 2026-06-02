@@ -94,10 +94,26 @@ class CAFSimulation:
     @property
     def line_pilots(self):
         return [p for p in self.active_pilots if p.current_assignment == Assignment.LINE]
-    
+
+    @property
+    def line_ips(self):
+        return [p for p in self.line_pilots if p.qual.name == 'IP']
+
+    @property
+    def line_fls(self):
+        return [p for p in self.line_pilots if p.qual.name == 'FL']
+
     @property
     def total_line_pilot_count(self):
         return len(self.line_pilots)
+
+    @property
+    def line_ip_count(self):
+        return len(self.line_ips)
+
+    @property
+    def line_fl_count(self):
+        return len(self.line_fls)
 
     @property
     def staff_pilots(self):
@@ -121,7 +137,7 @@ class CAFSimulation:
     
     @property
     def experience_ratio(self):
-        total_experienced = self.total_ip_qty + self.total_fl_qty
+        total_experienced = self.line_ip_count + self.line_fl_count
         return total_experienced / max(self.total_line_pilot_count, 1)
 
     @property
