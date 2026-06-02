@@ -310,6 +310,18 @@ class SquadronConfig:
     def max_manning(self) -> int:
         return int(self.desired_manning * self.manning_pct)
     
+    def mean_monthly_sim_events(self, qual: Qual) -> float:
+        total_sims = sum(p.sim_phase for p in self.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual == qual)
+        qualified_pilots = [p for p in self.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual == qual]
+        if total_sims <= 0:
+            return 0.0
+        if len(qualified_pilots) <= 0:
+            return 0.0
+        if self.phase_length_months <= 0:
+            return 0.0
+        return(total_sims / len(qualified_pilots)) / self.phase_length_months
+
+
     def update_stats(self):
         # 1. Filter for Active Line Pilots (The only ones who count for stats)
         line_pilots = [p for p in self.pilots if p.active and p.current_assignment == Assignment.LINE]
@@ -552,6 +564,9 @@ class SquadronConfig:
             'wg_rate_blue': rates.wg_blue_phase / months,
             'fl_rate_blue': rates.fl_blue_phase / months,
             'ip_rate_blue': rates.ip_blue_phase / months,
+            'wg_rate_sim': self.mean_monthly_sim_events(Qual.WG),
+            'fl_rate_sim': self.mean_monthly_sim_events(Qual.FL),
+            'ip_rate_sim': self.mean_monthly_sim_events(Qual.IP),
             'wg_rap_shortfall': monthly_sortie_rap_target(Qual.WG) - (rates.wg_phase / months),
             'fl_rap_shortfall': monthly_sortie_rap_target(Qual.FL) - (rates.fl_phase / months),
             'ip_rap_shortfall': monthly_sortie_rap_target(Qual.IP) - (rates.ip_phase / months),
