@@ -41,6 +41,9 @@ _RAP_COLOR_MAP = {
     6: "#ea580c",
     7: "#ef4444",
 }
+# Centered moving average for upgrade-track chart (phases, not calendar months).
+_UPGRADE_SMOOTH_WINDOW_PHASES = 5
+
 _RAP_STATE_LABELS = {
     0: "All Make RAP",
     1: "WG Shortfall",
@@ -51,6 +54,16 @@ _RAP_STATE_LABELS = {
     6: "FL + IP Shortfall",
     7: "WG + FL + IP Shortfall",
 }
+
+
+def _phase_moving_average(series: pd.Series, window: int = _UPGRADE_SMOOTH_WINDOW_PHASES) -> pd.Series:
+    """Centered moving average along the CAF phase timeline."""
+    if series.empty:
+        return series
+    w = min(window, len(series))
+    if w <= 1:
+        return series
+    return series.rolling(window=w, center=True, min_periods=1).mean()
 
 
 def _clean_syllabus_preds(raw: np.ndarray) -> np.ndarray:
@@ -100,7 +113,7 @@ def _syllabus_preds_by_timeline(df: pd.DataFrame, brain, ute: float) -> pd.DataF
         feat.groupby(["year", "phase", "timeline"], as_index=False)[
             _REMAINING_TOTAL + _REMAINING_SORTIES
         ]
-        .sum()
+        .mean()
         .sort_values(["year", "phase"])
     )
 
@@ -126,6 +139,12 @@ def build_df_display(df: pd.DataFrame) -> pd.DataFrame:
     work = df.copy()
     work["timeline"] = work["year"].astype(str) + " P" + work["phase"].astype(str)
 
+    for col in ("mqt_qty", "flug_qty", "ipug_qty", "wg_qty", "fl_qty", "ip_qty"):
+        if col not in work.columns:
+            work[col] = 0
+    work["wg_line"] = (work["wg_qty"] - work["mqt_qty"] - work["flug_qty"]).clip(lower=0)
+    work["fl_line"] = (work["fl_qty"] - work["ipug_qty"]).clip(lower=0)
+
     agg = {
         "wg_qty": "sum",
         "fl_qty": "sum",
@@ -141,6 +160,11 @@ def build_df_display(df: pd.DataFrame) -> pd.DataFrame:
         "wg_rate_mo": "mean",
         "fl_rate_mo": "mean",
         "ip_rate_mo": "mean",
+        "mqt_qty": "mean",
+        "flug_qty": "mean",
+        "ipug_qty": "mean",
+        "wg_line": "mean",
+        "fl_line": "mean",
     }
     for col in ("wg_rate_blue", "fl_rate_blue", "ip_rate_blue"):
         if col in work.columns:
@@ -150,7 +174,21 @@ def build_df_display(df: pd.DataFrame) -> pd.DataFrame:
     for col in ("wg_rate_blue", "fl_rate_blue", "ip_rate_blue"):
         if col not in out.columns:
             out[col] = 0.0
+    for col in ("mqt_qty", "flug_qty", "ipug_qty", "wg_line", "fl_line"):
+        if col not in out.columns:
+            out[col] = 0.0
     return out
+
+
+_LINE_MIX_STACK = [
+    ("mqt_qty", "MQT"),
+    ("wg_line", "WG (not MQT/FLUG)"),
+    ("flug_qty", "FLUG"),
+    ("fl_line", "FL (not IPUG)"),
+    ("ipug_qty", "IPUG"),
+    ("ip_qty", "IP"),
+]
+_LINE_MIX_COLORS = ["#f59e0b", "#93c5fd", "#ec4899", "#fda4af", "#6366f1", "#00CC96"]
 
 
 def run_rl_evaluation(run_mode: str, reward_mode: str, brain) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -237,6 +275,30 @@ def render_manning_charts(df_display: pd.DataFrame, df_hist: pd.DataFrame, brain
         color_discrete_sequence=["#636EFA", "#EF553B", "#00CC96", "#DC8F7E", "#78CAB4"],
     )
     st.plotly_chart(fig_pop, width="stretch")
+
+    st.subheader("Line Pilot Mix: Qualification & Upgrade (Per Squadron Avg)")
+    st.caption(
+        "Stacked average line pilots per squadron. Upgrade tracks (MQT, FLUG, IPUG) are "
+        "split out; remaining wingmen and flight leads are shown without those upgrades."
+    )
+    mix_cols = [c for c, _ in _LINE_MIX_STACK]
+    mix_plot = df_display[["timeline"] + mix_cols].rename(
+        columns={c: label for c, label in _LINE_MIX_STACK}
+    )
+    fig_line_mix = px.area(
+        mix_plot,
+        x="timeline",
+        y=[label for _, label in _LINE_MIX_STACK],
+        title="Line pilot composition (avg per squadron)",
+        labels={"value": "Pilots", "timeline": "Year/Phase", "variable": "Category"},
+        color_discrete_sequence=_LINE_MIX_COLORS,
+    )
+    fig_line_mix.update_layout(
+        yaxis_title="Pilots per squadron (avg)",
+        hovermode="x unified",
+        legend=dict(title="Category"),
+    )
+    st.plotly_chart(fig_line_mix, width="stretch")
 
     st.divider()
     st.subheader("CAF Experience Ratio")
@@ -328,6 +390,13 @@ def render_manning_charts(df_display: pd.DataFrame, df_hist: pd.DataFrame, brain
 
     st.divider()
     st.subheader("Detailed Operational Health: Sortie Rates vs. Manning")
+    sorties_only = st.toggle(
+        "Sorties only",
+        value=True,
+        key="rl_ops_health_sorties_only",
+        help="On: live sortie rates only. Off: also show blue/sim rates (dotted).",
+    )
+    include_sims = not sorties_only
 
     fig_ops = go.Figure()
     fig_ops.add_trace(
@@ -357,33 +426,34 @@ def render_manning_charts(df_display: pd.DataFrame, df_hist: pd.DataFrame, brain
             hovertemplate="%{y:.1f}",
         )
     )
-    fig_ops.add_trace(
-        go.Scatter(
-            x=df_display["timeline"],
-            y=df_display["wg_rate_blue"],
-            name="WG Blue Rate",
-            line=dict(color="#636EFA", dash="dot"),
-            hovertemplate="%{y:.1f}",
+    if include_sims:
+        fig_ops.add_trace(
+            go.Scatter(
+                x=df_display["timeline"],
+                y=df_display["wg_rate_blue"],
+                name="WG Blue Rate",
+                line=dict(color="#636EFA", dash="dot"),
+                hovertemplate="%{y:.1f}",
+            )
         )
-    )
-    fig_ops.add_trace(
-        go.Scatter(
-            x=df_display["timeline"],
-            y=df_display["fl_rate_blue"],
-            name="FL Blue Rate",
-            line=dict(color="#EF553B", dash="dot"),
-            hovertemplate="%{y:.1f}",
+        fig_ops.add_trace(
+            go.Scatter(
+                x=df_display["timeline"],
+                y=df_display["fl_rate_blue"],
+                name="FL Blue Rate",
+                line=dict(color="#EF553B", dash="dot"),
+                hovertemplate="%{y:.1f}",
+            )
         )
-    )
-    fig_ops.add_trace(
-        go.Scatter(
-            x=df_display["timeline"],
-            y=df_display["ip_rate_blue"],
-            name="IP Blue Rate",
-            line=dict(color="#00CC96", dash="dot"),
-            hovertemplate="%{y:.1f}",
+        fig_ops.add_trace(
+            go.Scatter(
+                x=df_display["timeline"],
+                y=df_display["ip_rate_blue"],
+                name="IP Blue Rate",
+                line=dict(color="#00CC96", dash="dot"),
+                hovertemplate="%{y:.1f}",
+            )
         )
-    )
     fig_ops.add_hline(y=9.0, line_dash="dot", line_color="red", annotation_text="Inexp.")
     fig_ops.add_hline(y=8.0, line_dash="dot", line_color="orange", annotation_text="Exp.")
 
@@ -408,10 +478,13 @@ def render_manning_charts(df_display: pd.DataFrame, df_hist: pd.DataFrame, brain
         )
     )
 
+    y_left_title = (
+        "Monthly Events (Sorties/Sims)" if include_sims else "Monthly Sorties"
+    )
     fig_ops.update_layout(
         title="Operational Health: Sortie Rates vs. Manning",
         xaxis_title="Year/Phase",
-        yaxis=dict(title="Monthly Events (Sorties/Sims)", side="left", showgrid=True),
+        yaxis=dict(title=y_left_title, side="left", showgrid=True),
         yaxis2=dict(
             title="Percentage",
             overlaying="y",
@@ -445,12 +518,74 @@ def render_manning_charts(df_display: pd.DataFrame, df_hist: pd.DataFrame, brain
     )
     st.plotly_chart(fig_ops, width="stretch")
 
+    st.divider()
+    st.subheader("Students in Upgrade Tracks")
+    use_smooth = st.toggle(
+        "Smoothed",
+        value=True,
+        key="rl_upgrade_smooth",
+        help=(
+            "On: centered moving average over "
+            f"{_UPGRADE_SMOOTH_WINDOW_PHASES} phases (~{_UPGRADE_SMOOTH_WINDOW_PHASES / 3:.1f} years). "
+            "Off: raw end-of-phase average per squadron."
+        ),
+    )
+    st.caption(
+        "Average line pilots in MQT, FLUG, or IPUG upgrade at end of each phase "
+        "(per squadron, then averaged across the CAF)."
+        + (
+            f" Smoothed view uses a {_UPGRADE_SMOOTH_WINDOW_PHASES}-phase centered moving average."
+            if use_smooth
+            else ""
+        )
+    )
+    colors_upgrade = {"MQT": "#f59e0b", "FLUG": "#ec4899", "IPUG": "#6366f1"}
+    fig_upgrades = go.Figure()
+    for col, label in (
+        ("mqt_qty", "MQT"),
+        ("flug_qty", "FLUG"),
+        ("ipug_qty", "IPUG"),
+    ):
+        raw_y = df_display[col]
+        plot_y = _phase_moving_average(raw_y) if use_smooth else raw_y
+        fig_upgrades.add_trace(
+            go.Scatter(
+                x=df_display["timeline"],
+                y=plot_y,
+                name=label,
+                line=dict(color=colors_upgrade[label], width=3),
+                mode="lines",
+                customdata=raw_y,
+                hovertemplate=(
+                    f"<b>%{{x}}</b><br>{label}: %{{y:.1f}} pilots/sq (avg)"
+                    + (
+                        "<br>Raw this phase: %{customdata:.1f}<extra></extra>"
+                        if use_smooth
+                        else "<extra></extra>"
+                    )
+                ),
+            )
+        )
+    y_title = "Pilots in upgrade (per squadron, avg)"
+    if use_smooth:
+        y_title += " — smoothed"
+    fig_upgrades.update_layout(
+        xaxis_title="Year/Phase",
+        yaxis_title=y_title,
+        hovermode="x unified",
+        margin=dict(l=20, r=20, t=30, b=20),
+        height=350,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    fig_upgrades.update_yaxes(autorange=True, rangemode="tozero")
+    st.plotly_chart(fig_upgrades, width="stretch")
+
     if df_hist is not None and not df_hist.empty:
         st.divider()
         st.subheader("Incomplete Syllabi (Brain Prediction)")
         st.caption(
-            "Y-axis is syllabus-normalized count (not %), summed across squadrons each phase. "
-            "1.0 ≈ one full syllabus incomplete; values from brain outputs 6–11 (same as Manning app)."
+            "Y-axis is syllabus-normalized incomplete work per squadron (avg), each phase. "
+            "1.0 ≈ one full syllabus incomplete at a typical squadron; values from brain outputs 6–11."
         )
         sorties_only_syll = st.toggle(
             "Sorties only",
@@ -474,7 +609,7 @@ def render_manning_charts(df_display: pd.DataFrame, df_hist: pd.DataFrame, brain
             ]
             syll_mode_label = "Total syllabus (sorties + sims)"
 
-        colors_upgrade = {"MQT": "#f59e0b", "FLUG": "#ec4899", "IPUG": "#6366f1"}
+        syll_colors = {"MQT": "#f59e0b", "FLUG": "#ec4899", "IPUG": "#6366f1"}
         fig_syll = go.Figure()
         for col, label in syll_series:
             fig_syll.add_trace(
@@ -482,16 +617,16 @@ def render_manning_charts(df_display: pd.DataFrame, df_hist: pd.DataFrame, brain
                     x=df_syll["timeline"],
                     y=df_syll[col],
                     name=label,
-                    line=dict(color=colors_upgrade[label], width=3),
+                    line=dict(color=syll_colors[label], width=3),
                     mode="lines",
                     hovertemplate=(
-                        f"<b>%{{x}}</b><br>{label}: %{{y:.2f}} syllabi<extra></extra>"
+                        f"<b>%{{x}}</b><br>{label}: %{{y:.2f}} syllabi/sq (avg)<extra></extra>"
                     ),
                 )
             )
         fig_syll.update_layout(
             xaxis_title="Year/Phase",
-            yaxis_title=f"Incomplete syllabi ({syll_mode_label})",
+            yaxis_title=f"Incomplete syllabi per squadron (avg)",
             yaxis_tickformat=".2f",
             hovermode="x unified",
             margin=dict(l=20, r=20, t=30, b=20),
@@ -502,86 +637,10 @@ def render_manning_charts(df_display: pd.DataFrame, df_hist: pd.DataFrame, brain
         st.plotly_chart(fig_syll, width="stretch")
 
 
-@st.cache_resource
-def load_sortie_brain(brain_path: str, brain_mtime: float):
-    return _joblib_load_brain(brain_path)
-
-
-st.set_page_config(page_title="RL Agent Evaluator", layout="wide")
-
-st.title("Manning RL Agent: 20-Year Policy Evaluation")
-
-if not os.path.exists(BRAIN_PATH):
-    st.error(
-        f"🚨 '{BRAIN_PATH}' not found! Copy the HPC artifact or run "
-        "`hpc_train_brain_multi_output.py`."
-    )
-    st.stop()
-
-_brain_mtime = os.path.getmtime(BRAIN_PATH)
-cached_brain = load_sortie_brain(BRAIN_PATH, _brain_mtime)
-
-col1, col2, col3 = st.columns([1, 1, 2])
-with col1:
-    run_mode = st.selectbox("Run Mode", ["pragmatic", "optimistic", "current", "ideal"])
-with col2:
-    reward_mode = st.selectbox(
-        "Reward Mode", ["readiness_first", "quantity_first", "key_staff_first"]
-    )
-with col3:
-    st.write("")
-    st.write("")
-    run_button = st.button("🚀 Run 20-Year Simulation")
-
-if run_button:
-    with st.spinner(f"Evaluating {run_mode} / {reward_mode} agent..."):
-        try:
-            step_df, hist_df = run_rl_evaluation(
-                run_mode=run_mode, reward_mode=reward_mode, brain=cached_brain
-            )
-            st.session_state["eval_df"] = step_df
-            st.session_state["hist_df"] = hist_df
-            st.session_state["run_mode"] = run_mode
-            st.session_state["reward_mode"] = reward_mode
-        except Exception as e:
-            st.error(f"Error loading model or running simulation: {e}")
-
-if "eval_df" in st.session_state:
-    df = st.session_state["eval_df"]
-    hist_df = st.session_state.get("hist_df")
-    active_run_mode = st.session_state.get("run_mode", run_mode)
-
-    df["Time"] = df["Year"] + (df["Phase"] - 1) / 3
-    year_phase_cd = df[["Year", "Phase"]].to_numpy()
-    ute_val = float(df["Avg UTE"].iloc[-1]) if "Avg UTE" in df.columns else 10.0
-
-    if hist_df is not None and not hist_df.empty:
-        df_display = build_df_display(hist_df)
-        end_year = int(df_display["year"].iloc[-1])
-
-        st.markdown("### CAF Status (from simulation history)")
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Final Total Pilots", int(df_display["total_pilots"].iloc[-1]))
-        c2.metric("Final Total Line Pilots", int(df_display["line_pilots"].iloc[-1]))
-        c3.metric(
-            "Final Total Non-Line Pilots",
-            int(df_display["staff_ips"].iloc[-1] + df_display["staff_fls"].iloc[-1]),
-        )
-        c4.metric("Final Line Exp Ratio", f"{df_display['exp_rat'].iloc[-1] * 100:.1f}%")
-        c5.metric("Total Separations", int(df_display["separated"].sum()))
-
-        st.markdown(f"### CAF Dashboard at Year {end_year}")
-        render_manning_charts(df_display, hist_df, cached_brain, ute_val)
-
-        csv = hist_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="Download Squadron-Phase History (CSV)",
-            data=csv,
-            file_name="rl_simulation_history.csv",
-            mime="text/csv",
-        )
-        st.markdown("---")
-
+def render_rl_charts(
+    df: pd.DataFrame, active_run_mode: str, year_phase_cd: np.ndarray
+) -> None:
+    """RL-specific metrics and charts (population/shortfalls, levers, action heatmap)."""
     st.markdown("### RL Agent Metrics")
     m1, m2, m3, m4, m5, m6, m7, m8 = st.columns(8)
     m1.metric("Final Line Pilots", int(df["Total Pilots"].iloc[-1]))
@@ -720,3 +779,85 @@ if "eval_df" in st.session_state:
         xaxis=dict(tickmode="linear"),
     )
     st.plotly_chart(fig_actions, width="stretch")
+
+
+@st.cache_resource
+def load_sortie_brain(brain_path: str, brain_mtime: float):
+    return _joblib_load_brain(brain_path)
+
+
+st.set_page_config(page_title="RL Agent Evaluator", layout="wide")
+
+st.title("Manning RL Agent: 20-Year Policy Evaluation")
+
+if not os.path.exists(BRAIN_PATH):
+    st.error(
+        f"🚨 '{BRAIN_PATH}' not found! Copy the HPC artifact or run "
+        "`hpc_train_brain_multi_output.py`."
+    )
+    st.stop()
+
+_brain_mtime = os.path.getmtime(BRAIN_PATH)
+cached_brain = load_sortie_brain(BRAIN_PATH, _brain_mtime)
+
+col1, col2, col3 = st.columns([1, 1, 2])
+with col1:
+    run_mode = st.selectbox("Run Mode", ["pragmatic", "optimistic", "current", "ideal"])
+with col2:
+    reward_mode = st.selectbox(
+        "Reward Mode", ["readiness_first", "quantity_first", "key_staff_first"]
+    )
+with col3:
+    st.write("")
+    st.write("")
+    run_button = st.button("🚀 Run 20-Year Simulation")
+
+if run_button:
+    with st.spinner(f"Evaluating {run_mode} / {reward_mode} agent..."):
+        try:
+            step_df, hist_df = run_rl_evaluation(
+                run_mode=run_mode, reward_mode=reward_mode, brain=cached_brain
+            )
+            st.session_state["eval_df"] = step_df
+            st.session_state["hist_df"] = hist_df
+            st.session_state["run_mode"] = run_mode
+            st.session_state["reward_mode"] = reward_mode
+        except Exception as e:
+            st.error(f"Error loading model or running simulation: {e}")
+
+if "eval_df" in st.session_state:
+    df = st.session_state["eval_df"]
+    hist_df = st.session_state.get("hist_df")
+    active_run_mode = st.session_state.get("run_mode", run_mode)
+
+    df["Time"] = df["Year"] + (df["Phase"] - 1) / 3
+    year_phase_cd = df[["Year", "Phase"]].to_numpy()
+    ute_val = float(df["Avg UTE"].iloc[-1]) if "Avg UTE" in df.columns else 10.0
+
+    render_rl_charts(df, active_run_mode, year_phase_cd)
+
+    if hist_df is not None and not hist_df.empty:
+        df_display = build_df_display(hist_df)
+        end_year = int(df_display["year"].iloc[-1])
+
+        st.markdown("---")
+        st.markdown("### CAF Status (from simulation history)")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Final Total Pilots", int(df_display["total_pilots"].iloc[-1]))
+        c2.metric("Final Total Line Pilots", int(df_display["line_pilots"].iloc[-1]))
+        c3.metric(
+            "Final Total Non-Line Pilots",
+            int(df_display["staff_ips"].iloc[-1] + df_display["staff_fls"].iloc[-1]),
+        )
+        c4.metric("Final Line Exp Ratio", f"{df_display['exp_rat'].iloc[-1] * 100:.1f}%")
+        c5.metric("Total Separations", int(df_display["separated"].sum()))
+
+        st.markdown(f"### CAF Dashboard at Year {end_year}")
+        render_manning_charts(df_display, hist_df, cached_brain, ute_val)
+
+        st.download_button(
+            label="Download Squadron-Phase History (CSV)",
+            data=hist_df.to_csv(index=False).encode("utf-8"),
+            file_name="rl_simulation_history.csv",
+            mime="text/csv",
+        )
