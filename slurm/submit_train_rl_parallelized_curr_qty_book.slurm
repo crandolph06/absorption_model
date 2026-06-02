@@ -12,8 +12,8 @@
 ## Optional Slurm Directives --------------------------------------
 #SBATCH --job-name=train_rl_parallelized_curr_qty_book
 #SBATCH --export=ALL
-#SBATCH --output=logs/rl_train_%j.out
-#SBATCH --error=logs/rl_train_%j.err
+#SBATCH --output=logs/train_rl_%j.out
+#SBATCH --error=logs/train_rl_%j.err
 #
 ## Execution Block ----------------------------------------------
 # Environment Setup
@@ -35,5 +35,5 @@ export PYTHONUNBUFFERED=1
 #
 mkdir -p logs
 #
-python -u rl_trainers/train_rl_parallelized_curr_qty_book.py
+python -u train_rl_parallelized_curr_qty_book.py
 #
