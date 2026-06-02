@@ -270,3 +270,55 @@ class ManningEnv(gym.Env):
                 ip_short,
                 current_intake
             ], dtype=np.float32)
+
+
+class SingleActionManningEnv(ManningEnv):
+    """
+    One policy lever may change per step; all others hold.
+
+    Action is MultiDiscrete([n_levers, 3]): lever index, then 0=decrease / 1=hold / 2=increase.
+    """
+
+    _LEVER_COUNT = {
+        "ideal": 7,
+        "optimistic": 7,
+        "pragmatic": 6,
+        "current": 4,
+    }
+    _ACTION_DIM = _LEVER_COUNT
+
+    def __init__(self, sim_engine, run_mode="ideal", reward_mode="quantity_first"):
+        super().__init__(sim_engine, run_mode=run_mode, reward_mode=reward_mode)
+        n_levers = self._LEVER_COUNT[run_mode]
+        self.action_space = spaces.MultiDiscrete([n_levers, 3])
+
+    def _apply_single_action(self, action, run_mode):
+        n_levers = self._LEVER_COUNT[run_mode]
+        lever_idx = int(np.clip(action[0], 0, n_levers - 1))
+        direction = int(action[1])
+
+        n_dims = self._ACTION_DIM[run_mode]
+        full_action = np.ones(n_dims, dtype=int)
+        if direction != 1:
+            full_action[lever_idx] = direction
+        self._apply_current_logic(full_action, run_mode)
+
+    def step(self, action):
+        self._apply_single_action(action, self.run_mode)
+
+        simulated_year = self.sim.current_year
+        simulated_phase = self.sim.current_phase
+        self.sim.run_phase(simulated_phase, simulated_year)
+        observation = self._get_obs()
+
+        reward = self._calculate_reward()
+        self.sim.advance_clock()
+
+        terminated = self.sim.current_year >= 2046
+        truncated = False
+
+        info = {
+            "simulated_year": simulated_year,
+            "simulated_phase": simulated_phase,
+        }
+        return observation, reward, terminated, truncated, info
