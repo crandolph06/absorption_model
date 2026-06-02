@@ -128,8 +128,11 @@ def run_evaluation(run_mode="pragmatic", reward_mode="readiness_first"):
 
     history = []
 
-    # Map the action indices to actual meanings
-    action_names = ["Intake", "FLUG", "IPUG", "Max Manning", "UTE", "Retention"]
+    # Map action indices to levers for the selected run mode.
+    # Current mode has 4 actions, pragmatic has 6, ideal/optimistic have 7.
+    action_names = ["Intake", "FLUG", "IPUG", "Max Manning"]
+    if run_mode in ["pragmatic", "optimistic", "ideal"]:
+        action_names.extend(["UTE", "Retention"])
     if run_mode in ["ideal", "optimistic"]:
         action_names.append("PAA")
 
