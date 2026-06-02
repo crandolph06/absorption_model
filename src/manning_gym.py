@@ -244,6 +244,8 @@ class ManningEnv(gym.Env):
             total_ips = self.sim.total_ip_qty
             total_fls = self.sim.total_fl_qty
             total_wg = self.sim.total_wg_qty
+            line_ips = self.sim.line_ip_count
+            line_fls = self.sim.line_fl_count
             exp_ratio = self.sim.experience_ratio
             wg_short = self.sim.current_wg_shortfall
             fl_short = self.sim.current_fl_shortfall
@@ -260,6 +262,8 @@ class ManningEnv(gym.Env):
                 total_ips,
                 total_fls,
                 total_wg,
+                line_ips,
+                line_fls,
                 exp_ratio,
                 wg_short,
                 fl_short,
