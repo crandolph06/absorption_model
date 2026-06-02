@@ -16,6 +16,40 @@ from src.manning_engine import CAFSimulation
 from src.manning_gym import ManningEnv
 from src.models import PriorityMode, Qual, monthly_sortie_rap_target
 
+_RUN_MODE_HELP = {
+    "ideal": (
+        "RL agent can adjust B-Course intake, FLUG/IPUG quotas, max manning %, UTE (1–30 per "
+        "squadron), retention (10–100%), and PAA (1–48 per squadron)."
+    ),
+    "optimistic": (
+        "Same levers as ideal. UTE capped at 20.0 per squadron, retention at 65%, PAA at 30 "
+        "per squadron."
+    ),
+    "pragmatic": (
+        "Agent adjusts intake, FLUG/IPUG quotas, max manning %, UTE (1–15.0 per squadron), and "
+        "retention (10–50%). Squadron PAA stays at seeded values (not a policy lever)."
+    ),
+    "current": (
+        "Fixed UTE (10.0 per squadron), retention (40%), and squadron PAA from initial data. "
+        "Agent only adjusts B-Course intake, FLUG/IPUG quotas, and max manning %."
+    ),
+}
+_REWARD_MODE_HELP = {
+    "quantity_first": (
+        f"Grow toward {ManningEnv.TARGET_TOTAL_PILOTS:,} total pilots (line + staff), then put "
+        "more weight on line RAP shortfalls as strength increases."
+    ),
+    "readiness_first": (
+        f"Penalize WG/FL/IP RAP shortfalls first while still rewarding progress toward "
+        f"{ManningEnv.TARGET_TOTAL_PILOTS:,} total pilots."
+    ),
+    "key_staff_first": (
+        f"Prioritize key staff: target staff count is {int(ManningEnv.KEY_STAFF_RATIO * 100)}% of "
+        f"remaining slots to reach {ManningEnv.TARGET_TOTAL_PILOTS:,} line + staff; then blend "
+        "into readiness-first logic."
+    ),
+}
+
 BRAIN_PATH = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
 _PAA_BY_SQUADRON = {sq_id: paa for sq_id, paa, _, _ in SQUADRON_DATA}
 _PREDICT_FEATURES = CAFSimulation._PREDICT_FEATURE_COLS
@@ -847,11 +881,15 @@ cached_brain = load_sortie_brain(BRAIN_PATH, _brain_mtime)
 
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 with col1:
-    run_mode = st.selectbox("Run Mode", ["pragmatic", "optimistic", "current", "ideal"])
+    run_mode = st.selectbox(
+        "Run Mode", ["pragmatic", "optimistic", "current", "ideal"]
+    )
+    st.caption(_RUN_MODE_HELP[run_mode])
 with col2:
     reward_mode = st.selectbox(
         "Reward Mode", ["readiness_first", "quantity_first", "key_staff_first"]
     )
+    st.caption(_REWARD_MODE_HELP[reward_mode])
 with col3:
     gate_type = st.selectbox("Gate Type", list(_GATE_TYPES.keys()), index=0)
     st.caption(_GATE_TYPES[gate_type]["help"])
