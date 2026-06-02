@@ -321,7 +321,8 @@ def run_rl_evaluation(
             "Year": info["simulated_year"],
             "Phase": info["simulated_phase"],
             "Reward": reward,
-            "Total Pilots": sim_engine.total_active_pilot_count,
+            "Total Active Pilots": sim_engine.total_active_pilot_count,
+            "Line Pilots": sim_engine.total_line_pilot_count,
             "Total Staff Pilots": sim_engine.total_staff_pilot_count,
             "WG Shortfall": sim_engine.current_wg_shortfall,
             "FL Shortfall": sim_engine.current_fl_shortfall,
@@ -713,9 +714,9 @@ def render_rl_charts(
     """RL-specific metrics and charts (population/shortfalls, levers, action heatmap)."""
     st.markdown("### RL Agent Metrics")
     m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
-    m1.metric("Final Line Pilots", int(df["Total Pilots"].iloc[-1]))
+    m1.metric("Final Line Pilots", int(df["Line Pilots"].iloc[-1]))
     m2.metric("Final Staff Pilots", int(df["Total Staff Pilots"].iloc[-1]))
-    m3.metric("Total Pilots", int(df["Total Pilots"].iloc[-1]) + int(df["Total Staff Pilots"].iloc[-1]))
+    m3.metric("Total Active Pilots", int(df["Total Active Pilots"].iloc[-1]))
     m4.metric("Final Experience Ratio", f"{df['Experience Ratio'].iloc[-1] * 100:.0f}%")
     n_sq = df["Number of Squadrons"].iloc[-1]
     m5.metric("Final Avg WG Shortfall", round(df["WG Shortfall"].iloc[-1] / n_sq, 2))
@@ -726,8 +727,8 @@ def render_rl_charts(
     st.subheader("System Health: Population vs Shortfalls")
     fig_health = go.Figure()
     health_series = [
-        ("Total Pilots", "Total Line Pilots", "blue"),
-        ("Total Staff Pilots", "Total Staff Pilots", "green"),
+        ("Line Pilots", "Line Pilots", "blue"),
+        ("Total Staff Pilots", "Staff Pilots", "green"),
         ("WG Shortfall", "WG Shortfall", "red"),
         ("FL Shortfall", "FL Shortfall", "orange"),
         ("IP Shortfall", "IP Shortfall", "yellow"),
@@ -928,18 +929,18 @@ if "eval_df" in st.session_state:
         end_year = int(df_display["year"].iloc[-1])
 
         st.markdown("---")
-        st.markdown("### CAF Status (from simulation history)")
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Final Total Pilots", int(df_display["total_pilots"].iloc[-1]))
-        c2.metric("Final Total Line Pilots", int(df_display["line_pilots"].iloc[-1]))
-        c3.metric(
-            "Final Total Non-Line Pilots",
-            int(df_display["staff_ips"].iloc[-1] + df_display["staff_fls"].iloc[-1]),
-        )
-        c4.metric("Final Line Exp Ratio", f"{df_display['exp_rat'].iloc[-1] * 100:.1f}%")
-        c5.metric("Total Separations", int(df_display["separated"].sum()))
+        # st.markdown("### CAF Status (from simulation history)")
+        # c1, c2, c3, c4, c5 = st.columns(5)
+        # c1.metric("Final Total Pilots", int(df_display["total_pilots"].iloc[-1]))
+        # c2.metric("Final Total Line Pilots", int(df_display["line_pilots"].iloc[-1]))
+        # c3.metric(
+        #     "Final Total Non-Line Pilots",
+        #     int(df_display["staff_ips"].iloc[-1] + df_display["staff_fls"].iloc[-1]),
+        # )
+        # c4.metric("Final Line Exp Ratio", f"{df_display['exp_rat'].iloc[-1] * 100:.1f}%")
+        # c5.metric("Total Separations", int(df_display["separated"].sum()))
 
-        st.markdown(f"### CAF Dashboard at Year {end_year}")
+        # st.markdown(f"### CAF Dashboard at Year {end_year}")
         render_manning_charts(df_display, hist_df, cached_brain, ute_val)
 
         st.download_button(
