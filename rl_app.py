@@ -171,10 +171,17 @@ def build_df_display(df: pd.DataFrame) -> pd.DataFrame:
             agg[col] = "mean"
 
     out = work.groupby(["year", "phase", "timeline"], as_index=False).agg(agg).reset_index()
+
+    # ip_qty in ``out`` is CAF-wide sum (for the population chart); line-mix needs per-sq avg.
+    ip_avg = work.groupby(["year", "phase", "timeline"], as_index=False).agg(
+        ip_qty_avg=("ip_qty", "mean")
+    )
+    out = out.merge(ip_avg, on=["year", "phase", "timeline"], how="left")
+
     for col in ("wg_rate_blue", "fl_rate_blue", "ip_rate_blue"):
         if col not in out.columns:
             out[col] = 0.0
-    for col in ("mqt_qty", "flug_qty", "ipug_qty", "wg_line", "fl_line"):
+    for col in ("mqt_qty", "flug_qty", "ipug_qty", "wg_line", "fl_line", "ip_qty_avg"):
         if col not in out.columns:
             out[col] = 0.0
     return out
@@ -186,7 +193,7 @@ _LINE_MIX_STACK = [
     ("flug_qty", "FLUG"),
     ("fl_line", "FL (not IPUG)"),
     ("ipug_qty", "IPUG"),
-    ("ip_qty", "IP"),
+    ("ip_qty_avg", "IP"),
 ]
 _LINE_MIX_COLORS = ["#f59e0b", "#93c5fd", "#ec4899", "#fda4af", "#6366f1", "#00CC96"]
 
@@ -292,6 +299,9 @@ def render_manning_charts(df_display: pd.DataFrame, df_hist: pd.DataFrame, brain
         title="Line pilot composition (avg per squadron)",
         labels={"value": "Pilots", "timeline": "Year/Phase", "variable": "Category"},
         color_discrete_sequence=_LINE_MIX_COLORS,
+    )
+    fig_line_mix.update_traces(
+        hovertemplate="%{fullData.name}: %{y:.2f}<extra></extra>",
     )
     fig_line_mix.update_layout(
         yaxis_title="Pilots per squadron (avg)",
@@ -557,9 +567,9 @@ def render_manning_charts(df_display: pd.DataFrame, df_hist: pd.DataFrame, brain
                 mode="lines",
                 customdata=raw_y,
                 hovertemplate=(
-                    f"<b>%{{x}}</b><br>{label}: %{{y:.1f}} pilots/sq (avg)"
+                    f"{label}: %{{y:.2f}} pilots/sq (avg)"
                     + (
-                        "<br>Raw this phase: %{customdata:.1f}<extra></extra>"
+                        "<br>Raw this phase: %{customdata:.2f}<extra></extra>"
                         if use_smooth
                         else "<extra></extra>"
                     )
@@ -620,7 +630,7 @@ def render_manning_charts(df_display: pd.DataFrame, df_hist: pd.DataFrame, brain
                     line=dict(color=syll_colors[label], width=3),
                     mode="lines",
                     hovertemplate=(
-                        f"<b>%{{x}}</b><br>{label}: %{{y:.2f}} syllabi/sq (avg)<extra></extra>"
+                        f"{label}: %{{y:.2f}} syllabi/sq (avg)<extra></extra>"
                     ),
                 )
             )
