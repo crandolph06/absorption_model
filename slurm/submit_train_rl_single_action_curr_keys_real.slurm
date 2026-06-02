@@ -12,8 +12,8 @@
 ## Optional Slurm Directives --------------------------------------
 #SBATCH --job-name=train_rl_single_action_curr_keys_real
 #SBATCH --export=ALL
-#SBATCH --output=logs/train_rl_single_action_curr_keys_real_%j.out
-#SBATCH --error=logs/train_rl_single_action_curr_keys_real_%j.err
+#SBATCH --output=logs/train_rl_%j.out
+#SBATCH --error=logs/train_rl_%j.err
 #
 ## Execution Block ----------------------------------------------
 # Environment Setup

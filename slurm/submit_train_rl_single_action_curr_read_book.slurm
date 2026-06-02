@@ -12,8 +12,8 @@
 ## Optional Slurm Directives --------------------------------------
 #SBATCH --job-name=train_rl_single_action_curr_read_book
 #SBATCH --export=ALL
-#SBATCH --output=logs/train_rl_single_action_curr_read_book_%j.out
-#SBATCH --error=logs/train_rl_single_action_curr_read_book_%j.err
+#SBATCH --output=logs/train_rl_%j.out
+#SBATCH --error=logs/train_rl_%j.err
 #
 ## Execution Block ----------------------------------------------
 # Environment Setup
