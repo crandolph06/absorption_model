@@ -13,7 +13,7 @@ from evaluate_manning_agent import (
 )
 from src.manning_config import SQUADRON_DATA
 from src.manning_engine import CAFSimulation
-from src.manning_gym import ManningEnv
+from src.manning_gym import ManningEnv, SingleActionManningEnv
 from src.models import PriorityMode, Qual, monthly_sortie_rap_target
 
 _RUN_MODE_HELP = {
@@ -237,9 +237,21 @@ _LINE_MIX_STACK = [
 ]
 _LINE_MIX_COLORS = ["#f59e0b", "#93c5fd", "#ec4899", "#fda4af", "#6366f1", "#00CC96"]
 
+_ACTION_MODES = {
+    "multi_action": {
+        "label": "Multiple actions",
+        "subdir": "multi_action",
+        "help": "All policy levers may change each phase (parallelized / multi-lever training).",
+    },
+    "single_action": {
+        "label": "Single action",
+        "subdir": "single_action",
+        "help": "At most one lever changes each phase (single-action training).",
+    },
+}
 _GATE_TYPES = {
     "Book Gates": {
-        "models_dir": "saved_models/book_gates",
+        "gate_subdir": "book_gates",
         "flug_window_start": 250,
         "ipug_window_start": 400,
         "help": (
@@ -248,7 +260,7 @@ _GATE_TYPES = {
         ),
     },
     "Real Gates": {
-        "models_dir": "saved_models/real_gates",
+        "gate_subdir": "real_gates",
         "flug_window_start": 150,
         "ipug_window_start": 300,
         "help": (
@@ -259,14 +271,57 @@ _GATE_TYPES = {
 }
 
 
-def model_path_for_gate(gate_type: str, reward_mode: str, run_mode: str) -> str:
+def _action_names_for_run_mode(run_mode: str) -> list[str]:
+    names = ["Intake", "FLUG", "IPUG", "Max Manning"]
+    if run_mode in ("pragmatic", "optimistic", "ideal"):
+        names.extend(["UTE", "Retention"])
+    if run_mode in ("ideal", "optimistic"):
+        names.append("PAA")
+    return names
+
+
+def models_dir_for(action_mode: str, gate_type: str) -> str:
+    """Checkpoint directory: saved_models/{single|multi}_action/{book|real}_gates/."""
+    return os.path.join(
+        "saved_models",
+        _ACTION_MODES[action_mode]["subdir"],
+        _GATE_TYPES[gate_type]["gate_subdir"],
+    )
+
+
+def model_path_for_gate(
+    action_mode: str, gate_type: str, reward_mode: str, run_mode: str
+) -> str:
     """Path prefix for PPO checkpoint (Stable-Baselines appends ``.zip``)."""
-    models_dir = _GATE_TYPES[gate_type]["models_dir"]
-    return os.path.join(models_dir, f"ppo_manning_agent_{reward_mode}_{run_mode}")
+    return os.path.join(
+        models_dir_for(action_mode, gate_type),
+        f"ppo_manning_agent_{reward_mode}_{run_mode}",
+    )
+
+
+def _display_actions_from_step(
+    action: np.ndarray, action_mode: str, action_names: list[str]
+) -> dict[str, int]:
+    """Map policy output to per-lever -1/0/1 values for charts and CSV export."""
+    if action_mode == "single_action":
+        lever_idx = int(np.clip(action[0], 0, len(action_names) - 1))
+        direction = int(action[1])
+        values = {name: 0 for name in action_names}
+        if direction != 1:
+            values[action_names[lever_idx]] = direction - 1
+        return values
+    return {
+        name: int(action[i]) - 1
+        for i, name in enumerate(action_names)
+    }
 
 
 def run_rl_evaluation(
-    run_mode: str, reward_mode: str, gate_type: str, brain
+    run_mode: str,
+    reward_mode: str,
+    gate_type: str,
+    action_mode: str,
+    brain,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run the RL policy and return per-step controls plus squadron-phase history."""
     gate = _GATE_TYPES[gate_type]
@@ -281,24 +336,22 @@ def run_rl_evaluation(
         use_upgrade_quotas=True,
         round_robin=False,
     )
-    env = ManningEnv(sim_engine, run_mode=run_mode, reward_mode=reward_mode)
+    env_cls = SingleActionManningEnv if action_mode == "single_action" else ManningEnv
+    env = env_cls(sim_engine, run_mode=run_mode, reward_mode=reward_mode)
 
-    model_path = model_path_for_gate(gate_type, reward_mode, run_mode)
+    model_path = model_path_for_gate(action_mode, gate_type, reward_mode, run_mode)
+    models_dir = models_dir_for(action_mode, gate_type)
     if not os.path.exists(f"{model_path}.zip"):
         raise FileNotFoundError(
             f"No trained model at `{model_path}.zip`. "
-            f"Place the {gate_type} checkpoint in `{gate['models_dir']}/`."
+            f"Place the checkpoint in `{models_dir}/`."
         )
     try:
         model = PPO.load(model_path)
     except Exception as e:
         _reraise_numpy_pickle_hint("PPO.load", e)
 
-    action_names = ["Intake", "FLUG", "IPUG", "Max Manning"]
-    if run_mode in ("pragmatic", "optimistic", "ideal"):
-        action_names.extend(["UTE", "Retention"])
-    if run_mode in ("ideal", "optimistic"):
-        action_names.append("PAA")
+    action_names = _action_names_for_run_mode(run_mode)
 
     obs, _info = env.reset()
     terminated = False
@@ -337,8 +390,12 @@ def run_rl_evaluation(
             "Experience Ratio": sim_engine.experience_ratio,
             "Number of Squadrons": len(sim_engine.squadrons),
         }
-        for i, name in enumerate(action_names):
-            record[f"Action: {name}"] = int(action[i]) - 1
+        display_actions = _display_actions_from_step(action, action_mode, action_names)
+        for name in action_names:
+            record[f"Action: {name}"] = display_actions[name]
+        if action_mode == "single_action":
+            record["Single Action Lever"] = action_names[int(np.clip(action[0], 0, len(action_names) - 1))]
+            record["Single Action Direction"] = int(action[1]) - 1
         step_rows.append(record)
 
     step_df = pd.DataFrame(step_rows)
@@ -870,7 +927,7 @@ if not os.path.exists(BRAIN_PATH):
 _brain_mtime = os.path.getmtime(BRAIN_PATH)
 cached_brain = load_sortie_brain(BRAIN_PATH, _brain_mtime)
 
-col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
 with col1:
     run_mode = st.selectbox(
         "Run Mode", ["pragmatic", "optimistic", "current", "ideal"]
@@ -882,27 +939,39 @@ with col2:
     )
     st.caption(_REWARD_MODE_HELP[reward_mode])
 with col3:
+    action_mode = st.selectbox(
+        "Action Mode",
+        list(_ACTION_MODES.keys()),
+        index=0,
+        format_func=lambda key: _ACTION_MODES[key]["label"],
+    )
+    st.caption(_ACTION_MODES[action_mode]["help"])
+with col4:
     gate_type = st.selectbox("Gate Type", list(_GATE_TYPES.keys()), index=0)
     st.caption(_GATE_TYPES[gate_type]["help"])
-with col4:
+with col5:
     st.write("")
     st.write("")
     run_button = st.button("🚀 Run 20-Year Simulation")
 
-_expected_model = model_path_for_gate(gate_type, reward_mode, run_mode)
+_expected_model = model_path_for_gate(action_mode, gate_type, reward_mode, run_mode)
 if not os.path.exists(f"{_expected_model}.zip"):
     st.warning(
         f"No model file at `{_expected_model}.zip`. "
-        f"Copy the trained checkpoint into `{_GATE_TYPES[gate_type]['models_dir']}/`."
+        f"Copy the trained checkpoint into `{models_dir_for(action_mode, gate_type)}/`."
     )
 
 if run_button:
-    with st.spinner(f"Evaluating {gate_type} / {run_mode} / {reward_mode}..."):
+    with st.spinner(
+        f"Evaluating {_ACTION_MODES[action_mode]['label']} / {gate_type} / "
+        f"{run_mode} / {reward_mode}..."
+    ):
         try:
             step_df, hist_df = run_rl_evaluation(
                 run_mode=run_mode,
                 reward_mode=reward_mode,
                 gate_type=gate_type,
+                action_mode=action_mode,
                 brain=cached_brain,
             )
             st.session_state["eval_df"] = step_df
@@ -910,6 +979,7 @@ if run_button:
             st.session_state["run_mode"] = run_mode
             st.session_state["reward_mode"] = reward_mode
             st.session_state["gate_type"] = gate_type
+            st.session_state["action_mode"] = action_mode
         except Exception as e:
             st.error(f"Error loading model or running simulation: {e}")
 
