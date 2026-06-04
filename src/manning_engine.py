@@ -50,14 +50,14 @@ class CAFSimulation:
             monthly = AgingRate(
                 mqt_mo, row[0], row[1], row[2],
                 mqt_mo, row[3], row[4], row[5],
-                mqt_sim_phase=mqt_mo,
-                wg_sim_phase=row[0],
-                fl_sim_phase=row[1],
-                ip_sim_phase=row[2],
-                mqt_sim_blue_phase=mqt_mo,
-                wg_sim_blue_phase=row[3],
-                fl_sim_blue_phase=row[4],
-                ip_sim_blue_phase=row[5],
+                mqt_sim_phase=row[6],
+                wg_sim_phase=row[7],
+                fl_sim_phase=row[8],
+                ip_sim_phase=row[9],
+                mqt_sim_blue_phase=row[6],
+                wg_sim_blue_phase=row[7],
+                fl_sim_blue_phase=row[8],
+                ip_sim_blue_phase=row[9],
             )
         else:
             monthly = AgingRate(
@@ -69,7 +69,7 @@ class CAFSimulation:
     def _deferrals_from_brain_row(self, row: np.ndarray) -> Tuple[int, int, int, int, int, int]:
         # Ignore negative deferrals (artifact of brain output)
         # Assume < 0.10 is negligible and set to 0
-        deferrals = list(row[6:12])
+        deferrals = list(row[10:16])
         for i, d in enumerate(deferrals):
             if d < 0.10:
                 deferrals[i] = 0.0
