@@ -1,12 +1,13 @@
+import math
 import random
-from typing import List
+from typing import List, Optional, Set
 from src.models import (
     EventType,
     SquadronConfig,
     Pilot,
     Qual,
     Upgrade,
-    SIM_RAP_MONTHLY,
+    MAX_MONTHLY_EVENTS,
 )
 from src.syllabi import SyllabusEvent, ContinuationProfile
 from src import rules
@@ -113,41 +114,82 @@ def select_upgrade_students(pilots: List[Pilot], upgrade_type: Upgrade, count: i
 # ----------------------
 # Allocation Helpers
 # ----------------------
-def assign_sortie(cfg: SquadronConfig, candidates: List[Pilot], side: str = "Blue", noise: float = 0.0) -> bool:
+def _eligible_for_event(candidates: List[Pilot], cfg: SquadronConfig) -> List[Pilot]:
+    return [p for p in candidates if p.has_events_capacity(cfg.phase_length_days)]
+
+
+def _can_assign_distinct_from_pool(pool: List[Pilot], count: int, cfg: SquadronConfig) -> bool:
+    """Whether ``count`` distinct pilots in ``pool`` can each take one more event under the cap."""
+    if count <= 0:
+        return True
+    months = cfg.phase_length_days / 30.0
+    if months <= 0:
+        return False
+    max_phase_events = MAX_MONTHLY_EVENTS * months
+    eligible = _eligible_for_event(pool, cfg)
+    if len(eligible) < count:
+        return False
+    usage = {id(p): p.phase_events() for p in eligible}
+    picked: Set[int] = set()
+    for _ in range(count):
+        available = [
+            p for p in eligible
+            if id(p) not in picked and usage[id(p)] + 1 <= max_phase_events + 1e-9
+        ]
+        if not available:
+            return False
+        available.sort(key=lambda p: usage[id(p)])
+        winner = available[0]
+        picked.add(id(winner))
+        usage[id(winner)] += 1
+    return True
+
+
+def assign_sortie(
+    cfg: SquadronConfig,
+    candidates: List[Pilot],
+    side: str = "Blue",
+    noise: float = 0.0,
+    exclude: Optional[Set[int]] = None,
+) -> bool:
     """
     Selects the best candidate (lowest utilization) to fly a sortie.
     Returns True if a pilot was found and assigned, False otherwise.
     """
+    exclude = exclude if exclude is not None else set()
+    candidates = [p for p in candidates if id(p) not in exclude]
+    candidates = _eligible_for_event(candidates, cfg)
     if not candidates:
         return False
-    
-    # Sort by current monthly sorties + random noise for distribution
+
     candidates.sort(key=lambda p: p.sortie_phase + random.uniform(0, noise))
-    
+
     winner = candidates[0]
-    
-    # Use helper method if available in models.py, otherwise update manually
-    if hasattr(winner, 'add_sortie'):
-        winner.add_sortie(avg_sortie_dur=cfg.avg_sortie_dur, side=side)
-    else:
-        winner.sortie_phase += 1
-        if side == "Blue":
-            winner.sortie_blue_phase += 1
-        elif side == "Red":
-            winner.sortie_red_phase += 1
-        
+    winner.add_sortie(avg_sortie_dur=cfg.avg_sortie_dur, side=side)
+    exclude.add(id(winner))
     return True
 
-def assign_sim(cfg: SquadronConfig, candidates: List[Pilot], noise: float = 0.0) -> bool:
+
+def assign_sim(
+    cfg: SquadronConfig,
+    candidates: List[Pilot],
+    noise: float = 0.0,
+    exclude: Optional[Set[int]] = None,
+) -> bool:
     """
     Selects the best candidate (lowest utilization) to fly a simulator event.
     Returns True if a pilot was found and assigned, False otherwise.
     """
+    exclude = exclude if exclude is not None else set()
+    candidates = [p for p in candidates if id(p) not in exclude]
+    candidates = _eligible_for_event(candidates, cfg)
     if not candidates:
         return False
 
     candidates.sort(key=lambda p: p.sim_phase + random.uniform(0, noise))
-    candidates[0].add_sim(cfg.avg_sortie_dur)
+    winner = candidates[0]
+    winner.add_sim(cfg.avg_sortie_dur)
+    exclude.add(id(winner))
     return True
 
 def check_syllabus_resources(
@@ -155,16 +197,38 @@ def check_syllabus_resources(
     all_pilots: List[Pilot],
     syllabus_upgrade_type: Upgrade,
     total_capacity: int,
+    cfg: SquadronConfig,
+    student: Optional[Pilot] = None,
 ) -> bool:
-    """Enough support pilots and (for sorties) iron capacity for one student line."""
-    if len([p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.IP)]) < event.num_instructor:
+    """Enough distinct support pilots, iron/sim capacity, and event-cap headroom for one student line."""
+    ips = [
+        p for p in all_pilots
+        if rules.can_fill_seat(pilot=p, min_qual=Qual.IP) and p is not student
+    ]
+    if len(ips) < event.num_instructor:
         return False
-    wg_pool = len([p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)])
-    if wg_pool < event.num_blue_wg or wg_pool < event.num_red_wg:
+    if not _can_assign_distinct_from_pool(ips, event.num_instructor, cfg):
         return False
-    fl_pool = len([p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)])
-    if fl_pool < event.num_blue_fl or fl_pool < event.num_red_fl:
+
+    wg_pool = [
+        p for p in all_pilots
+        if rules.can_fill_seat(pilot=p, min_qual=Qual.WG) and p is not student
+    ]
+    fl_pool = [
+        p for p in all_pilots
+        if rules.can_fill_seat(pilot=p, min_qual=Qual.FL) and p is not student
+    ]
+    wg_seats = event.num_blue_wg + event.num_red_wg
+    fl_seats = event.num_blue_fl + event.num_red_fl
+    if len(wg_pool) < wg_seats:
         return False
+    if len(fl_pool) < fl_seats:
+        return False
+    if not _can_assign_distinct_from_pool(wg_pool, wg_seats, cfg):
+        return False
+    if not _can_assign_distinct_from_pool(fl_pool, fl_seats, cfg):
+        return False
+
     if event.event_type == EventType.SORTIE:
         slots = 1 + event.num_instructor + event.num_blue_wg + event.num_blue_fl + event.num_red_wg + event.num_red_fl
         if sum(p.sortie_phase for p in all_pilots) + slots > total_capacity:
@@ -188,56 +252,86 @@ def process_syllabus_event(
     """
     for student in upgrade_students:
         for _ in range(event.num_student):
-            if not check_syllabus_resources(event, all_pilots, syllabus_upgrade_type, total_capacity):
-                # Already deferred: leave list unchanged (no duplicate)
+            if not student.has_events_capacity(cfg.phase_length_days):
                 if event not in student.incomplete_syllabus_items:
                     student.incomplete_syllabus_items.append(event)
                 continue
-            # Retry succeeded: drop from deferral queue before crediting the line
+            if not check_syllabus_resources(
+                event, all_pilots, syllabus_upgrade_type, total_capacity, cfg, student=student
+            ):
+                if event not in student.incomplete_syllabus_items:
+                    student.incomplete_syllabus_items.append(event)
+                continue
             if event in student.incomplete_syllabus_items:
                 student.incomplete_syllabus_items.remove(event)
+
+            line_assigned: Set[int] = {id(student)}
+            line_ok = True
             if event.event_type == EventType.SIM:
-                student.add_sim(cfg.avg_sortie_dur)
                 for _ in range(event.num_instructor):
                     ips = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.IP)]
-                    assign_sim(cfg, ips, noise)
-                for _ in range(event.num_blue_wg):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
-                    candidates = [p for p in candidates if p is not student]
-                    assign_sim(cfg, candidates, noise)
-                for _ in range(event.num_blue_fl):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
-                    candidates = [p for p in candidates if p is not student]
-                    assign_sim(cfg, candidates, noise)
-                for _ in range(event.num_red_wg):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
-                    candidates = [p for p in candidates if p is not student]
-                    assign_sim(cfg, candidates, noise)
-                for _ in range(event.num_red_fl):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
-                    candidates = [p for p in candidates if p is not student]
-                    assign_sim(cfg, candidates, noise)
+                    if not assign_sim(cfg, ips, noise, exclude=line_assigned):
+                        line_ok = False
+                        break
+                if line_ok:
+                    for _ in range(event.num_blue_wg):
+                        candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
+                        if not assign_sim(cfg, candidates, noise, exclude=line_assigned):
+                            line_ok = False
+                            break
+                if line_ok:
+                    for _ in range(event.num_blue_fl):
+                        candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
+                        if not assign_sim(cfg, candidates, noise, exclude=line_assigned):
+                            line_ok = False
+                            break
+                if line_ok:
+                    for _ in range(event.num_red_wg):
+                        candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
+                        if not assign_sim(cfg, candidates, noise, exclude=line_assigned):
+                            line_ok = False
+                            break
+                if line_ok:
+                    for _ in range(event.num_red_fl):
+                        candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
+                        if not assign_sim(cfg, candidates, noise, exclude=line_assigned):
+                            line_ok = False
+                if line_ok:
+                    student.add_sim(cfg.avg_sortie_dur)
             else:
-                student.add_sortie(cfg.avg_sortie_dur, "Blue")
                 for _ in range(event.num_instructor):
                     ips = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.IP)]
-                    assign_sortie(cfg, ips, "Blue", noise)
-                for _ in range(event.num_blue_wg):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
-                    candidates = [p for p in candidates if p is not student]
-                    assign_sortie(cfg, candidates, "Blue", noise)
-                for _ in range(event.num_blue_fl):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
-                    candidates = [p for p in candidates if p is not student]
-                    assign_sortie(cfg, candidates, "Blue", noise)
-                for _ in range(event.num_red_wg):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
-                    candidates = [p for p in candidates if p is not student]
-                    assign_sortie(cfg, candidates, "Red", noise)
-                for _ in range(event.num_red_fl):
-                    candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
-                    candidates = [p for p in candidates if p is not student]
-                    assign_sortie(cfg, candidates, "Red", noise)
+                    if not assign_sortie(cfg, ips, "Blue", noise, exclude=line_assigned):
+                        line_ok = False
+                        break
+                if line_ok:
+                    for _ in range(event.num_blue_wg):
+                        candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
+                        if not assign_sortie(cfg, candidates, "Blue", noise, exclude=line_assigned):
+                            line_ok = False
+                            break
+                if line_ok:
+                    for _ in range(event.num_blue_fl):
+                        candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
+                        if not assign_sortie(cfg, candidates, "Blue", noise, exclude=line_assigned):
+                            line_ok = False
+                            break
+                if line_ok:
+                    for _ in range(event.num_red_wg):
+                        candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
+                        if not assign_sortie(cfg, candidates, "Red", noise, exclude=line_assigned):
+                            line_ok = False
+                            break
+                if line_ok:
+                    for _ in range(event.num_red_fl):
+                        candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
+                        if not assign_sortie(cfg, candidates, "Red", noise, exclude=line_assigned):
+                            line_ok = False
+                if line_ok:
+                    student.add_sortie(cfg.avg_sortie_dur, "Blue")
+
+            if not line_ok and event not in student.incomplete_syllabus_items:
+                student.incomplete_syllabus_items.append(event)
 
 def run_upgrade_program(
     syllabus: List[SyllabusEvent],
@@ -296,22 +390,54 @@ def allocate_continuation_training(
         ]
 
         for _ in range(qty):
-            assign_sortie(cfg=cfg, candidates=eligible, side=bucket.side, noise=noise)
+            if not assign_sortie(cfg=cfg, candidates=eligible, side=bucket.side, noise=noise):
+                break
+
+def allocate_sim_rap(
+    pilots: List[Pilot],
+    cfg: SquadronConfig,
+    noise: float = 0.0,
+) -> None:
+    """
+    Top up sim RAP events after syllabus + continuation training.
+
+    Sims are allocated one at a time (not bulk-assigned), subject to the per-pilot
+    monthly event cap and optionally sim-wing capacity.
+    """
+    phase_months = cfg.phase_length_days / 30.0
+    if math.isfinite(cfg.sim_sessions_monthly):
+        sim_capacity = int(cfg.sim_sessions_monthly * cfg.sim_bays_per_session * phase_months)
+    else:
+        sim_capacity = None  # no sim-bay limit (e.g. SIM_SESSIONS_MONTHLY = inf)
+    used_sims = int(round(sum(p.sim_phase for p in pilots)))
+
+    while sim_capacity is None or used_sims < sim_capacity:
+        pool = []
+        for p in pilots:
+            target = p.target_sims * phase_months
+            shortfall = target - p.sim_phase
+            if shortfall <= 1e-9:
+                continue
+            if not p.has_events_capacity(cfg.phase_length_days):
+                continue
+            pool.append((shortfall, p))
+        if not pool:
+            break
+
+        max_shortfall = max(s for s, _ in pool)
+        candidates = [p for s, p in pool if s >= max_shortfall - 1e-9]
+        if not assign_sim(cfg, candidates, noise):
+            break
+        used_sims += 1
 
 # ----------------------
 # Main Simulation Phase
 # ----------------------
 def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_noise: float = 0.0):
-    
-    # 1. Reset Phase Counters
+
     for p in pilots:
-        if hasattr(p, 'reset_counters'):
-            p.reset_counters()
-        else:
-            p.sortie_phase = 0 
-            p.sortie_blue_phase = 0
-            p.sortie_red_phase = 0
-            p.sim_phase = 0
+        p.reset_phase_counters()
+        p.set_rap_requirement()
 
     # 2. New students only (carryover already have upgrade MQT/FLUG/IPUG)
     mqt_students = select_upgrade_students(pilots, Upgrade.MQT, cfg.mqt_students)
@@ -337,11 +463,12 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
     # 5. Continuation Training
     allocate_continuation_training(pilots, CONTINUATION_PROFILE, total_capacity, allocation_noise, cfg=cfg)
 
-    # 6. Finalize Stats (no graduation here — incomplete students keep upgrade status)
+    # 6. Sim RAP (discrete allocation; syllabus sims already credited above)
+    allocate_sim_rap(pilots, cfg, allocation_noise)
+
+    # 7. Finalize monthly stats and RAP shortfalls
     for p in pilots:
-        months = cfg.phase_length_days / 30.0
-        p.sim_phase = SIM_RAP_MONTHLY * months
-        p.update_total()
+        p.update_total(cfg.phase_length_days)
         p.update_monthly(cfg.phase_length_days)
 
     return pilots
@@ -370,11 +497,22 @@ def print_phase_summary(pilots: List[Pilot], cfg: SquadronConfig, verbose: bool 
             continue
             
         avg_sorties = sum(p.sortie_monthly for p in group) / len(group)
+        avg_sims = sum(p.sim_monthly for p in group) / len(group)
+        avg_events = sum(p.sortie_monthly + p.sim_monthly for p in group) / len(group)
         avg_blue_sorties = sum(p.sortie_blue_monthly for p in group) / len(group)
         avg_red_sorties = sum(p.sortie_red_monthly for p in group) / len(group)
-        print(f"{name} ({len(group)}): Avg Mo. Sorties {avg_sorties:.1f}, Avg Mo. Blue Sorties {avg_blue_sorties:.1f}, Avg Mo. Red Sorties {avg_red_sorties:.1f}")
+        if verbose:
+            print(
+                f"{name} ({len(group)}): Avg Mo. Sorties {avg_sorties:.1f}, "
+                f"Sims {avg_sims:.1f}, Total Events {avg_events:.1f}, "
+                f"Blue {avg_blue_sorties:.1f}, Red {avg_red_sorties:.1f}"
+            )
 
     if verbose:
         for name, group in groups.items():
             for p in group:
-                print(f'{p.qual}/{p.upgrade}: Monthly {p.sortie_monthly}, Blue {p.sortie_blue_monthly}, Red {p.sortie_red_monthly}')
+                print(
+                    f"{p.qual}/{p.upgrade}: Sorties {p.sortie_monthly:.1f}/mo, "
+                    f"Sims {p.sim_monthly:.1f}/mo, "
+                    f"Total {p.sortie_monthly + p.sim_monthly:.1f}/mo"
+                )
