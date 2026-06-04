@@ -16,6 +16,8 @@ SIM_EP_MONTHLY: float = 1.0
 # (e.g. 4 bays = one 4-ship block or two 2-ship blocks in parallel).
 SIM_SESSIONS_MONTHLY: float = 30.0
 SIM_BAYS_PER_SESSION: int = 4
+# Max combined sorties + sims per pilot per month (single-phase allocation path).
+MAX_MONTHLY_EVENTS: float = 25.0
 
 
 # ----------------------
@@ -198,6 +200,16 @@ class Pilot:
         self.sortie_red_phase = 0
         self.sim_phase = 0
         self.ep_sim_phase = 0.0
+
+    def phase_events(self) -> float:
+        return float(self.sortie_phase) + float(self.sim_phase)
+
+    def has_events_capacity(self, phase_length_days: float, additional: float = 1.0) -> bool:
+        """True if ``additional`` more events would stay within ``MAX_MONTHLY_EVENTS`` per month."""
+        months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
+        if months <= 0:
+            return False
+        return (self.phase_events() + additional) / months <= MAX_MONTHLY_EVENTS + 1e-9
 
     def add_sortie(self, avg_sortie_dur: float, side: str = "Blue"):
         self.sortie_phase += 1
