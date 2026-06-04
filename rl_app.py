@@ -139,9 +139,9 @@ def _syllabus_preds_by_timeline(df: pd.DataFrame, brain, ute: float) -> pd.DataF
     feat = _brain_features_from_history(df, ute)
     preds = brain.predict(feat[_PREDICT_FEATURES].fillna(0))
     for i, col in enumerate(_REMAINING_TOTAL):
-        feat[col] = _clean_syllabus_preds(preds[:, 6 + i])
+        feat[col] = _clean_syllabus_preds(preds[:, 10 + i])
     for i, col in enumerate(_REMAINING_SORTIES):
-        feat[col] = _clean_syllabus_preds(preds[:, 9 + i])
+        feat[col] = _clean_syllabus_preds(preds[:, 13 + i])
     feat["timeline"] = feat["year"].astype(str) + " P" + feat["phase"].astype(str)
     return (
         feat.groupby(["year", "phase", "timeline"], as_index=False)[
@@ -713,7 +713,7 @@ def render_manning_charts(df_display: pd.DataFrame, df_hist: pd.DataFrame, brain
         st.subheader("Incomplete Syllabi (Brain Prediction)")
         st.caption(
             "Y-axis is syllabus-normalized incomplete work per squadron (avg), each phase. "
-            "1.0 ≈ one full syllabus incomplete at a typical squadron; values from brain outputs 6–11."
+            "1.0 ≈ one full syllabus incomplete at a typical squadron; values from brain outputs 10–15."
         )
         sorties_only_syll = st.toggle(
             "Sorties only",
