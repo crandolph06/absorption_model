@@ -32,11 +32,8 @@ def verify_model():
         if col not in df.columns: 
             df[col] = 0
 
-    fls = df['fl_qty'].replace(0, 1.0)
-    wgs = df['wg_qty'].replace(0, 1.0)
-
-    df['fl_congestion'] = (df['ipug_qty'] + df['flug_qty']) / fls
-    df['wg_crowding'] = (df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']) / wgs
+    df['fl_congestion'] = (df['ipug_qty'] + df['flug_qty']) / df['fl_qty']
+    df['wg_crowding'] = (df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']) / df['wg_qty']
 
     df['sorties_avail'] = df['paa'] * df['ute']
     df['pilot_to_sortie'] = df['total_pilots'] / df['sorties_avail']

@@ -5,8 +5,6 @@ import joblib
 import glob
 import os
 
-from src.syllabi import SORTIE_SLOTS_MQT, SORTIE_SLOTS_FLUG, SORTIE_SLOTS_IPUG
-
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline

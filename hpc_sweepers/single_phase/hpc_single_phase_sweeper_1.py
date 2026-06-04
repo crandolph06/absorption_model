@@ -131,12 +131,15 @@ def process_single_config(args):
     avg = {k: sum(d[k] for d in results) / n for k in results[0]}
 
     # 5. Construct Final Row
-    # We add the inputs back here for the CSV
+    experienced = int(total * exp)
+    wg_qty = total - experienced
+    fl_qty = experienced - ip_q
     return {
         "paa": paa, "ute": ute,
         "total_capacity": cfg.paa * cfg.ute * cfg.phase_length_months,
         "exp_ratio": exp, "ip_qty": ip_q, "total_pilots": total,
         "mqt_qty": mqt, "flug_qty": flug, "ipug_qty": ipug,
+        "wg_qty": wg_qty, "fl_qty": fl_qty,
         "rap_state_code": avg["r_code"],
         "rap_state_label": rap_state_label(int(round(avg["r_code"]))),
         "blue_rap_state_code": avg["b_code"],

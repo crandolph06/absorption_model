@@ -44,16 +44,17 @@ def predict_metrics(df_inputs):
         if col not in df.columns: 
             df[col] = 0
 
-    ips = df['ip_qty'].replace(0, 1.0)
-    fls = df['fl_qty'].replace(0, 1.0)
-    wgs = df['wg_qty'].replace(0, 1.0)
+    experienced = (df['total_pilots'] * df['exp_ratio']).astype(int)
+    df['wg_qty'] = df['total_pilots'] - experienced
+    df['fl_qty'] = experienced - df['ip_qty']
 
+    ips = df['ip_qty'].replace(0, 1.0)
     df['mqt_load'] = df['mqt_qty'] / ips
     df['flug_load'] = df['flug_qty'] / ips
     df['ipug_load'] = df['ipug_qty'] / ips
     
-    df['fl_congestion'] = (df['ipug_qty'] + df['flug_qty']) / fls
-    df['wg_crowding'] = (df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']) / wgs
+    df['fl_congestion'] = (df['ipug_qty'] + df['flug_qty']) / df['fl_qty']
+    df['wg_crowding'] = (df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']) / df['wg_qty']
 
     df['sorties_avail'] = df['paa'] * df['ute']
     df['pilot_to_sortie'] = df['total_pilots'] / df['sorties_avail']
