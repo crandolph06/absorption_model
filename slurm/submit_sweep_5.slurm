@@ -12,8 +12,8 @@
 ## Optional Slurm Directives --------------------------------------
 #SBATCH --job-name=single_phase_sweep_5
 #SBATCH --export=ALL
-#SBATCH --output=$WORKDIR/absorption_model/logs/sweep_5_%j.out
-#SBATCH --error=$WORKDIR/absorption_model/logs/sweep_5_%j.err
+#SBATCH --output=../logs/sweep_5_%j.out
+#SBATCH --error=../logs/sweep_5_%j.err
 #
 ## Execution Block ----------------------------------------------
 JOBID=`echo $SLURM_JOB_ID`
