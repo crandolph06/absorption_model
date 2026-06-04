@@ -62,11 +62,14 @@ def train_hpc_multi_brain():
         'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio',
     ]
     
+    # Multi-output layout (16 targets): sorties 0–2, blue 3–5, sim monthly 6–9, syllabus 10–15
     targets = [
-        'wg_monthly', 'fl_monthly', 'ip_monthly', 
+        'wg_monthly', 'fl_monthly', 'ip_monthly',
         'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly',
+        'mqt_sim_monthly', 'wg_sim_monthly', 'fl_sim_monthly', 'ip_sim_monthly',
         'remaining_mqt_syllabi_mean', 'remaining_flug_syllabi_mean', 'remaining_ipug_syllabi_mean',
-        'remaining_mqt_syllabi_sorties_only_mean', 'remaining_flug_syllabi_sorties_only_mean', 'remaining_ipug_syllabi_sorties_only_mean'
+        'remaining_mqt_syllabi_sorties_only_mean', 'remaining_flug_syllabi_sorties_only_mean',
+        'remaining_ipug_syllabi_sorties_only_mean',
     ]
 
     X = df[features].fillna(0)
