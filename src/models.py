@@ -14,7 +14,7 @@ SIM_RAP_MONTHLY: float = 3.0
 SIM_EP_MONTHLY: float = 1.0
 # Simulator wing capacity: ~30 session lines / month; each session has this many bays
 # (e.g. 4 bays = one 4-ship block or two 2-ship blocks in parallel).
-SIM_SESSIONS_MONTHLY: float = 30.0
+SIM_SESSIONS_MONTHLY: float = float("inf")
 SIM_BAYS_PER_SESSION: int = 4
 # Max combined sorties + sims per pilot per month (single-phase allocation path).
 MAX_MONTHLY_EVENTS: float = 25.0
@@ -474,40 +474,8 @@ class SquadronConfig:
             return rates.mqt_sim_phase
         return rates.wg_sim_phase
 
-    def apply_phase_aging(self, rates: AgingRate, brain_includes_sim_outputs: bool = False):
-        """Sortie aging from ``rates``; sims depend on ``brain_includes_sim_outputs``.
-
-        When ``brain_includes_sim_outputs`` is False (current single-phase brain): sortie rates
-        come from the ML model; sim RAP uses ``SIM_RAP_MONTHLY`` × phase length for everyone;
-        student upgrade syllabus sim lines are topped up to completion with integer ``add_sim``.
-
-        When True: phase sim totals use ``rates.*_sim_phase`` (fractional, like sorties) via
-        ``Pilot.age_sim_phase_with_rates`` until a dedicated sim-aware brain replaces the placeholder.
-        """
-        from src.syllabi import (
-            FLUG_SYLLABUS,
-            IPUG_SYLLABUS,
-            MQT_SYLLABUS,
-            count_sim_student_slots,
-            count_sortie_student_slots,
-        )
-
-        syllabus_needs = {
-            Upgrade.MQT: (
-                count_sortie_student_slots(MQT_SYLLABUS),
-                count_sim_student_slots(MQT_SYLLABUS),
-            ),
-            Upgrade.FLUG: (
-                count_sortie_student_slots(FLUG_SYLLABUS),
-                count_sim_student_slots(FLUG_SYLLABUS),
-            ),
-            Upgrade.IPUG: (
-                count_sortie_student_slots(IPUG_SYLLABUS),
-                count_sim_student_slots(IPUG_SYLLABUS),
-            ),
-        }
-        phase_length_months = self.phase_length_months
-
+    def apply_phase_aging(self, rates: AgingRate):
+        """Sortie and sim phase credit from ``rates`` (brain-predicted monthly rates)."""
         for p in self.pilots:
             if not p.active:
                 continue
@@ -521,26 +489,10 @@ class SquadronConfig:
             else:
                 p_rate = rates.wg_phase
 
-            p.age_one_phase_with_rates(p_rate, self.avg_sortie_dur, phase_length_months)
+            p.age_one_phase_with_rates(p_rate, self.avg_sortie_dur, self.phase_length_months)
 
-            if brain_includes_sim_outputs:
-                sim_rate = self._phase_sim_rate_for_pilot(p, rates)
-                p.age_sim_phase_with_rates(sim_rate, self.avg_sortie_dur)
-                continue
-
-            n_rap = max(0, int(round(SIM_RAP_MONTHLY * phase_length_months)))
-            for _ in range(n_rap):
-                p.add_sim(self.avg_sortie_dur)
-
-            if (
-                p.current_assignment == Assignment.LINE
-                and p.upgrade in syllabus_needs
-            ):
-                _, need_sim = syllabus_needs[p.upgrade]
-                if need_sim <= 0:
-                    continue
-                while int(p.sims_flown) - int(p.sims_at_upgrade_start) < need_sim:
-                    p.add_sim(self.avg_sortie_dur)
+            sim_rate = self._phase_sim_rate_for_pilot(p, rates)
+            p.age_sim_phase_with_rates(sim_rate, self.avg_sortie_dur)
 
     def store_stats(self, year: int, phase_num: int, rates: AgingRate):
         months = self.phase_length_months
