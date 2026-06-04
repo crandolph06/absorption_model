@@ -47,11 +47,11 @@ def setup_simulation(round_robin: bool, annual_intake: int,
     return sim, squadrons
 
 # if __name__ == "__main__":
-#     brain = joblib.load('outputs/single_phase/brains') # For HPC
-#     # brain = joblib.load('brains/hpc_sortie_brain_lite.pkl') # For local
+#     # brain = joblib.load('outputs/single_phase/brains') # For HPC
+#     brain = joblib.load('brains/hpc_sortie_brain_multi_output_mlp.pkl') # For local
 #     sim, squadrons = setup_simulation(round_robin=False, ai_brain=brain, annual_intake=150, retention_rate = .4)
 
 #     results_df = sim.run_simulation(
-#         years_to_run=10,   
+#         years_to_run=1,   
 #         squadron_configs=squadrons,
 #     )
