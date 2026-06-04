@@ -33,7 +33,7 @@ python --version
 export PYTHONUNBUFFERED=1
 #
 mkdir -p $WORKDIR/absorption_model/logs
-timeout 14100s python -u hpc_single_phase_sweeper_2A.py || true
+timeout 14100s python -u single_phase_sweepers/hpc_single_phase_sweeper_2A.py || true
 #
 
 if [ -f SWEEP_2A_COMPLETE.txt ]; then
