@@ -178,7 +178,7 @@ def run_parallel_sweep():
     print("Generating parameter space...")
     keys, param_generator = get_sweep_configs()
 
-    batch_prefix = "batch_1_"
+    batch_prefix = "batch_low_"
     completed_batches: set[int] = set()
     for f in os.listdir(OUTPUT_DIR):
         if f.startswith(batch_prefix) and f.endswith('.parquet'):
@@ -249,9 +249,9 @@ def run_parallel_sweep():
                 pd.DataFrame(buffer).to_parquet(batch_file, index=False)
                 count += len(buffer)
 
-    with open("SWEEP_1_COMPLETE.txt", "w") as f:
+    with open("SWEEP_LOW_COMPLETE.txt", "w") as f:
         f.write("Done")
-    print(f"\n✅ Sweep 1 Complete. Total valid configs: {count}")
+    print(f"\n✅ Sweep Low Complete. Total valid configs: {count}")
 
 if __name__ == "__main__":
     run_parallel_sweep()
