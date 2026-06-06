@@ -12,27 +12,49 @@ from sklearn.metrics import r2_score
 from sklearn.neural_network import MLPRegressor
 
 INPUT_DIR = "outputs/single_phase/repart_parquet"
-SAMPLE_FRAC = 0.10 
+LOW_BATCH_GLOB = "outputs/single_phase/parquet/batch_low_*.parquet"
+SAMPLE_FRAC = 0.10
+LOW_EXP_THRESHOLD = 0.10
+LOW_EXP_SAMPLE_FRAC = 1.0
 RANDOM_SEED = 42
+
+
+def sample_chunk(df_chunk):
+    """Keep all low-exp rows; sample high-exp rows at SAMPLE_FRAC."""
+    low = df_chunk[df_chunk["exp_ratio"] <= LOW_EXP_THRESHOLD]
+    high = df_chunk[df_chunk["exp_ratio"] > LOW_EXP_THRESHOLD]
+
+    if LOW_EXP_SAMPLE_FRAC < 1.0:
+        low = low.sample(frac=LOW_EXP_SAMPLE_FRAC, random_state=RANDOM_SEED)
+    elif LOW_EXP_SAMPLE_FRAC > 1.0 and len(low) > 0:
+        low = low.sample(frac=LOW_EXP_SAMPLE_FRAC, replace=True, random_state=RANDOM_SEED)
+
+    if len(high) > 0 and SAMPLE_FRAC < 1.0:
+        high = high.sample(frac=SAMPLE_FRAC, random_state=RANDOM_SEED)
+
+    return pd.concat([low, high], ignore_index=True)
+
 
 def train_hpc_multi_brain():
     print(f"🚀 Starting Multi-Output HPC Brain Training...")
-    files = glob.glob(os.path.join(INPUT_DIR, "part.*.parquet"))
-    
-    if not files:
-        print(f"❌ No parquet files found in {INPUT_DIR}")
+    files = sorted(glob.glob(os.path.join(INPUT_DIR, "part.*.parquet")))
+    low_files = sorted(glob.glob(LOW_BATCH_GLOB))
+
+    if not files and not low_files:
+        print(f"❌ No parquet files found in {INPUT_DIR} or {LOW_BATCH_GLOB}")
         return
 
     # LOAD & SAMPLE DATA
     mini_batches = []
     for f in files:
-        df_chunk = pd.read_parquet(f)
-        if SAMPLE_FRAC < 1.0:
-            df_chunk = df_chunk.sample(frac=SAMPLE_FRAC, random_state=RANDOM_SEED)
-        mini_batches.append(df_chunk)
-    
+        mini_batches.append(sample_chunk(pd.read_parquet(f)))
+    for f in low_files:
+        mini_batches.append(pd.read_parquet(f))
+
     df = pd.concat(mini_batches, ignore_index=True)
+    low_exp_count = (df["exp_ratio"] <= LOW_EXP_THRESHOLD).sum()
     print(f"📊 Dataset loaded: {len(df):,} rows")
+    print(f"   exp_ratio <= {LOW_EXP_THRESHOLD}: {low_exp_count:,} rows")
 
     # FEATURE & TARGET SELECTION
     base_features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'wg_qty', 'fl_qty','ip_qty']
@@ -104,6 +126,11 @@ def train_hpc_multi_brain():
     # SCORE
     score = r2_score(Y_test, y_pred)
     print(f"✅ Training Complete. Overall R² Score: {score:.4f}")
+
+    low_test = X_test["exp_ratio"] <= LOW_EXP_THRESHOLD
+    if low_test.any():
+        low_score = r2_score(Y_test.loc[low_test], y_pred[low_test], multioutput="uniform_average")
+        print(f"   R² (exp_ratio <= {LOW_EXP_THRESHOLD}): {low_score:.4f} ({low_test.sum():,} test rows)")
 
     # SAVE
     os.makedirs(os.path.dirname(OUTPUT_MODEL), exist_ok=True)
