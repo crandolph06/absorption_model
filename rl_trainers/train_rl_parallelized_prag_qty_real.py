@@ -82,7 +82,7 @@ def main():
             print(f"✅ Learning Complete. Total duration: {duration} (HH:MM:SS)")
 
             os.makedirs("saved_models", exist_ok=True)
-            model_path = f"saved_models/ppo_manning_agent_{reward_mode}_{run_mode}"
+            model_path = f"saved_models/multi_action/real_gates/ppo_manning_agent_{reward_mode}_{run_mode}"
             model.save(model_path)
             print(f"Training complete. Model saved to {model_path}.zip")
             env.close()
