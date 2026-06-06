@@ -4,6 +4,7 @@ import numpy as np
 import joblib
 import glob
 import os
+import sys
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -13,10 +14,35 @@ from sklearn.neural_network import MLPRegressor
 
 INPUT_DIR = "outputs/single_phase/repart_parquet"
 LOW_BATCH_GLOB = "outputs/single_phase/parquet/batch_low_*.parquet"
+OUTPUT_MODEL = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl"
 SAMPLE_FRAC = 0.10
 LOW_EXP_THRESHOLD = 0.10
 LOW_EXP_SAMPLE_FRAC = 1.0
 RANDOM_SEED = 42
+
+TARGETS = [
+    "wg_monthly", "fl_monthly", "ip_monthly",
+    "wg_blue_monthly", "fl_blue_monthly", "ip_blue_monthly",
+    "mqt_sim_monthly", "wg_sim_monthly", "fl_sim_monthly", "ip_sim_monthly",
+    "remaining_mqt_syllabi_mean", "remaining_flug_syllabi_mean", "remaining_ipug_syllabi_mean",
+    "remaining_mqt_syllabi_sorties_only_mean", "remaining_flug_syllabi_sorties_only_mean",
+    "remaining_ipug_syllabi_sorties_only_mean",
+]
+
+
+def model_output_count(model):
+    preds = model.predict(np.zeros((1, 9)))
+    return preds.shape[1] if preds.ndim > 1 else 1
+
+
+def require_target_columns(df):
+    missing = [col for col in TARGETS if col not in df.columns]
+    if missing:
+        print(f"❌ Training data is missing {len(missing)} required target column(s):")
+        for col in missing:
+            print(f"   - {col}")
+        print("   Re-run repartition from current sweep parquet, then retrain.")
+        sys.exit(1)
 
 
 def sample_chunk(df_chunk):
@@ -36,7 +62,8 @@ def sample_chunk(df_chunk):
 
 
 def train_hpc_multi_brain():
-    print(f"🚀 Starting Multi-Output HPC Brain Training...")
+    print("🚀 Starting Multi-Output HPC Brain Training...")
+    print(f"   Script expects {len(TARGETS)} outputs (includes 4 sim monthly targets)")
     files = sorted(glob.glob(os.path.join(INPUT_DIR, "part.*.parquet")))
     low_files = sorted(glob.glob(LOW_BATCH_GLOB))
 
@@ -52,6 +79,7 @@ def train_hpc_multi_brain():
         mini_batches.append(pd.read_parquet(f))
 
     df = pd.concat(mini_batches, ignore_index=True)
+    require_target_columns(df)
     low_exp_count = (df["exp_ratio"] <= LOW_EXP_THRESHOLD).sum()
     print(f"📊 Dataset loaded: {len(df):,} rows")
     print(f"   exp_ratio <= {LOW_EXP_THRESHOLD}: {low_exp_count:,} rows")
@@ -79,23 +107,12 @@ def train_hpc_multi_brain():
         'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio',
     ]
     
-    # Multi-output layout (16 targets): sorties 0–2, blue 3–5, sim monthly 6–9, syllabus 10–15
-    targets = [
-        'wg_monthly', 'fl_monthly', 'ip_monthly',
-        'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly',
-        'mqt_sim_monthly', 'wg_sim_monthly', 'fl_sim_monthly', 'ip_sim_monthly',
-        'remaining_mqt_syllabi_mean', 'remaining_flug_syllabi_mean', 'remaining_ipug_syllabi_mean',
-        'remaining_mqt_syllabi_sorties_only_mean', 'remaining_flug_syllabi_sorties_only_mean',
-        'remaining_ipug_syllabi_sorties_only_mean',
-    ]
-
     X = df[features].fillna(0)
-    Y = df[targets].fillna(0)
+    Y = df[TARGETS].fillna(0)
+    print(f"   Training matrix: X={X.shape}, Y={Y.shape}")
 
     # 3. SPLIT
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=RANDOM_SEED)
-
-    OUTPUT_MODEL = "outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl"
 
     # DEFINE MODEL
     brain = MLPRegressor(
@@ -133,8 +150,13 @@ def train_hpc_multi_brain():
         print(f"   R² (exp_ratio <= {LOW_EXP_THRESHOLD}): {low_score:.4f} ({low_test.sum():,} test rows)")
 
     # SAVE
+    n_outputs = model_output_count(mlp_model)
+    print(f"   Saved model output count: {n_outputs}")
+    if n_outputs != len(TARGETS):
+        print(f"❌ Refusing to save: expected {len(TARGETS)} outputs, got {n_outputs}")
+        sys.exit(1)
+
     os.makedirs(os.path.dirname(OUTPUT_MODEL), exist_ok=True)
-    
     joblib.dump(mlp_model, OUTPUT_MODEL)
     print(f"💾 MLP brain saved to {OUTPUT_MODEL}")
 

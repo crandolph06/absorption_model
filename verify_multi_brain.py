@@ -29,6 +29,10 @@ def verify_model():
         print(f"❌ Error: Model file not found at {MODEL_PATH}.")
         return
 
+    if os.path.exists(MODEL_PATH):
+        mtime = pd.Timestamp(os.path.getmtime(MODEL_PATH), unit="s")
+        print(f"   Model file modified: {mtime}")
+
     files = sorted(glob.glob(os.path.join(DATA_DIR, "part.*.parquet")))
     if not files:
         print(f"❌ Error: No parquet files found in {DATA_DIR}")
