@@ -134,6 +134,17 @@ CONTINUATION_PROFILE = ContinuationProfile(
     ]
 )
 
+TEST_CONTINUATION_PROFILE = ContinuationProfile(
+    name="Test Continuation Training",
+    buckets=[
+        # Seat min_qual is crew requirement; IPs may fill FL/WG seats (``can_fill_seat`` / hierarchy).
+        ContinuationBucket("Blue FL", Qual.FL, "Blue", 0.25),
+        ContinuationBucket("Blue WG", Qual.WG, "Blue", 0.25),
+        ContinuationBucket("Red FL", Qual.FL, "Red", 0.25),
+        ContinuationBucket("Red WG", Qual.WG, "Red", 0.25),
+    ]
+)
+
 
 def syllabus_sortie_events_only(syllabus: List[SyllabusEvent]) -> List[SyllabusEvent]:
     """This simulator only allocates flying for SORTIE syllabus lines (not SIM)."""
