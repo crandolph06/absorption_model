@@ -22,19 +22,24 @@ class SyllabusEvent:
 # Tiny Test Syllabi
 # ----------------------
 TEST_MQT_SYLLABUS = [
-    SyllabusEvent("OBFM", EventType.SORTIE, Qual.WG, num_student=1, num_instructor=1),
-    SyllabusEvent("DBFM", EventType.SORTIE, Qual.WG, 1,1,0,0,0,0)
-    # SyllabusEvent("ACM", EventType.SORTIE, Qual.WG, num_blue_wg=1,)
+    SyllabusEvent("OBFM", EventType.SORTIE, Qual.WG, 1,1,0,0,0,0),
+    SyllabusEvent("ACM", EventType.SORTIE, Qual.WG, 1,1,0,0,1,1),
+    SyllabusEvent("4vX TI", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
+    SyllabusEvent("DCA", EventType.SORTIE, Qual.WG, 1,1,1,1,2,2)
 ]
 
 TEST_FLUG_SYLLABUS = [
-    SyllabusEvent("OBFM", EventType.SORTIE, Qual.WG, num_student=1, num_instructor=1),
-    # SyllabusEvent("ACM", EventType.SORTIE, Qual.WG, num_blue_wg=1)
+    SyllabusEvent("OBFM", EventType.SORTIE, Qual.WG, 1,1,0,0,0,0),
+    SyllabusEvent("ACM", EventType.SORTIE, Qual.WG, 1,1,0,0,1,1),
+    SyllabusEvent("4vX TI", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
+    SyllabusEvent("DCA", EventType.SORTIE, Qual.WG, 1,1,1,1,2,2)
 ]
 
 TEST_IPUG_SYLLABUS = [
-    SyllabusEvent("OBFM", EventType.SORTIE, Qual.FL, num_student=1, num_instructor=1),
-    SyllabusEvent("ACM", EventType.SORTIE, Qual.FL, 1,1,0,0,1,1)
+    SyllabusEvent("OBFM", EventType.SORTIE, Qual.WG, 1,1,0,0,0,0),
+    SyllabusEvent("ACM", EventType.SORTIE, Qual.WG, 1,1,0,0,1,1),
+    SyllabusEvent("4vX TI", EventType.SIM, Qual.WG, 1,1,1,1,0,0),
+    SyllabusEvent("DCA", EventType.SORTIE, Qual.WG, 1,1,1,1,2,2)
 ]
 
 # ----------------------
