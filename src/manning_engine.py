@@ -1,6 +1,7 @@
 import pandas as pd
 from typing import List, Optional, Tuple
 from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, PriorityMode, AgingRate
+from src.simulation_config import SimulationConfig
 import os
 import numpy as np
 import joblib
@@ -11,7 +12,8 @@ class CAFSimulation:
                  round_robin: bool, brain = None, flug_window_start: int = 250, 
                  ipug_window_start: int = 400, max_manning_pct: int = 150, 
                  staff_priority_mode: PriorityMode = PriorityMode.RANDOM,
-                 use_upgrade_quotas: bool = False):
+                 use_upgrade_quotas: bool = False,
+                 sim_config: Optional[SimulationConfig] = None):
         self.history = []
         self.current_year = 2026
         self.current_phase = 1
@@ -39,6 +41,7 @@ class CAFSimulation:
         else:
             raise FileNotFoundError(f"Could not find brains/hpc_sortie_brain_multi_output_mlp. Please confirm file path first.")
         self.round_robin = round_robin
+        self.sim_config = sim_config or SimulationConfig()
 
     def _phase_rates_from_brain_row(
         self, mqt_mo: float, row: np.ndarray, phase_length_days: float
@@ -235,17 +238,18 @@ class CAFSimulation:
         for i, sq in enumerate(self.squadrons):
             row = preds[i]
             mqt_mo = self._resolve_mqt_monthly(sq)
-            rates = self._phase_rates_from_brain_row(mqt_mo, row, sq.phase_length_days)
+            phase_days = self.sim_config.phase_length_days
+            rates = self._phase_rates_from_brain_row(mqt_mo, row, phase_days)
             mqt_baseline = {
                 id(p): p.sorties_flown
                 for p in sq.pilots
                 if p.upgrade == Upgrade.MQT and p.active
             }
 
-            sq.apply_phase_aging(rates)
+            sq.apply_phase_aging(rates, phase_days)
 
             if mqt_baseline:
-                months = sq.phase_length_months
+                months = self.sim_config.phase_length_months
                 if months > 0:
                     deltas = [
                         p.sorties_flown - mqt_baseline[id(p)]
@@ -255,7 +259,7 @@ class CAFSimulation:
                     if deltas:
                         sq.observed_mqt_monthly = sum(deltas) / len(deltas) / months
 
-            current_stats = sq.store_stats(year, phase_num, rates)
+            current_stats = sq.store_stats(year, phase_num, rates, phase_days)
 
             deferrals = self._deferrals_from_brain_row(row)
             self.process_end_of_phase(sq, year, phase_num, self.retention_rate, current_stats, deferrals) 
