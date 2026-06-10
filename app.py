@@ -403,7 +403,7 @@ with col_main:
         (df_syll[x_var_syll] >= x_syll_min) & (df_syll[x_var_syll] <= x_syll_max)
     ]
 
-    # 16-output brain: indices 10–15 are remaining-syllabus targets (see hpc_train_brain_multi_output.py)
+    # 12-output brain: indices 6–11 are remaining-syllabus targets (see hpc_train_brain_multi_output.py)
     _predict_features = [
         "paa", "ute", "exp_ratio", "ip_ratio", "fl_congestion",
         "wg_crowding", "sorties_avail", "pilot_to_sortie", "ip_to_stud_ratio",
@@ -427,9 +427,14 @@ with col_main:
 
     _syll_preds = brain.predict(df_syll[_predict_features].fillna(0))
     for i, col in enumerate(_remaining_total):
-        df_syll[col] = _clean_syllabus_preds(_syll_preds[:, 10 + i])
+        df_syll[col] = _clean_syllabus_preds(_syll_preds[:, 6 + i])
     for i, col in enumerate(_remaining_sorties):
-        df_syll[col] = _clean_syllabus_preds(_syll_preds[:, 13 + i])
+        df_syll[col] = _clean_syllabus_preds(_syll_preds[:, 9 + i])
+    # 16-output brain: indices 10–15 are remaining-syllabus targets
+    # for i, col in enumerate(_remaining_total):
+    #     df_syll[col] = _clean_syllabus_preds(_syll_preds[:, 10 + i])
+    # for i, col in enumerate(_remaining_sorties):
+    #     df_syll[col] = _clean_syllabus_preds(_syll_preds[:, 13 + i])
     if sorties_only_syll:
         syll_series = [
             ("remaining_mqt_syllabi_sorties_only_mean", "MQT"),
