@@ -3,7 +3,7 @@ import copy
 import joblib
 from src.models import PriorityMode
 from src.manning_engine import CAFSimulation
-from src.manning_config import get_initial_squadrons
+from src.manning_config import get_initial_squadrons, SQUADRON_DATA
 
 def setup_simulation(round_robin: bool, annual_intake: int,
                      ai_brain, 
@@ -39,7 +39,7 @@ def setup_simulation(round_robin: bool, annual_intake: int,
     # Used 1.5 CCR for all units
     # Used 50% of exp pilots as starting IP value 
 
-    squadrons = get_initial_squadrons(2026)
+    squadrons = get_initial_squadrons(2026, SQUADRON_DATA)
 
     for sq in squadrons:
         sq.update_stats()
