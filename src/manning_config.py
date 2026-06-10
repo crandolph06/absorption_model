@@ -17,7 +17,7 @@ SQUADRON_DATA = [
 ]
 
 TEST_SQUADRON_DATA = [
-    (14, 10, 2, 10, (2, 0, 0))#, (493, 10, 2, 10), (495, 10, 2, 10), (95, 10, 2, 10) # All units 10 PAA, 2 IPs, 10 pilots total
+    (14, 10, 2, 10, (1, 0, 0))#, (493, 10, 2, 10), (495, 10, 2, 10), (95, 10, 2, 10) # All units 10 PAA, 2 IPs, 10 pilots total
 ]
 
 def get_initial_squadrons(current_year: int, squadron_data: list):
@@ -48,28 +48,29 @@ def get_initial_squadrons(current_year: int, squadron_data: list):
                              squadron_id=sq_id, current_assignment=Assignment.LINE, active=True))
         
         # 4. Seed upgrades within current manning
-        for mqt, flug, ipug in upgradees:
-            if mqt > 0: # Default to youngest wingmen
-                mqt_eligible_wingmen = [p for p in sq.pilots if p.qual == Qual.WG] 
-                mqt_eligible_wingmen.sort(key=lambda x: x.year_group)
-                if len(mqt_eligible_wingmen) < mqt:
-                    raise ValueError(f"Not enough wingmen eligible for MQT upgrades: {len(mqt_eligible_wingmen)} available, {mqt} requested")
-                for i in range(mqt):
-                    mqt_eligible_wingmen[i].upgrade = Upgrade.MQT
-            if flug > 0: # Default to oldest wingmen
-                flug_eligible_wingmen = [p for p in sq.pilots if p.qual == Qual.WG and p.upgrade == Upgrade.NONE] 
-                if len(flug_eligible_wingmen) < flug:
-                    raise ValueError(f"Not enough wingmen eligible for FLUG upgrades: {len(flug_eligible_wingmen)} available, {flug} requested")
-                flug_eligible_wingmen.sort(key=lambda x: x.year_group, reverse=True)
-                for i in range(flug):
-                    flug_eligible_wingmen[i].upgrade = Upgrade.FLUG
-            if ipug > 0: # Default to oldest flight leads
-                ipug_eligible_flight_leads = [p for p in sq.pilots if p.qual == Qual.FL] 
-                if len(ipug_eligible_flight_leads) < ipug:
-                    raise ValueError(f"Not enough flight leads eligible for IPUG upgrades: {len(ipug_eligible_flight_leads)} available, {ipug} requested")
-                ipug_eligible_flight_leads.sort(key=lambda x: x.year_group, reverse=True)
-                for i in range(ipug):
-                    ipug_eligible_flight_leads[i].upgrade = Upgrade.IPUG
+        mqt, flug, ipug = upgradees
+
+        if mqt > 0: # Default to youngest wingmen
+            mqt_eligible_wingmen = [p for p in sq.pilots if p.qual == Qual.WG] 
+            mqt_eligible_wingmen.sort(key=lambda x: x.year_group)
+            if len(mqt_eligible_wingmen) < mqt:
+                raise ValueError(f"Not enough wingmen eligible for MQT upgrades: {len(mqt_eligible_wingmen)} available, {mqt} requested")
+            for i in range(mqt):
+                mqt_eligible_wingmen[i].upgrade = Upgrade.MQT
+        if flug > 0: # Default to oldest wingmen
+            flug_eligible_wingmen = [p for p in sq.pilots if p.qual == Qual.WG and p.upgrade == Upgrade.NONE] 
+            if len(flug_eligible_wingmen) < flug:
+                raise ValueError(f"Not enough wingmen eligible for FLUG upgrades: {len(flug_eligible_wingmen)} available, {flug} requested")
+            flug_eligible_wingmen.sort(key=lambda x: x.year_group, reverse=True)
+            for i in range(flug):
+                flug_eligible_wingmen[i].upgrade = Upgrade.FLUG
+        if ipug > 0: # Default to oldest flight leads
+            ipug_eligible_flight_leads = [p for p in sq.pilots if p.qual == Qual.FL] 
+            if len(ipug_eligible_flight_leads) < ipug:
+                raise ValueError(f"Not enough flight leads eligible for IPUG upgrades: {len(ipug_eligible_flight_leads)} available, {ipug} requested")
+            ipug_eligible_flight_leads.sort(key=lambda x: x.year_group, reverse=True)
+            for i in range(ipug):
+                ipug_eligible_flight_leads[i].upgrade = Upgrade.IPUG
         
         sq.update_stats()
         squadrons.append(sq)
