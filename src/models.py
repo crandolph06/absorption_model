@@ -300,7 +300,6 @@ class SquadronConfig:
     total_pilots: int = 0
     line_pilots: int = 0
     experience_ratio: float = 0.0
-    phase_length_days: int = 120  # Default ~4 months; drive all phase scaling from this field.
     avg_sortie_dur: float = 1.3
     # Simulator wing: session lines per month (each line has ``sim_bays_per_session`` bays).
     sim_sessions_monthly: float = SIM_SESSIONS_MONTHLY
@@ -310,11 +309,6 @@ class SquadronConfig:
     observed_mqt_monthly: Optional[float] = None
 
     @property
-    def phase_length_months(self) -> float:
-        """Notional months in a phase (phase_length_days / 30)."""
-        return max(0.0, float(self.phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH)
-
-    @property
     def desired_manning(self) -> int:
         return int(self.ccr * self.paa)
 
@@ -322,16 +316,17 @@ class SquadronConfig:
     def max_manning(self) -> int:
         return int(self.desired_manning * self.manning_pct)
     
-    def mean_monthly_sim_events(self, qual: Qual) -> float:
+    def mean_monthly_sim_events(self, qual: Qual, phase_length_days: float) -> float:
         total_sims = sum(p.sim_phase for p in self.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual == qual)
         qualified_pilots = [p for p in self.pilots if p.active and p.current_assignment == Assignment.LINE and p.qual == qual]
         if total_sims <= 0:
             return 0.0
         if len(qualified_pilots) <= 0:
             return 0.0
-        if self.phase_length_months <= 0:
+        months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
+        if months <= 0:
             return 0.0
-        return(total_sims / len(qualified_pilots)) / self.phase_length_months
+        return (total_sims / len(qualified_pilots)) / months
 
 
     def update_stats(self):
@@ -478,8 +473,9 @@ class SquadronConfig:
             return rates.mqt_sim_phase
         return rates.wg_sim_phase
 
-    def apply_phase_aging(self, rates: AgingRate):
+    def apply_phase_aging(self, rates: AgingRate, phase_length_days: float):
         """Sortie and sim phase credit from ``rates`` (brain-predicted monthly rates)."""
+        phase_length_months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
         for p in self.pilots:
             if not p.active:
                 continue
@@ -493,13 +489,13 @@ class SquadronConfig:
             else:
                 p_rate = rates.wg_phase
 
-            p.age_one_phase_with_rates(p_rate, self.avg_sortie_dur, self.phase_length_months)
+            p.age_one_phase_with_rates(p_rate, self.avg_sortie_dur, phase_length_months)
 
             sim_rate = self._phase_sim_rate_for_pilot(p, rates)
             p.age_sim_phase_with_rates(sim_rate, self.avg_sortie_dur)
 
-    def store_stats(self, year: int, phase_num: int, rates: AgingRate):
-        months = self.phase_length_months
+    def store_stats(self, year: int, phase_num: int, rates: AgingRate, phase_length_days: float):
+        months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
         if months <= 0:
             months = 1e-9
 
@@ -532,9 +528,9 @@ class SquadronConfig:
             'wg_rate_blue': rates.wg_blue_phase / months,
             'fl_rate_blue': rates.fl_blue_phase / months,
             'ip_rate_blue': rates.ip_blue_phase / months,
-            'wg_rate_sim': self.mean_monthly_sim_events(Qual.WG),
-            'fl_rate_sim': self.mean_monthly_sim_events(Qual.FL),
-            'ip_rate_sim': self.mean_monthly_sim_events(Qual.IP),
+            'wg_rate_sim': self.mean_monthly_sim_events(Qual.WG, phase_length_days),
+            'fl_rate_sim': self.mean_monthly_sim_events(Qual.FL, phase_length_days),
+            'ip_rate_sim': self.mean_monthly_sim_events(Qual.IP, phase_length_days),
             'wg_rap_shortfall': monthly_sortie_rap_target(Qual.WG) - (rates.wg_phase / months),
             'fl_rap_shortfall': monthly_sortie_rap_target(Qual.FL) - (rates.fl_phase / months),
             'ip_rap_shortfall': monthly_sortie_rap_target(Qual.IP) - (rates.ip_phase / months),
