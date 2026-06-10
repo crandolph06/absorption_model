@@ -1,7 +1,7 @@
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
-from src.manning_config import get_initial_squadrons
+from src.manning_config import SQUADRON_DATA, get_initial_squadrons
 
 class ManningEnv(gym.Env):
     # Stable per-step reward scale for RL (used by quantity / readiness shaping).
@@ -126,7 +126,7 @@ class ManningEnv(gym.Env):
         self.sim.sq_phase_flug_intake = self.initial_flug_quota
         self.sim.sq_phase_ipug_intake = self.initial_ipug_quota
 
-        self.sim.squadrons = get_initial_squadrons(self.sim.current_year)
+        self.sim.squadrons = get_initial_squadrons(self.sim.current_year, SQUADRON_DATA)
 
         observation = self._get_obs()
         return observation, {}
