@@ -20,7 +20,9 @@ TEST_SQUADRON_DATA = [
     (14, 10, 2, 10, (1, 0, 0))#, (493, 10, 2, 10), (495, 10, 2, 10), (95, 10, 2, 10) # All units 10 PAA, 2 IPs, 10 pilots total
 ]
 
-def get_initial_squadrons(current_year: int, squadron_data: list):
+def get_initial_squadrons(current_year: int, squadron_data: list | None = None):
+    if squadron_data is None:
+        squadron_data = SQUADRON_DATA
     squadrons = []
     for sq_id, paa, ip_qty, target_total, upgradees in squadron_data:
         sq = SquadronConfig(id=sq_id, paa=paa, ute=10.0, ip_qty=ip_qty, pilots=[])
@@ -48,7 +50,7 @@ def get_initial_squadrons(current_year: int, squadron_data: list):
                              squadron_id=sq_id, current_assignment=Assignment.LINE, active=True))
         
         # 4. Seed upgrades within current manning
-        mqt, flug, ipug = upgradees
+        mqt, flug, ipug = upgradees if upgradees else (0, 0, 0)
 
         if mqt > 0: # Default to youngest wingmen
             mqt_eligible_wingmen = [p for p in sq.pilots if p.qual == Qual.WG] 
