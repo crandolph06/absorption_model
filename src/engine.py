@@ -470,16 +470,21 @@ def _print_allocation_debug(pilots: List[Pilot], stage: str) -> None:
         )
 
 
-def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_noise: float = 0.0, debug_verbose: bool = False):
+def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_noise: float = 0.0, debug_verbose: bool = False, pre_seed_upgrades: bool = False):
 
     for p in pilots:
         p.reset_phase_counters()
         p.set_rap_requirement()
 
     # 2. New students only (carryover already have upgrade MQT/FLUG/IPUG)
-    mqt_students = select_upgrade_students(pilots, Upgrade.MQT, cfg.mqt_students)
-    flug_students = select_upgrade_students(pilots, Upgrade.FLUG, cfg.flug_students)
-    ipug_students = select_upgrade_students(pilots, Upgrade.IPUG, cfg.ipug_students)
+    if not pre_seed_upgrades:
+        mqt_students = select_upgrade_students(pilots, Upgrade.MQT, cfg.mqt_students)
+        flug_students = select_upgrade_students(pilots, Upgrade.FLUG, cfg.flug_students)
+        ipug_students = select_upgrade_students(pilots, Upgrade.IPUG, cfg.ipug_students)
+    else:
+        mqt_students = [p for p in pilots if p.upgrade == Upgrade.MQT]
+        flug_students = [p for p in pilots if p.upgrade == Upgrade.FLUG]
+        ipug_students = [p for p in pilots if p.upgrade == Upgrade.IPUG]
 
     phase_months = cfg.phase_length_days / 30.0
     total_capacity = int(total_phase_capacity(cfg) * phase_months)
