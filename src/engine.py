@@ -456,6 +456,20 @@ def allocate_sim_rap(
 # ----------------------
 # Main Simulation Phase
 # ----------------------
+def _print_allocation_debug(pilots: List[Pilot], stage: str) -> None:
+    """One line per pilot; fixed-width columns for narrow terminals."""
+    print(f"--- {stage} ---")
+    print(f"{'Q/U':<9}{'bl':>4}{'rd':>4}{'so':>4}{'sm':>4}{'tt':>4}")
+    for p in pilots:
+        qu = f"{p.qual.name}/{p.upgrade.name}"
+        tot = p.sortie_phase + p.sim_phase
+        print(
+            f"{qu:<9}"
+            f"{p.sortie_blue_phase:>4.0f}{p.sortie_red_phase:>4.0f}"
+            f"{p.sortie_phase:>4.0f}{p.sim_phase:>4.0f}{tot:>4.0f}"
+        )
+
+
 def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_noise: float = 0.0, debug_verbose: bool = False):
 
     for p in pilots:
@@ -481,32 +495,22 @@ def run_phase_simulation(cfg: SquadronConfig, pilots: List[Pilot], allocation_no
     # 4. Full syllabus for new students only
     run_upgrade_program(MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, allocation_noise, cfg=cfg, total_capacity=total_capacity)
     if debug_verbose:
-        for p in pilots:
-            print("Post MQT Allocation:")
-            print(f"{p.qual}/{p.upgrade}: Blue Sorties {p.sortie_blue_phase}, Red Sorties {p.sortie_red_phase}, Total Sorties {p.sortie_phase}, Total Sims {p.sim_phase}, Total Events {p.total_phase}")
+        _print_allocation_debug(pilots, "MQT")
     run_upgrade_program(IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, allocation_noise, cfg=cfg, total_capacity=total_capacity)
     if debug_verbose:
-        for p in pilots:
-            print("Post IPUG Allocation:")
-            print(f"{p.qual}/{p.upgrade}: Blue Sorties {p.sortie_blue_phase}, Red Sorties {p.sortie_red_phase}, Total Sorties {p.sortie_phase}, Total Sims {p.sim_phase}, Total Events {p.total_phase}")
+        _print_allocation_debug(pilots, "IPUG")
     run_upgrade_program(FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, allocation_noise, cfg=cfg, total_capacity=total_capacity)
     if debug_verbose:
-            for p in pilots:
-                print("Post FLUG Allocation:")
-                print(f"{p.qual}/{p.upgrade}: Blue Sorties {p.sortie_blue_phase}, Red Sorties {p.sortie_red_phase}, Total Sorties {p.sortie_phase}, Total Sims {p.sim_phase}, Total Events {p.total_phase}")
+        _print_allocation_debug(pilots, "FLUG")
     # 5. Continuation Training
     allocate_continuation_training(pilots, CONTINUATION_PROFILE, total_capacity, allocation_noise, cfg=cfg)
     if debug_verbose:
-        for p in pilots:
-            print("Post CT Allocation:")
-            print(f"{p.qual}/{p.upgrade}: Blue Sorties {p.sortie_blue_phase}, Red Sorties {p.sortie_red_phase}, Total Sorties {p.sortie_phase}, Total Sims {p.sim_phase}, Total Events {p.total_phase}")
+        _print_allocation_debug(pilots, "CT")
 
     # 6. Sim RAP (discrete allocation; syllabus sims already credited above)
     allocate_sim_rap(pilots, cfg, allocation_noise)
     if debug_verbose:
-        for p in pilots:
-            print("Post Sim RAP Allocation:")
-            print(f"{p.qual}/{p.upgrade}: Blue Sorties {p.sortie_blue_phase}, Red Sorties {p.sortie_red_phase}, Total Sorties {p.sortie_phase}, Total Sims {p.sim_phase}, Total Events {p.total_phase}")
+        _print_allocation_debug(pilots, "SimRAP")
     # 7. Finalize monthly stats and RAP shortfalls
     for p in pilots:
         p.update_total(cfg.phase_length_days)
