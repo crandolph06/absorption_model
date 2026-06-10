@@ -11,7 +11,7 @@ from src.models import (
     PHASE_DAYS_PER_NOTIONAL_MONTH,
 )
 from src.simulation_config import SimulationConfig
-from src.syllabi import SyllabusEvent, ContinuationProfile
+from src.syllabi import SyllabusEvent, ContinuationProfile, ContinuationBucket
 from src import rules
 from src.syllabi import MQT_SYLLABUS, FLUG_SYLLABUS, IPUG_SYLLABUS, CONTINUATION_PROFILE, TEST_MQT_SYLLABUS, TEST_FLUG_SYLLABUS, TEST_IPUG_SYLLABUS, TEST_CONTINUATION_PROFILE
 
@@ -392,6 +392,18 @@ def run_upgrade_program(
 # ----------------------
 # Continuation Training (CT)
 # ----------------------
+_CT_ROUND_ROBIN_ORDER = {
+    ("Blue", Qual.FL): 0,
+    ("Red", Qual.FL): 1,
+    ("Blue", Qual.WG): 2,
+    ("Red", Qual.WG): 3,
+}
+
+
+def _ct_bucket_round_robin_key(bucket: ContinuationBucket) -> int:
+    return _CT_ROUND_ROBIN_ORDER.get((bucket.side, bucket.min_qual), 99)
+
+
 def allocate_continuation_training(
     pilots: List[Pilot],
     profile: ContinuationProfile,
@@ -425,18 +437,33 @@ def allocate_continuation_training(
         bucket = sorted_remainders[i % len(sorted_remainders)][0]
         base_qty[bucket] += 1
 
-    # Execute allocation per bucket
-    for bucket, qty in base_qty.items():
-        # Find eligible pilots for this specific CT bucket
-        # We access the internal hierarchy check from rules since CT doesn't have a syllabus upgrade type
-        eligible = [
-            p for p in ct_candidates
-            if rules.can_fill_seat(pilot=p, min_qual=bucket.min_qual)
-        ]
+    # Assign one sortie per bucket per pass: Blue FL → Red FL → Blue WG → Red WG.
+    remaining = dict(base_qty)
+    buckets = sorted(remaining.keys(), key=_ct_bucket_round_robin_key)
 
-        for _ in range(qty):
-            if not assign_sortie(cfg=cfg, candidates=eligible, phase_length_days=phase_length_days, side=bucket.side, noise=noise):
-                break
+    while sum(remaining.values()) > 0:
+        assigned_this_pass = False
+        for bucket in buckets:
+            if remaining.get(bucket, 0) <= 0:
+                continue
+            eligible = [
+                p for p in ct_candidates
+                if rules.can_fill_seat(pilot=p, min_qual=bucket.min_qual)
+            ]
+            if assign_sortie(
+                cfg=cfg,
+                candidates=eligible,
+                phase_length_days=phase_length_days,
+                side=bucket.side,
+                noise=noise,
+            ):
+                remaining[bucket] -= 1
+                assigned_this_pass = True
+            else:
+                remaining[bucket] = 0
+
+        if not assigned_this_pass:
+            break
 
 def allocate_sim_rap(
     pilots: List[Pilot],
