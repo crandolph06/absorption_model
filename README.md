@@ -267,6 +267,6 @@ HPC sessions are limited to **4 hours**; sweep scripts use `timeout` and checkpo
 
 ## Contact / ownership
 
-Maj Claire "Buzzer" Randolph - 15 AF CAG/Special Projects
-claire.randolph@us.af.mil
+Maj Claire "Buzzer" Randolph - 15 AF CAG/Special Projects |
+claire.randolph@us.af.mil |
 DSN: 965-4147 (Comm prefix 803-895-XXXX)
