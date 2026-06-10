@@ -372,19 +372,19 @@ class SquadronConfig:
             self.ipug_carry = 0.0
 
         else:
-            if sorties_only:
-                deferrals = deferrals[3:]
-            else:
-                deferrals = deferrals[:3]
-            mqt_deferrals, flug_deferrals, ipug_deferrals = deferrals
+            # if sorties_only:
+            #     deferrals = deferrals[3:]
+            # else:
+            #     deferrals = deferrals[:3]
+            # mqt_deferrals, flug_deferrals, ipug_deferrals = deferrals
 
-            mqt_whole = int(mqt_deferrals)
-            flug_whole = int(flug_deferrals)
-            ipug_whole = int(ipug_deferrals)
+            # mqt_whole = int(mqt_deferrals)
+            # flug_whole = int(flug_deferrals)
+            # ipug_whole = int(ipug_deferrals)
 
-            self.mqt_carry = mqt_deferrals - mqt_whole
-            self.flug_carry = flug_deferrals - flug_whole
-            self.ipug_carry = ipug_deferrals - ipug_whole
+            # self.mqt_carry = mqt_deferrals - mqt_whole
+            # self.flug_carry = flug_deferrals - flug_whole
+            # self.ipug_carry = ipug_deferrals - ipug_whole
 
             mqt_pilots = [p for p in self.pilots if p.upgrade == Upgrade.MQT]
             flug_pilots = [p for p in self.pilots if p.upgrade == Upgrade.FLUG]
@@ -400,9 +400,13 @@ class SquadronConfig:
                 key=lambda x: (x.sorties_flown - x.sorties_at_upgrade_start, 
                 x.sorties_flown), reverse=True)
 
-            mqt_limit = max(0, len(mqt_pilots) - mqt_whole)
-            flug_limit = max(0, len(flug_pilots) - flug_whole)
-            ipug_limit = max(0, len(ipug_pilots) - ipug_whole)
+            # mqt_limit = max(0, len(mqt_pilots) - mqt_whole)
+            # flug_limit = max(0, len(flug_pilots) - flug_whole)
+            # ipug_limit = max(0, len(ipug_pilots) - ipug_whole)
+
+            mqt_limit = len(mqt_pilots)
+            flug_limit = len(flug_pilots)
+            ipug_limit = len(ipug_pilots)
 
             for i in range(mqt_limit):
                 mqt_pilots[i].graduate()

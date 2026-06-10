@@ -68,13 +68,18 @@ def _brain_features_from_history(df: pd.DataFrame, ute: float) -> pd.DataFrame:
 def _syllabus_preds_by_timeline(
     df: pd.DataFrame, brain, ute: float
 ) -> pd.DataFrame:
-    """Brain outputs 10–15 per squadron-phase, summed CAF-wide per timeline."""
+    """Brain outputs 6–11 per squadron-phase, summed CAF-wide per timeline."""
     feat = _brain_features_from_history(df, ute)
     preds = brain.predict(feat[_PREDICT_FEATURES].fillna(0))
     for i, col in enumerate(_REMAINING_TOTAL):
-        feat[col] = _clean_syllabus_preds(preds[:, 10 + i])
+        feat[col] = _clean_syllabus_preds(preds[:, 6 + i])
     for i, col in enumerate(_REMAINING_SORTIES):
-        feat[col] = _clean_syllabus_preds(preds[:, 13 + i])
+        feat[col] = _clean_syllabus_preds(preds[:, 9 + i])
+    # 16-output brain: outputs 10–15 per squadron-phase
+    # for i, col in enumerate(_REMAINING_TOTAL):
+    #     feat[col] = _clean_syllabus_preds(preds[:, 10 + i])
+    # for i, col in enumerate(_REMAINING_SORTIES):
+    #     feat[col] = _clean_syllabus_preds(preds[:, 13 + i])
     feat["timeline"] = feat["year"].astype(str) + " P" + feat["phase"].astype(str)
     return (
         feat.groupby(["year", "phase", "timeline"], as_index=False)[
@@ -470,9 +475,10 @@ if submitted:
         # --- Chart 4: Incomplete syllabi from brain (CAF aggregate over time) ---
         st.divider()
         st.subheader("Incomplete Syllabi (Brain Prediction)")
+        # 16-output brain: values from brain outputs 10–15
         st.caption(
             "Y-axis is syllabus-normalized count (not %), summed across squadrons each phase. "
-            "1.0 ≈ one full syllabus incomplete; values from brain outputs 10–15 (same as single-phase dashboard)."
+            "1.0 ≈ one full syllabus incomplete; values from brain outputs 6–11 (same as single-phase dashboard)."
         )
         sorties_only_syll = st.toggle(
             "Sorties only",
