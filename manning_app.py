@@ -14,7 +14,7 @@ from src.manning_main import setup_simulation
 from src.models import PriorityMode, Qual, monthly_sortie_rap_target
 
 BRAIN_PATH = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
-_PAA_BY_SQUADRON = {sq_id: paa for sq_id, paa, _, _ in SQUADRON_DATA}
+_PAA_BY_SQUADRON = {sq_id: paa for sq_id, paa, _, _, _ in SQUADRON_DATA}
 _PREDICT_FEATURES = CAFSimulation._PREDICT_FEATURE_COLS
 _SYLLABI_NEGLIGIBLE = 0.10
 _REMAINING_TOTAL = [
