@@ -118,6 +118,29 @@ def _eligible_for_event(candidates: List[Pilot], cfg: SquadronConfig) -> List[Pi
     return [p for p in candidates if p.has_events_capacity(cfg.phase_length_days)]
 
 
+def _total_phase_events(p: Pilot) -> float:
+    return p.sortie_phase + p.sim_phase
+
+
+def _type_specific_event_count(p: Pilot, event_type: EventType, side: str = "Blue") -> float:
+    """Tie-breaker: least sims, blue sorties, or red sorties for the event being assigned."""
+    if event_type == EventType.SIM:
+        return p.sim_phase
+    if side == "Red":
+        return p.sortie_red_phase
+    return p.sortie_blue_phase
+
+
+def _allocation_sort_key(
+    p: Pilot, event_type: EventType, side: str = "Blue", noise: float = 0.0
+) -> tuple:
+    """Primary: total phase events; tie-break: count for this event type (lowest first)."""
+    return (
+        _total_phase_events(p) + random.uniform(0, noise),
+        _type_specific_event_count(p, event_type, side),
+    )
+
+
 def _can_assign_distinct_from_pool(pool: List[Pilot], count: int, cfg: SquadronConfig) -> bool:
     """Whether ``count`` distinct pilots in ``pool`` can each take one more event under the cap."""
     if count <= 0:
@@ -153,7 +176,7 @@ def assign_sortie(
     exclude: Optional[Set[int]] = None,
 ) -> bool:
     """
-    Selects the best candidate (lowest utilization) to fly a sortie.
+    Selects the best candidate (lowest total events, then least blue/red sorties) to fly a sortie.
     Returns True if a pilot was found and assigned, False otherwise.
     """
     exclude = exclude if exclude is not None else set()
@@ -162,7 +185,7 @@ def assign_sortie(
     if not candidates:
         return False
 
-    candidates.sort(key=lambda p: p.sortie_phase + random.uniform(0, noise))
+    candidates.sort(key=lambda p: _allocation_sort_key(p, EventType.SORTIE, side, noise))
 
     winner = candidates[0]
     winner.add_sortie(avg_sortie_dur=cfg.avg_sortie_dur, side=side)
@@ -177,7 +200,7 @@ def assign_sim(
     exclude: Optional[Set[int]] = None,
 ) -> bool:
     """
-    Selects the best candidate (lowest utilization) to fly a simulator event.
+    Selects the best candidate (lowest total events, then least sims) for a simulator event.
     Returns True if a pilot was found and assigned, False otherwise.
     """
     exclude = exclude if exclude is not None else set()
@@ -186,7 +209,7 @@ def assign_sim(
     if not candidates:
         return False
 
-    candidates.sort(key=lambda p: p.sim_phase + random.uniform(0, noise))
+    candidates.sort(key=lambda p: _allocation_sort_key(p, EventType.SIM, noise=noise))
     winner = candidates[0]
     winner.add_sim(cfg.avg_sortie_dur)
     exclude.add(id(winner))
