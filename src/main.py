@@ -1,29 +1,18 @@
+from numpy import true_divide
 from src.models import SquadronConfig
 from src.engine import create_pilots, run_phase_simulation, print_phase_summary
+from src.manning_config import get_initial_squadrons, TEST_SQUADRON_DATA
 
 if __name__ == "__main__":
-    cfg = SquadronConfig(
-        ute=10,
-        paa=18,
-        id=99,
-        mqt_students=5,
-        flug_students=3,
-        ipug_students=3,
-        total_pilots=30,
-        experience_ratio=0.5,
-        ip_qty=4,
-        phase_length_days=120,
-        avg_sortie_dur = 1.3
-    )
+    squadrons = get_initial_squadrons(2026, TEST_SQUADRON_DATA)
 
-    pilots = create_pilots(cfg)
-
-    run_phase_simulation(cfg, pilots)
-    print_phase_summary(pilots, cfg, verbose=False)
+    for squadron in squadrons:
+        run_phase_simulation(squadron, squadron.pilots, debug_verbose=True, pre_seed_upgrades=True)
+        print_phase_summary(squadron.pilots, squadron, verbose=True)
 
     # Optional: second phase on same roster — carryover retries incomplete_syllabus_items
     RUN_SECOND_PHASE = False
     if RUN_SECOND_PHASE:
         print("\n--- Phase 2 (carryover) ---")
-        run_phase_simulation(cfg, pilots)
-        print_phase_summary(pilots, cfg, verbose=False)
+        run_phase_simulation(squadron, squadron.pilots, pre_seed_upgrades=False)
+        print_phase_summary(squadron.pilots, squadron, verbose=False)
