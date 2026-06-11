@@ -352,6 +352,24 @@ class SquadronConfig:
             return 0.0
         return (total_sims / len(qualified_pilots)) / months
 
+    def _mean_monthly_sortie_field(
+        self,
+        qual: Qual,
+        field_name: str,
+        *,
+        line_only: bool = True,
+        exclude_upgrades: bool = False,
+    ) -> float:
+        pilots = [
+            p for p in self.pilots
+            if p.active and p.qual == qual
+            and (not line_only or p.current_assignment == Assignment.LINE)
+            and (not exclude_upgrades or p.upgrade == Upgrade.NONE)
+        ]
+        if not pilots:
+            return 0.0
+        return sum(getattr(p, field_name) for p in pilots) / len(pilots)
+
 
     def update_stats(self):
         # 1. Filter for Active Line Pilots (The only ones who count for stats)
@@ -580,6 +598,64 @@ class SquadronConfig:
         }
     
         return current_stats
+
+    def store_stats_from_physics(self, year: int, phase_num: int, phase_length_days: float):
+        """History row from allocator-produced pilot monthly rates (not sortie brain)."""
+        months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
+        if months <= 0:
+            months = 1e-9
+
+        self.update_stats()
+
+        wg_rate_mo = self._mean_monthly_sortie_field(Qual.WG, "sortie_rap_monthly")
+        fl_rate_mo = self._mean_monthly_sortie_field(Qual.FL, "sortie_rap_monthly")
+        ip_rate_mo = self._mean_monthly_sortie_field(Qual.IP, "sortie_rap_monthly")
+        wg_rate_blue = self._mean_monthly_sortie_field(Qual.WG, "sortie_blue_monthly")
+        fl_rate_blue = self._mean_monthly_sortie_field(Qual.FL, "sortie_blue_monthly")
+        ip_rate_blue = self._mean_monthly_sortie_field(Qual.IP, "sortie_blue_monthly")
+
+        return {
+            'year': year,
+            'phase': phase_num,
+            'squadron_id': self.id,
+            'wg_qty': self.wg_qty,
+            'fl_qty': self.fl_qty,
+            'ip_qty': self.ip_qty,
+            'mqt_qty': self.mqt_students,
+            'flug_qty': self.flug_students,
+            'ipug_qty': self.ipug_students,
+            'mqt_sortie_carry': self.mqt_sortie_carry,
+            'flug_sortie_carry': self.flug_sortie_carry,
+            'ipug_sortie_carry': self.ipug_sortie_carry,
+            'mqt_sim_carry': self.mqt_sim_carry,
+            'flug_sim_carry': self.flug_sim_carry,
+            'ipug_sim_carry': self.ipug_sim_carry,
+            'deferred_sortie_burden': self.deferred_sortie_burden,
+            'deferred_sim_burden': self.deferred_sim_burden,
+            'percent_manned': self.line_pilots / self.desired_manning,
+            'line_pilots': self.line_pilots,
+            'total_pilots': self.total_pilots,
+            'exp_rat': self.experience_ratio,
+            'staff_ips': 0,
+            'staff_fls': 0,
+            'separated': 0,
+            'retained': 0,
+            'wg_rate_mo': wg_rate_mo,
+            'fl_rate_mo': fl_rate_mo,
+            'ip_rate_mo': ip_rate_mo,
+            'wg_rate_blue': wg_rate_blue,
+            'fl_rate_blue': fl_rate_blue,
+            'ip_rate_blue': ip_rate_blue,
+            'wg_rate_sim': self.mean_monthly_sim_events(Qual.WG, phase_length_days),
+            'fl_rate_sim': self.mean_monthly_sim_events(Qual.FL, phase_length_days),
+            'ip_rate_sim': self.mean_monthly_sim_events(Qual.IP, phase_length_days),
+            'wg_rap_shortfall': monthly_sortie_rap_target(Qual.WG) - wg_rate_mo,
+            'fl_rap_shortfall': monthly_sortie_rap_target(Qual.FL) - fl_rate_mo,
+            'ip_rap_shortfall': monthly_sortie_rap_target(Qual.IP) - ip_rate_mo,
+            'wg_blue_shortfall': monthly_sortie_rap_target(Qual.WG) - wg_rate_blue,
+            'fl_blue_shortfall': monthly_sortie_rap_target(Qual.FL) - fl_rate_blue,
+            'ip_blue_shortfall': monthly_sortie_rap_target(Qual.IP) - ip_rate_blue,
+        }
     
     def send_to_staff(self, priority_mode: PriorityMode = PriorityMode.RANDOM, min_ips: int = 3):
         current_line_pilots = []
