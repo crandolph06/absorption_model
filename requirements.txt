@@ -5,7 +5,9 @@
 pandas==2.2.2
 numpy==2.4.4
 scikit-learn==1.8.0
+scipy>=1.11.0,<2
 joblib==1.4.0
+PyYAML>=6.0.2,<7
 
 # Streamlit apps (manning_app, app, rl_app)
 streamlit==1.52.2

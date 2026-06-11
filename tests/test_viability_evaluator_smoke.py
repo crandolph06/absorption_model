@@ -1,0 +1,107 @@
+from dataclasses import replace
+from pathlib import Path
+import unittest
+
+import numpy as np
+
+from src.viability.config import load_config
+from src.viability.evaluator import (
+    _flatten_result,
+    _load_brain,
+    _validate_brain_output,
+    evaluate_design,
+)
+from src.viability.policy import PolicyDesign
+
+
+class _FakeBrain:
+    def __init__(self, outputs):
+        self.outputs = outputs
+
+    def predict(self, x):
+        return np.zeros((len(x), self.outputs))
+
+
+class ViabilityEvaluatorSmokeTest(unittest.TestCase):
+    def setUp(self):
+        self.config = load_config("configs/viability.example.yaml")
+        self.variable_names = list(self.config.policy.variables)
+
+    def test_brain_validation_rejects_legacy_12_output_layout(self):
+        with self.assertRaisesRegex(ValueError, "expected 16 outputs, got 12"):
+            _validate_brain_output(_FakeBrain(outputs=12), expected_outputs=16)
+
+    def test_flatten_result_keeps_design_metrics_and_constraints_readable(self):
+        design = PolicyDesign.from_mapping(
+            {
+                "annual_intake": 250,
+                "retention_rate": 0.5,
+                "ute": 12,
+                "paa": 24,
+                "max_manning_pct": 150,
+                "flug_quota_per_phase": 3,
+                "ipug_quota_per_phase": 2,
+            },
+            self.config.policy,
+            raw_values={
+                "annual_intake": 250.4,
+                "retention_rate": 0.5,
+                "ute": 12.0,
+                "paa": 24.2,
+                "max_manning_pct": 150.0,
+                "flug_quota_per_phase": 3.1,
+                "ipug_quota_per_phase": 2.1,
+            },
+        )
+        result = evaluate_design(design, self.config)
+        row = _flatten_result(7, result, self.variable_names)
+
+        self.assertEqual(row["design_id"], 7)
+        self.assertEqual(row["applied_annual_intake"], 250)
+        self.assertAlmostEqual(row["raw_annual_intake"], 250.4)
+        self.assertIn("active_constraint", row)
+        self.assertIn("active_constraint_value", row)
+        self.assertIn("status", row)
+        self.assertIn("error", row)
+
+    def test_evaluate_design_one_year_when_compatible_brain_is_available(self):
+        brain_path = Path(self.config.model.brain_path)
+        if not brain_path.exists():
+            self.skipTest(f"Configured brain is not available: {brain_path}")
+        try:
+            _validate_brain_output(_load_brain(self.config.model.brain_path), 16)
+        except ValueError as exc:
+            self.skipTest(str(exc))
+
+        smoke_config = replace(
+            self.config,
+            model=replace(
+                self.config.model,
+                years_to_run=1,
+                assessment_start_year=self.config.model.start_year,
+                target_year=self.config.model.start_year,
+            ),
+        )
+        design = PolicyDesign.from_mapping(
+            {
+                "annual_intake": 250,
+                "retention_rate": 0.5,
+                "ute": 12,
+                "paa": 24,
+                "max_manning_pct": 150,
+                "flug_quota_per_phase": 3,
+                "ipug_quota_per_phase": 2,
+            },
+            smoke_config.policy,
+        )
+
+        result = evaluate_design(design, smoke_config)
+
+        self.assertEqual(result.status, "ok", result.error)
+        self.assertIn("final_total_pilots", result.raw_metrics)
+        self.assertIn("total_pilots_final", result.constraints)
+        self.assertIsNotNone(result.active_constraint)
+
+
+if __name__ == "__main__":
+    unittest.main()
