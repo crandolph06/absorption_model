@@ -13,7 +13,19 @@ from src.models import (
 from src.simulation_config import SimulationConfig
 from src.syllabi import SyllabusEvent, ContinuationProfile, ContinuationBucket
 from src import rules
-from src.syllabi import MQT_SYLLABUS, FLUG_SYLLABUS, IPUG_SYLLABUS, CONTINUATION_PROFILE, TEST_MQT_SYLLABUS, TEST_FLUG_SYLLABUS, TEST_IPUG_SYLLABUS, TEST_CONTINUATION_PROFILE
+from src.syllabi import (
+    MQT_SYLLABUS,
+    FLUG_SYLLABUS,
+    IPUG_SYLLABUS,
+    CONTINUATION_PROFILE,
+    TEST_MQT_SYLLABUS,
+    TEST_FLUG_SYLLABUS,
+    TEST_IPUG_SYLLABUS,
+    TEST_CONTINUATION_PROFILE,
+    incomplete_burden,
+    syllabus_burden_fraction,
+    syllabus_burden_per_student,
+)
 
 # ----------------------
 # Pilot Creation
@@ -45,41 +57,54 @@ def total_phase_capacity(cfg: SquadronConfig) -> float:
     return cfg.ute * cfg.paa
 
 
-def phase_upgrade_metrics(pilots: List[Pilot]) -> dict:
+def phase_upgrade_metrics(
+    pilots: List[Pilot],
+    mqt_syllabus: List[SyllabusEvent] = MQT_SYLLABUS,
+    flug_syllabus: List[SyllabusEvent] = FLUG_SYLLABUS,
+    ipug_syllabus: List[SyllabusEvent] = IPUG_SYLLABUS,
+) -> dict:
     """
-    End-of-phase syllabus stats read from ``Pilot.incomplete_syllabus_items``
-    and ``Pilot.upgrade`` — same state the simulator uses for carryover (lines 289–295).
+    End-of-phase deferral stats from ``Pilot.incomplete_syllabus_items``.
+
+    Counts **line slots** (student + support), not syllabus event rows.
+    ``remaining_*_syllabi_sorties_only`` is squad deferred sortie slots divided by
+    one-student sortie syllabus burden (syllabi-worth of outstanding sortie work).
     """
     deferred_mqt_sorties = deferred_flug_sorties = deferred_ipug_sorties = 0
     deferred_mqt_sims = deferred_flug_sims = deferred_ipug_sims = 0
+    held_back_mqt = held_back_flug = held_back_ipug = 0
 
-    mqt_syllabus_sorties = sum(1 for e in MQT_SYLLABUS if e.event_type == EventType.SORTIE)
-    mqt_syllabus_sims = sum(1 for e in MQT_SYLLABUS if e.event_type == EventType.SIM)
-    flug_syllabus_sorties = sum(1 for e in FLUG_SYLLABUS if e.event_type == EventType.SORTIE)
-    flug_syllabus_sims = sum(1 for e in FLUG_SYLLABUS if e.event_type == EventType.SIM)
-    ipug_syllabus_sorties = sum(1 for e in IPUG_SYLLABUS if e.event_type == EventType.SORTIE)
-    ipug_syllabus_sims = sum(1 for e in IPUG_SYLLABUS if e.event_type == EventType.SIM)
+    mqt_sortie_burden, mqt_sim_burden = syllabus_burden_per_student(mqt_syllabus)
+    flug_sortie_burden, flug_sim_burden = syllabus_burden_per_student(flug_syllabus)
+    ipug_sortie_burden, ipug_sim_burden = syllabus_burden_per_student(ipug_syllabus)
 
     for p in pilots:
-        n_sorties = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SORTIE)
-        n_sims = sum(1 for e in p.incomplete_syllabus_items if e.event_type == EventType.SIM)
+        if not p.incomplete_syllabus_items:
+            continue
+        sortie_slots, sim_slots = incomplete_burden(p.incomplete_syllabus_items)
 
         if p.upgrade == Upgrade.MQT:
-            deferred_mqt_sorties += n_sorties
-            deferred_mqt_sims += n_sims
+            deferred_mqt_sorties += sortie_slots
+            deferred_mqt_sims += sim_slots
+            held_back_mqt += 1
         elif p.upgrade == Upgrade.FLUG:
-            deferred_flug_sorties += n_sorties
-            deferred_flug_sims += n_sims
+            deferred_flug_sorties += sortie_slots
+            deferred_flug_sims += sim_slots
+            held_back_flug += 1
         elif p.upgrade == Upgrade.IPUG:
-            deferred_ipug_sorties += n_sorties
-            deferred_ipug_sims += n_sims
+            deferred_ipug_sorties += sortie_slots
+            deferred_ipug_sims += sim_slots
+            held_back_ipug += 1
 
-    remaining_mqt_syllabi = (deferred_mqt_sorties + deferred_mqt_sims) / (mqt_syllabus_sorties + mqt_syllabus_sims)
-    remaining_mqt_syllabi_sorties_only = deferred_mqt_sorties / mqt_syllabus_sorties
-    remaining_flug_syllabi = (deferred_flug_sorties + deferred_flug_sims) / (flug_syllabus_sorties + flug_syllabus_sims)
-    remaining_flug_syllabi_sorties_only = deferred_flug_sorties / flug_syllabus_sorties
-    remaining_ipug_syllabi = (deferred_ipug_sorties + deferred_ipug_sims) / (ipug_syllabus_sorties + ipug_syllabus_sims)
-    remaining_ipug_syllabi_sorties_only = deferred_ipug_sorties / ipug_syllabus_sorties
+    mqt_sortie_frac, mqt_sim_frac = syllabus_burden_fraction(
+        deferred_mqt_sorties, deferred_mqt_sims, mqt_sortie_burden, mqt_sim_burden
+    )
+    flug_sortie_frac, flug_sim_frac = syllabus_burden_fraction(
+        deferred_flug_sorties, deferred_flug_sims, flug_sortie_burden, flug_sim_burden
+    )
+    ipug_sortie_frac, ipug_sim_frac = syllabus_burden_fraction(
+        deferred_ipug_sorties, deferred_ipug_sims, ipug_sortie_burden, ipug_sim_burden
+    )
 
     return {
         "deferred_mqt_sorties": deferred_mqt_sorties,
@@ -88,13 +113,43 @@ def phase_upgrade_metrics(pilots: List[Pilot]) -> dict:
         "deferred_mqt_sims": deferred_mqt_sims,
         "deferred_flug_sims": deferred_flug_sims,
         "deferred_ipug_sims": deferred_ipug_sims,
-        "remaining_mqt_syllabi": remaining_mqt_syllabi,
-        "remaining_flug_syllabi": remaining_flug_syllabi,
-        "remaining_ipug_syllabi": remaining_ipug_syllabi,
-        "remaining_mqt_syllabi_sorties_only": remaining_mqt_syllabi_sorties_only,
-        "remaining_flug_syllabi_sorties_only": remaining_flug_syllabi_sorties_only,
-        "remaining_ipug_syllabi_sorties_only": remaining_ipug_syllabi_sorties_only,
+        "held_back_mqt": held_back_mqt,
+        "held_back_flug": held_back_flug,
+        "held_back_ipug": held_back_ipug,
+        "remaining_mqt_syllabi_sorties_only": mqt_sortie_frac,
+        "remaining_flug_syllabi_sorties_only": flug_sortie_frac,
+        "remaining_ipug_syllabi_sorties_only": ipug_sortie_frac,
+        "remaining_mqt_syllabi_sims_only": mqt_sim_frac,
+        "remaining_flug_syllabi_sims_only": flug_sim_frac,
+        "remaining_ipug_syllabi_sims_only": ipug_sim_frac,
     }
+
+
+def graduate_completed_upgrades(pilots: List[Pilot]) -> None:
+    """Graduate upgrade students with no incomplete syllabus lines (Layer 1 end-of-phase)."""
+    for p in pilots:
+        if p.upgrade != Upgrade.NONE and not p.incomplete_syllabus_items:
+            p.graduate()
+
+
+def apply_deferred_burden_to_squadron(cfg: SquadronConfig, metrics: dict) -> None:
+    """Store carryover iron/sim burden on ``cfg`` for the next phase."""
+    cfg.deferred_sortie_burden = int(
+        metrics["deferred_mqt_sorties"]
+        + metrics["deferred_flug_sorties"]
+        + metrics["deferred_ipug_sorties"]
+    )
+    cfg.deferred_sim_burden = int(
+        metrics["deferred_mqt_sims"]
+        + metrics["deferred_flug_sims"]
+        + metrics["deferred_ipug_sims"]
+    )
+    cfg.mqt_sortie_carry = metrics["remaining_mqt_syllabi_sorties_only"]
+    cfg.flug_sortie_carry = metrics["remaining_flug_syllabi_sorties_only"]
+    cfg.ipug_sortie_carry = metrics["remaining_ipug_syllabi_sorties_only"]
+    cfg.mqt_sim_carry = metrics["remaining_mqt_syllabi_sims_only"]
+    cfg.flug_sim_carry = metrics["remaining_flug_syllabi_sims_only"]
+    cfg.ipug_sim_carry = metrics["remaining_ipug_syllabi_sims_only"]
 
 
 # ----------------------
@@ -522,6 +577,7 @@ def allocate_sim_rap(
     phase_months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
     if math.isfinite(cfg.sim_sessions_monthly):
         sim_capacity = int(cfg.sim_sessions_monthly * cfg.sim_bays_per_session * phase_months)
+        sim_capacity = max(0, sim_capacity - int(cfg.deferred_sim_burden))
     else:
         sim_capacity = None  # no sim-bay limit (e.g. SIM_SESSIONS_MONTHLY = inf)
     used_sims = int(round(sum(p.sim_phase for p in pilots)))
@@ -589,7 +645,10 @@ def run_phase_simulation(
         flug_students = [p for p in pilots if p.upgrade == Upgrade.FLUG]
         ipug_students = [p for p in pilots if p.upgrade == Upgrade.IPUG]
 
-    total_capacity = int(total_phase_capacity(cfg) * phase_months)
+    total_capacity = max(
+        0,
+        int(total_phase_capacity(cfg) * phase_months) - cfg.deferred_sortie_burden,
+    )
 
     # 3. Carryover: incomplete lines only (not a full new syllabus)
     for upgrade_type in (Upgrade.MQT, Upgrade.FLUG, Upgrade.IPUG):
@@ -619,6 +678,16 @@ def run_phase_simulation(
     allocate_sim_rap(pilots, cfg, phase_length_days, noise)
     if debug_verbose:
         _print_allocation_debug(pilots, "SimRAP")
+    graduate_completed_upgrades(pilots)
+
+    metrics = phase_upgrade_metrics(
+        pilots,
+        mqt_syllabus=TEST_MQT_SYLLABUS,
+        flug_syllabus=TEST_FLUG_SYLLABUS,
+        ipug_syllabus=TEST_IPUG_SYLLABUS,
+    )
+    apply_deferred_burden_to_squadron(cfg, metrics)
+
     # 7. Finalize monthly stats and RAP shortfalls
     for p in pilots:
         p.update_total(phase_length_days)
