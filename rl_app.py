@@ -107,7 +107,7 @@ def _clean_syllabus_preds(raw: np.ndarray) -> np.ndarray:
 
 def _brain_features_from_history(df: pd.DataFrame, ute: float) -> pd.DataFrame:
     out = df.copy()
-    for col in ("mqt_carry", "flug_carry", "ipug_carry"):
+    for col in ("mqt_sortie_carry", "flug_sortie_carry", "ipug_sortie_carry"):
         if col not in out.columns:
             out[col] = 0.0
 
@@ -115,9 +115,9 @@ def _brain_features_from_history(df: pd.DataFrame, ute: float) -> pd.DataFrame:
     out["ute"] = float(ute)
     out["exp_ratio"] = out["exp_rat"]
     line_pilots = out["line_pilots"]
-    mqt_qty = out["mqt_qty"] + out["mqt_carry"]
-    flug_qty = out["flug_qty"] + out["flug_carry"]
-    ipug_qty = out["ipug_qty"] + out["ipug_carry"]
+    mqt_qty = out["mqt_qty"] + out["mqt_sortie_carry"]
+    flug_qty = out["flug_qty"] + out["flug_sortie_carry"]
+    ipug_qty = out["ipug_qty"] + out["ipug_sortie_carry"]
 
     fls = out["fl_qty"].replace(0, 1.0)
     wgs = out["wg_qty"].replace(0, 1.0)
