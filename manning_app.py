@@ -15,7 +15,7 @@ from src.models import PriorityMode, Qual, monthly_sortie_rap_target
 from src.simulation_config import DEFAULT_PHASE_LENGTH_DAYS, SimulationConfig
 
 BRAIN_PATH = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
-_PAA_BY_SQUADRON = {sq_id: paa for sq_id, paa, _, _, _ in SQUADRON_DATA}
+_PAA_BY_SQUADRON = {sq_id: paa for sq_id, paa, *_ in SQUADRON_DATA}
 _PREDICT_FEATURES = CAFSimulation._PREDICT_FEATURE_COLS
 _SYLLABI_NEGLIGIBLE = 0.10
 _REMAINING_TOTAL = [
