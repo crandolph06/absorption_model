@@ -36,7 +36,7 @@ def rap_assess(pilots):
             red_dict[group_name] = [0, 0]
             continue
 
-        avg_sorties = sum(p.sortie_monthly for p in group_pilots) / len(group_pilots)
+        avg_sorties = sum(p.sortie_rap_monthly for p in group_pilots) / len(group_pilots)
         avg_blue_sorties = sum(p.sortie_blue_monthly for p in group_pilots) / len(group_pilots)
         avg_red_sorties = sum(p.sortie_red_monthly for p in group_pilots) / len(group_pilots)
 

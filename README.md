@@ -51,6 +51,7 @@ absorption_model/
 ├── src/                    # Core simulation logic (start here)
 │   ├── engine.py           # Single-phase: pilot creation, sortie/sim allocation, syllabi
 │   ├── models.py           # Pilot, SquadronConfig, enums, RAP constants, manning aging
+│   ├── simulation_config.py # SimulationConfig: phase length, allocation noise (fleet-wide variables)
 │   ├── syllabi.py          # MQT / FLUG / IPUG event definitions
 │   ├── rules.py            # Who can fly, upgrade eligibility
 │   ├── rap_state.py        # RAP shortfall assessment (sortie + sim)
@@ -85,14 +86,14 @@ absorption_model/
 
 ### Layer 1 — Single-phase physics (`src/engine.py`)
 
-**What it does:** For one `SquadronConfig`, creates pilots, runs syllabus programs (MQT/FLUG/IPUG), continuation training, and sim RAP. Sorties are allocated against **hard capacity** `PAA × UTE` per phase, with a per-pilot monthly event cap (`MAX_MONTHLY_EVENTS` in `models.py`). Syllabus requirements and CT makeup are based on 20 FW flying training.
+**What it does:** For one `SquadronConfig`, creates pilots, runs syllabus programs (MQT/FLUG/IPUG), continuation training, and sim RAP. Sorties are allocated against **hard capacity** `PAA × UTE × phase_months`, with a per-pilot monthly event cap (`MAX_MONTHLY_EVENTS` in `models.py`). Phase length comes from `SimulationConfig` (default 120 days), not squadron config. Syllabus requirements and CT makeup are based on 20 FW flying training.
 
 **Key functions:**
 
 | Function | Role |
 |----------|------|
 | `create_pilots()` | Build WG / FL / IP roster from config |
-| `run_phase_simulation()` | Full phase: upgrades → syllabus → CT → sim RAP |
+| `run_phase_simulation()` | Full phase: upgrades → syllabus → CT → sim RAP (`sim_config` optional) |
 | `assign_sortie()` / `assign_sim()` | Pick lowest-utilization pilot (total events, then type-specific tie-break) |
 | `rap_assess()` | Per-cohort sortie RAP vs targets (`rap_state.py`) |
 
@@ -107,7 +108,7 @@ absorption_model/
 1. Adds B-course graduates  
 2. Starts upgrades (FLUG / IPUG windows)  
 3. Calls **sortie brain** → predicted monthly sortie/sim rates per squadron  
-4. Ages pilots via `apply_phase_aging()` (fractional sorties/sims, not discrete allocation)  
+4. Ages pilots via `apply_phase_aging()` (fractional sorties/sims, scaled by `CAFSimulation.sim_config.phase_length_days`)  
 5. Graduates, staff funnel, retention  
 
 **Important:** The manning model does **not** re-run `engine.py` each phase. It uses the brain’s predicted rates as realized flying. RAP shortfall in history is computed as `RAP_target − brain_predicted_rate`, not fleet capacity balance.
@@ -218,7 +219,7 @@ HPC sessions are limited to **4 hours**; sweep scripts use `timeout` and checkpo
 | **PAA** | Primary assigned aircraft per squadron |
 | **UTE** | Utilization rate (sorties per aircraft per month) |
 | **RAP** | Ready Aircrew Program — monthly sortie/sim targets by qual (WG 9/mo sorties, FL/IP 8/mo, sim 3/mo) |
-| **Phase** | 120-day notional period; 3 phases per year |
+| **Phase** | Typical phase length (default 120 days via `SimulationConfig`); 3 phases per year |
 | **MQT / FLUG / IPUG** | Upgrade syllabi (wingman → FL → IP) |
 | **Exp ratio** | (IPs + FLs) / line pilots |
 | **Staff funnel** | Over-manned line IPs/FLs moved to staff billets |
@@ -231,7 +232,8 @@ HPC sessions are limited to **4 hours**; sweep scripts use `timeout` and checkpo
 2. **Brain / code alignment:** Mismatched 12 vs 16 outputs silently breaks syllabus charts or sim deferrals. Always verify output count after pulling a new `.pkl`.
 3. **Layer 1 vs Layer 2:** Single-phase sweeps train the brain on **capacity-constrained** outcomes; the manning model applies brain rates **without** re-enforcing `PAA × UTE` fleet totals. Document any policy conclusions accordingly.
 4. **`total_pilots` in training data** = line pilot count in manning prediction, not including staff.
-5. **`archive/`:** Historical scripts; not part of the active pipeline unless you know you need them.
+5. **`SimulationConfig`:** Fleet-wide phase length and (Layer 1) allocation noise live in `src/simulation_config.py`, not on `SquadronConfig`. Pass `sim_config=` to `run_phase_simulation()` or `CAFSimulation(...)`.
+6. **`archive/`:** Historical scripts; not part of the active pipeline unless you know you need them.
 
 ---
 

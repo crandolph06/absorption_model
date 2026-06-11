@@ -12,6 +12,7 @@ from src.manning_config import SQUADRON_DATA
 from src.manning_engine import CAFSimulation
 from src.manning_main import setup_simulation
 from src.models import PriorityMode, Qual, monthly_sortie_rap_target
+from src.simulation_config import DEFAULT_PHASE_LENGTH_DAYS, SimulationConfig
 
 BRAIN_PATH = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
 _PAA_BY_SQUADRON = {sq_id: paa for sq_id, paa, _, _, _ in SQUADRON_DATA}
@@ -37,7 +38,7 @@ def _clean_syllabus_preds(raw: np.ndarray) -> np.ndarray:
 def _brain_features_from_history(df: pd.DataFrame, ute: float) -> pd.DataFrame:
     """Same feature math as CAFSimulation.predict_rates_fast, one row per history row."""
     out = df.copy()
-    for col in ("mqt_carry", "flug_carry", "ipug_carry"):
+    for col in ("mqt_sortie_carry", "flug_sortie_carry", "ipug_sortie_carry"):
         if col not in out.columns:
             out[col] = 0.0
 
@@ -45,9 +46,9 @@ def _brain_features_from_history(df: pd.DataFrame, ute: float) -> pd.DataFrame:
     out["ute"] = float(ute)
     out["exp_ratio"] = out["exp_rat"]
     line_pilots = out["line_pilots"]
-    mqt_qty = out["mqt_qty"] + out["mqt_carry"]
-    flug_qty = out["flug_qty"] + out["flug_carry"]
-    ipug_qty = out["ipug_qty"] + out["ipug_carry"]
+    mqt_qty = out["mqt_qty"] + out["mqt_sortie_carry"]
+    flug_qty = out["flug_qty"] + out["flug_sortie_carry"]
+    ipug_qty = out["ipug_qty"] + out["ipug_sortie_carry"]
 
     fls = out["fl_qty"].replace(0, 1.0)
     wgs = out["wg_qty"].replace(0, 1.0)
@@ -146,6 +147,7 @@ with st.sidebar.form("sim_params"):
     )
 
     staff_priority_mode = priority_options[selected_label]
+    sim_config = SimulationConfig(phase_length_days=DEFAULT_PHASE_LENGTH_DAYS)
     
     # The Submit Button
     submitted = st.form_submit_button("🚀 Run Simulation")
@@ -191,7 +193,7 @@ if submitted:
         sim, squadrons = setup_simulation(round_robin=round_robin, ai_brain=cached_brain,
                                           flug_window_start=flug_start, ipug_window_start=ipug_start, annual_intake=intake,
                                           max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode,
-                                          retention_rate=retention)
+                                          retention_rate=retention, sim_config=sim_config)
         df = sim.run_simulation(
             years_to_run=years, squadron_configs=squadrons, ute=ute_val
             ) 
@@ -545,7 +547,8 @@ if submitted:
         master_sim, _ = setup_simulation(round_robin=round_robin,
                                          ai_brain=cached_brain, flug_window_start=flug_start, annual_intake=intake,
                                          ipug_window_start= ipug_start, max_manning_pct=max_manning_pct,
-                                         staff_priority_mode=staff_priority_mode, retention_rate=retention)
+                                         staff_priority_mode=staff_priority_mode, retention_rate=retention,
+                                         sim_config=sim_config)
 
         # Loop with enumeration to update the bar
         for i, val in enumerate(test_range):
@@ -557,7 +560,7 @@ if submitted:
                                             ai_brain=cached_brain, existing_sim=master_sim, annual_intake=val,
                                             flug_window_start=flug_start, ipug_window_start=ipug_start,
                                             max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode,
-                                            retention_rate=retention)
+                                            retention_rate=retention, sim_config=sim_config)
 
             t_df = t_sim.run_simulation(
                 years_to_run=20, squadron_configs=t_sqs, ute=ute_val 

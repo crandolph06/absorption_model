@@ -3,6 +3,7 @@ import numpy as np
 import os
 from src.engine import run_phase_simulation, create_pilots
 from src.models import SquadronConfig, Qual, Upgrade
+from src.simulation_config import DEFAULT_PHASE_LENGTH_DAYS, SimulationConfig
 from src.rap_state import rap_assess, rap_state_code, rap_state_label, mqt_observed_sortie_metrics
 
 def run_research_sweep(average_iterations=True):
@@ -16,7 +17,7 @@ def run_research_sweep(average_iterations=True):
     ipug_students = [0, 2, 4, 6, 8, 10]
     total_pilots = [25, 30, 35, 40]
 
-    PHASE_DAYS = 120
+    SIM_CONFIG = SimulationConfig(phase_length_days=DEFAULT_PHASE_LENGTH_DAYS)
     ITERATIONS_PER_CONFIG = 3 
     OUTPUT_FILE = "outputs/research_data_debug.csv"
 
@@ -48,13 +49,13 @@ def run_research_sweep(average_iterations=True):
                                     cfg = SquadronConfig(
                                         paa=paa, ute=ute, experience_ratio=exp, ip_qty=ip_q,
                                         mqt_students=mqt, flug_students=flug, ipug_students=ipug,
-                                        phase_length_days=PHASE_DAYS, total_pilots=total, id=99
+                                        total_pilots=total, id=99
                                     )
 
                                     for i in range(ITERATIONS_PER_CONFIG):
                                         try:
                                             pilots = create_pilots(cfg)
-                                            final_pilots = run_phase_simulation(cfg, pilots, allocation_noise=0.0)
+                                            final_pilots = run_phase_simulation(cfg, pilots, sim_config=SIM_CONFIG)
                                             rap_dict, blue_rap_dict, red_dict = rap_assess(final_pilots)
                                             mqt_sorties = mqt_observed_sortie_metrics(final_pilots)
 
@@ -63,7 +64,7 @@ def run_research_sweep(average_iterations=True):
 
                                             current_result = {
                                                 "paa": paa, "ute": ute, 
-                                                "total_capacity": cfg.paa * cfg.ute * (PHASE_DAYS / 30),
+                                                "total_capacity": cfg.paa * cfg.ute * SIM_CONFIG.phase_length_months,
                                                 "exp_ratio": exp, "ip_qty": ip_q, "total_pilots": total,
                                                 "mqt_qty": mqt, "flug_qty": flug, "ipug_qty": ipug,
                                                 "rap_state_code": r_code, "rap_state_label": rap_state_label(r_code),
