@@ -9,6 +9,7 @@ from src.viability.doe import generate_doe
 from src.viability.evaluator import evaluate_design, evaluate_designs_parallel
 from src.viability.io import run_output_dir, write_config_resolved, write_table
 from src.viability.policy import PolicyDesign
+from src.viability.surrogate import fit_surrogates_from_file
 
 
 def main() -> int:
@@ -54,6 +55,25 @@ def main() -> int:
         default=50,
         help="Flush evaluation checkpoint batches every N completed designs",
     )
+    fit_parser = subparsers.add_parser("fit-surrogate", help="Fit baseline viability surrogates")
+    fit_parser.add_argument("--config", required=True, help="Path to viability YAML config")
+    fit_parser.add_argument("--evaluations", required=True, help="Evaluations parquet or CSV path")
+    fit_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Directory for surrogate artifacts (default: directory containing evaluations)",
+    )
+    fit_parser.add_argument(
+        "--boundary-threshold",
+        type=float,
+        default=0.1,
+        help="Absolute phi threshold for boundary MAE metric",
+    )
+    fit_parser.add_argument(
+        "--no-gpr",
+        action="store_true",
+        help="Skip the optional phi Gaussian process model",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -89,6 +109,18 @@ def main() -> int:
         write_table(results, output_dir / "evaluations.parquet")
         all_ok = bool(len(results) > 0 and (results["status"] == "ok").all())
         return 0 if all_ok else 1
+
+    if args.command == "fit-surrogate":
+        output_dir = Path(args.output_dir) if args.output_dir else Path(args.evaluations).parent
+        result = fit_surrogates_from_file(
+            args.evaluations,
+            config,
+            output_dir,
+            boundary_threshold=args.boundary_threshold,
+            fit_gpr=not args.no_gpr,
+        )
+        print(json.dumps(result.metrics, indent=2, sort_keys=True, default=str))
+        return 0
 
     raise ValueError(f"Unhandled command {args.command!r}")
 

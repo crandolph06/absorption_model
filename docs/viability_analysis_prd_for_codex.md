@@ -465,6 +465,18 @@ If a configured brain produces any other output count, the viability evaluator
 should fail clearly before running the long-horizon model. A silent fallback to a
 legacy 12-output layout would make the long-horizon results difficult to trust.
 
+For local review without a full HPC sweep, generate a small ignored single-phase
+training batch with:
+
+```bash
+python tools/generate_local_brain_training_data.py --n 256 --workers 4
+python hpc_train_brain_multi_output.py
+```
+
+That writes the configured local artifact at
+`outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl`. Treat this
+as a smoke/review brain unless it is trained on a production-sized sweep.
+
 ### 6.2 Prototype simplification
 
 The first usable feasibility prototype should prioritize direct long-horizon
