@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
+import math
 import random
 from typing import List, Optional, Tuple
 
@@ -17,7 +18,7 @@ SIM_EP_MONTHLY: float = 1.0
 SIM_SESSIONS_MONTHLY: float = float("inf")
 SIM_BAYS_PER_SESSION: int = 4
 # Max combined sorties + sims per pilot per month (single-phase allocation path).
-MAX_MONTHLY_EVENTS: float = 25.0
+MAX_MONTHLY_EVENTS: float = 20.0
 # Single-ship CT sorties: at most this many count toward sortie RAP per month.
 SINGLE_SHIP_RAP_MONTHLY_CAP: float = 1.0
 
@@ -309,9 +310,14 @@ class SquadronConfig:
     mqt_students: int = 0 
     flug_students: int = 0
     ipug_students: int = 0
-    mqt_carry: float = 0.0
-    flug_carry: float = 0.0
-    ipug_carry: float = 0.0
+    mqt_sortie_carry: float = 0.0
+    flug_sortie_carry: float = 0.0
+    ipug_sortie_carry: float = 0.0
+    mqt_sim_carry: float = 0.0
+    flug_sim_carry: float = 0.0
+    ipug_sim_carry: float = 0.0
+    deferred_sortie_burden: int = 0
+    deferred_sim_burden: int = 0
     wg_qty: int = 0
     fl_qty: int = 0
     ip_qty: int = 0
@@ -370,75 +376,86 @@ class SquadronConfig:
         self.flug_students = sum(1 for p in line_pilots if p.upgrade == Upgrade.FLUG)
         self.ipug_students = sum(1 for p in line_pilots if p.upgrade == Upgrade.IPUG)
 
-    def graduate_current_upgrades(self, deferrals: Tuple[int, int, int, int, int, int], sorties_only: bool = True):
-        """Graduate upgrade students with no deferred syllabus lines. """
-        
-        graduated_count = 0
+    def graduate_current_upgrades(
+        self,
+        deferrals: Tuple[float, float, float, float, float, float],
+        sorties_only: bool = False,
+    ):
+        """
+        Graduate upgrade students using brain-predicted deferred sortie/sim **line slots**.
+
+        ``deferrals`` is
+        ``(mqt_sorties, flug_sorties, ipug_sorties, mqt_sims, flug_sims, ipug_sims)``.
+        Students held back = ceil(deferred_slots / syllabus_burden_per_student) per track.
+        ``*_sortie_carry`` / ``*_sim_carry`` store syllabi-worth of deferred sortie/sim burden
+        for the next phase.
+        """
+        from src.syllabi import (
+            SORTIE_BURDEN_FLUG,
+            SORTIE_BURDEN_IPUG,
+            SORTIE_BURDEN_MQT,
+            SIM_BURDEN_FLUG,
+            SIM_BURDEN_IPUG,
+            SIM_BURDEN_MQT,
+            incomplete_burden,
+        )
+
+        mqt_sd, flug_sd, ipug_sd, mqt_sm, flug_sm, ipug_sm = deferrals
 
         if all(abs(d) < 1e-3 for d in deferrals):
             for pilot in self.pilots:
                 if pilot.upgrade != Upgrade.NONE:
                     pilot.graduate()
-                    graduated_count += 1
-            self.mqt_carry = 0.0
-            self.flug_carry = 0.0
-            self.ipug_carry = 0.0
+            self.mqt_sortie_carry = 0.0
+            self.flug_sortie_carry = 0.0
+            self.ipug_sortie_carry = 0.0
+            self.mqt_sim_carry = 0.0
+            self.flug_sim_carry = 0.0
+            self.ipug_sim_carry = 0.0
+            self.deferred_sortie_burden = 0
+            self.deferred_sim_burden = 0
+            self.update_stats()
+            return
 
-        else:
-            # if sorties_only:
-            #     deferrals = deferrals[3:]
-            # else:
-            #     deferrals = deferrals[:3]
-            # mqt_deferrals, flug_deferrals, ipug_deferrals = deferrals
+        track_specs = (
+            (Upgrade.MQT, mqt_sd, mqt_sm, SORTIE_BURDEN_MQT, SIM_BURDEN_MQT, "mqt_sortie_carry", "mqt_sim_carry"),
+            (Upgrade.FLUG, flug_sd, flug_sm, SORTIE_BURDEN_FLUG, SIM_BURDEN_FLUG, "flug_sortie_carry", "flug_sim_carry"),
+            (Upgrade.IPUG, ipug_sd, ipug_sm, SORTIE_BURDEN_IPUG, SIM_BURDEN_IPUG, "ipug_sortie_carry", "ipug_sim_carry"),
+        )
 
-            # mqt_whole = int(mqt_deferrals)
-            # flug_whole = int(flug_deferrals)
-            # ipug_whole = int(ipug_deferrals)
+        for upgrade, sortie_def, sim_def, sortie_burden, sim_burden, sortie_carry_attr, sim_carry_attr in track_specs:
+            students = [p for p in self.pilots if p.upgrade == upgrade]
+            if not students:
+                setattr(self, sortie_carry_attr, 0.0)
+                setattr(self, sim_carry_attr, 0.0)
+                continue
 
-            # self.mqt_carry = mqt_deferrals - mqt_whole
-            # self.flug_carry = flug_deferrals - flug_whole
-            # self.ipug_carry = ipug_deferrals - ipug_whole
+            held_back = 0
+            if sortie_burden > 0 and sortie_def > 1e-3:
+                held_back = max(held_back, int(math.ceil(sortie_def / sortie_burden)))
+            if not sorties_only and sim_burden > 0 and sim_def > 1e-3:
+                held_back = max(held_back, int(math.ceil(sim_def / sim_burden)))
+            held_back = min(held_back, len(students))
 
-            mqt_pilots = [p for p in self.pilots if p.upgrade == Upgrade.MQT]
-            flug_pilots = [p for p in self.pilots if p.upgrade == Upgrade.FLUG]
-            ipug_pilots = [p for p in self.pilots if p.upgrade == Upgrade.IPUG]
+            students.sort(
+                key=lambda p: (
+                    incomplete_burden(p.incomplete_syllabus_items)[0]
+                    + incomplete_burden(p.incomplete_syllabus_items)[1],
+                    -(p.sorties_flown - p.sorties_at_upgrade_start),
+                )
+            )
+            graduate_count = len(students) - held_back
+            for pilot in students[:graduate_count]:
+                pilot.graduate()
 
-            mqt_pilots.sort(
-                key=lambda x: (x.sorties_flown - x.sorties_at_upgrade_start, 
-                x.sorties_flown), reverse=True)
-            flug_pilots.sort(
-                key=lambda x: (x.sorties_flown - x.sorties_at_upgrade_start, 
-                x.sorties_flown), reverse=True)
-            ipug_pilots.sort( 
-                key=lambda x: (x.sorties_flown - x.sorties_at_upgrade_start, 
-                x.sorties_flown), reverse=True)
+            sortie_frac = sortie_def / sortie_burden if sortie_burden > 0 else 0.0
+            sim_frac = sim_def / sim_burden if sim_burden > 0 else 0.0
+            setattr(self, sortie_carry_attr, sortie_frac)
+            setattr(self, sim_carry_attr, sim_frac)
 
-            # mqt_limit = max(0, len(mqt_pilots) - mqt_whole)
-            # flug_limit = max(0, len(flug_pilots) - flug_whole)
-            # ipug_limit = max(0, len(ipug_pilots) - ipug_whole)
-
-            mqt_limit = len(mqt_pilots)
-            flug_limit = len(flug_pilots)
-            ipug_limit = len(ipug_pilots)
-
-            for i in range(mqt_limit):
-                mqt_pilots[i].graduate()
-                graduated_count += 1
-            for i in range(flug_limit):
-                flug_pilots[i].graduate()
-                graduated_count += 1
-            for i in range(ipug_limit):
-                ipug_pilots[i].graduate()
-                graduated_count += 1
-                
+        self.deferred_sortie_burden = int(round(mqt_sd + flug_sd + ipug_sd))
+        self.deferred_sim_burden = int(round(mqt_sm + flug_sm + ipug_sm))
         self.update_stats()
-        still_upgrade = self.mqt_students + self.flug_students + self.ipug_students
-        # if still_upgrade:
-        #     print(
-        #         f"Squadron {self.id} graduation: {graduated_count} pilot(s) graduated; "
-        #         f"{still_upgrade} still in upgrade (deferred syllabus lines remain) "
-        #         f"[MQT={self.mqt_students}, FLUG={self.flug_students}, IPUG={self.ipug_students}]."
-        #     )
 
     def new_phase_upgrades(self, flug_window_start:int, ipug_window_start:int,
                            use_upgrade_quotas: bool = False, flug_quota: int = 999,
@@ -529,9 +546,14 @@ class SquadronConfig:
             'mqt_qty': self.mqt_students,
             'flug_qty': self.flug_students,
             'ipug_qty': self.ipug_students,
-            'mqt_carry': self.mqt_carry,
-            'flug_carry': self.flug_carry,
-            'ipug_carry': self.ipug_carry,
+            'mqt_sortie_carry': self.mqt_sortie_carry,
+            'flug_sortie_carry': self.flug_sortie_carry,
+            'ipug_sortie_carry': self.ipug_sortie_carry,
+            'mqt_sim_carry': self.mqt_sim_carry,
+            'flug_sim_carry': self.flug_sim_carry,
+            'ipug_sim_carry': self.ipug_sim_carry,
+            'deferred_sortie_burden': self.deferred_sortie_burden,
+            'deferred_sim_burden': self.deferred_sim_burden,
             'percent_manned': self.line_pilots / self.desired_manning,
             'line_pilots': self.line_pilots,
             'total_pilots': self.total_pilots,
