@@ -12,7 +12,6 @@ from src.manning_config import SQUADRON_DATA
 from src.manning_engine import CAFSimulation
 from src.manning_main import setup_simulation
 from src.models import PriorityMode, Qual, monthly_sortie_rap_target
-from src.simulation_config import DEFAULT_PHASE_LENGTH_DAYS, SimulationConfig
 
 BRAIN_PATH = "brains/hpc_sortie_brain_multi_output_mlp.pkl"
 _PAA_BY_SQUADRON = {sq_id: paa for sq_id, paa, *_ in SQUADRON_DATA}
@@ -147,8 +146,7 @@ with st.sidebar.form("sim_params"):
     )
 
     staff_priority_mode = priority_options[selected_label]
-    sim_config = SimulationConfig(phase_length_days=DEFAULT_PHASE_LENGTH_DAYS)
-    
+
     # The Submit Button
     submitted = st.form_submit_button("🚀 Run Simulation")
 
@@ -193,7 +191,7 @@ if submitted:
         sim, squadrons = setup_simulation(round_robin=round_robin, ai_brain=cached_brain,
                                           flug_window_start=flug_start, ipug_window_start=ipug_start, annual_intake=intake,
                                           max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode,
-                                          retention_rate=retention, sim_config=sim_config)
+                                          retention_rate=retention)
         df = sim.run_simulation(
             years_to_run=years, squadron_configs=squadrons, ute=ute_val
             ) 
@@ -547,8 +545,7 @@ if submitted:
         master_sim, _ = setup_simulation(round_robin=round_robin,
                                          ai_brain=cached_brain, flug_window_start=flug_start, annual_intake=intake,
                                          ipug_window_start= ipug_start, max_manning_pct=max_manning_pct,
-                                         staff_priority_mode=staff_priority_mode, retention_rate=retention,
-                                         sim_config=sim_config)
+                                         staff_priority_mode=staff_priority_mode, retention_rate=retention)
 
         # Loop with enumeration to update the bar
         for i, val in enumerate(test_range):
@@ -560,7 +557,7 @@ if submitted:
                                             ai_brain=cached_brain, existing_sim=master_sim, annual_intake=val,
                                             flug_window_start=flug_start, ipug_window_start=ipug_start,
                                             max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode,
-                                            retention_rate=retention, sim_config=sim_config)
+                                            retention_rate=retention)
 
             t_df = t_sim.run_simulation(
                 years_to_run=20, squadron_configs=t_sqs, ute=ute_val 
