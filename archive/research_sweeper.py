@@ -55,7 +55,7 @@ def run_research_sweep(average_iterations=True):
                                     for i in range(ITERATIONS_PER_CONFIG):
                                         try:
                                             pilots = create_pilots(cfg)
-                                            final_pilots = run_phase_simulation(cfg, pilots, allocation_noise=0.0, sim_config=SIM_CONFIG)
+                                            final_pilots = run_phase_simulation(cfg, pilots, sim_config=SIM_CONFIG)
                                             rap_dict, blue_rap_dict, red_dict = rap_assess(final_pilots)
                                             mqt_sorties = mqt_observed_sortie_metrics(final_pilots)
 
