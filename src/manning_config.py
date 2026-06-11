@@ -48,7 +48,15 @@ def get_initial_squadrons(current_year: int, squadron_data: list):
                              squadron_id=sq_id, current_assignment=Assignment.LINE, active=True))
         
         # 4. Seed upgrades within current manning
-        mqt, flug, ipug = upgradees
+        if len(upgradees) == 0:
+            mqt, flug, ipug = 0, 0, 0
+        elif len(upgradees) == 3:
+            mqt, flug, ipug = upgradees
+        else:
+            raise ValueError(
+                f"Squadron {sq_id} upgrade seed must be empty or (mqt, flug, ipug); "
+                f"got {upgradees!r}"
+            )
 
         if mqt > 0: # Default to youngest wingmen
             mqt_eligible_wingmen = [p for p in sq.pilots if p.qual == Qual.WG] 
