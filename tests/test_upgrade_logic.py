@@ -61,7 +61,6 @@ def _run_phase(cfg, pilots, *, phase_days: int = 30, pre_seed: bool = True):
         return run_phase_simulation(
             cfg,
             pilots,
-            allocation_noise=0.0,
             sim_config=sim,
             pre_seed_upgrades=pre_seed,
             mqt_syllabus=TEST_MQT_SYLLABUS,
