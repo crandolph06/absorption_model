@@ -13,7 +13,8 @@ class CAFSimulation:
                  ipug_window_start: int = 400, max_manning_pct: int = 150, 
                  staff_priority_mode: PriorityMode = PriorityMode.RANDOM,
                  use_upgrade_quotas: bool = False,
-                 sim_config: Optional[SimulationConfig] = None):
+                 sim_config: Optional[SimulationConfig] = None,
+                 use_physics_allocator: bool = False):
         self.history = []
         self.current_year = 2026
         self.current_phase = 1
@@ -26,6 +27,7 @@ class CAFSimulation:
         self.phase_intake = annual_intake // 3 # APPROXIMATE +/- 2
         self.retention_rate = retention_rate
         self.use_upgrade_quotas = use_upgrade_quotas
+        self.use_physics_allocator = use_physics_allocator
         if self.use_upgrade_quotas == False:
             self.sq_phase_flug_intake = 999
             self.sq_phase_ipug_intake = 999
@@ -35,6 +37,8 @@ class CAFSimulation:
 
         if brain:
             self.brain = brain
+        elif use_physics_allocator:
+            self.brain = None
         else:
             for path in (
                 "brains/hpc_sortie_brain_multi_output_mlp_16_out.pkl",
@@ -273,6 +277,35 @@ class CAFSimulation:
             target_sq.pilots.append(new_pilot)
             target_sq.update_stats()
 
+    def _run_squadron_physics_phase(self, sq: SquadronConfig, year: int, phase_num: int):
+        """One CAF phase using ``run_phase_simulation`` instead of the sortie brain."""
+        from src.engine import run_phase_simulation
+        from src.rap_state import mqt_observed_sortie_metrics
+
+        phase_days = self.sim_config.phase_length_days
+        run_phase_simulation(
+            sq,
+            sq.pilots,
+            debug_verbose=False,
+            pre_seed_upgrades=False,
+            sim_config=self.sim_config,
+        )
+
+        mqt_metrics = mqt_observed_sortie_metrics(sq.pilots)
+        if mqt_metrics["sortie_mo"] > 0:
+            sq.observed_mqt_monthly = mqt_metrics["sortie_mo"]
+
+        current_stats = sq.store_stats_from_physics(year, phase_num, phase_days)
+        self.process_end_of_phase(
+            sq,
+            year,
+            phase_num,
+            self.retention_rate,
+            current_stats,
+            deferrals=(0, 0, 0, 0, 0, 0),
+            skip_graduation=True,
+        )
+
     def run_phase(self, phase_num: int, year: int):
 
         # print(f"Running phase {phase_num} of {year}")
@@ -292,6 +325,11 @@ class CAFSimulation:
                 flug_window_start=self.flug_window_start, ipug_window_start=self.ipug_window_start, 
                 use_upgrade_quotas=use_upgrade_quotas, flug_quota=flug_quota, ipug_quota=ipug_quota)
             sq.update_stats()            
+
+        if self.use_physics_allocator:
+            for sq in self.squadrons:
+                self._run_squadron_physics_phase(sq, year, phase_num)
+            return
 
         preds = self.predict_rates_fast()
 
@@ -339,14 +377,15 @@ class CAFSimulation:
         return pd.DataFrame(self.history)
     
 
-    def process_end_of_phase(self, sq: SquadronConfig, year: int, phase_num: int, retention_rate, current_stats: dict, deferrals: Tuple[int, int, int, int, int, int]):
+    def process_end_of_phase(self, sq: SquadronConfig, year: int, phase_num: int, retention_rate, current_stats: dict, deferrals: Tuple[int, int, int, int, int, int], skip_graduation: bool = False):
         
         staff_ips = 0
         staff_fls = 0
         separated_count = 0
         retained_count = 0
 
-        sq.graduate_current_upgrades(deferrals, sorties_only=False)
+        if not skip_graduation:
+            sq.graduate_current_upgrades(deferrals, sorties_only=False)
 
         sq.send_to_staff(priority_mode=self.staff_priority)
 
