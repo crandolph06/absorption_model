@@ -256,8 +256,6 @@ def assign_sortie(
 
     winner = candidates[0]
     winner.add_sortie(avg_sortie_dur=cfg.avg_sortie_dur, side=side, single_ship=single_ship)
-    tag = " (single-ship)" if single_ship else ""
-    print(f"Assigned Sortie{tag} to {winner.qual.name}/{winner.upgrade.name}: {winner.sortie_blue_phase} Blue, {winner.sortie_red_phase} Red, {winner.sim_phase} Sim,{winner.sim_phase + winner.sortie_phase} Total")
     exclude.add(id(winner))
     return True
 
@@ -283,7 +281,6 @@ def assign_sim(
     winner = candidates[0]
     winner.add_sim(cfg.avg_sortie_dur)
     exclude.add(id(winner))
-    print(f"Assigned Sim to {winner.qual.name}/{winner.upgrade.name}: {winner.sortie_blue_phase} Blue, {winner.sortie_red_phase} Red, {winner.sim_phase} Sim,{winner.sim_phase + winner.sortie_phase} Total")
     return True
 
 def check_syllabus_resources(
