@@ -52,7 +52,17 @@ _CONSTRAINT_SCALE_FIELDS = (
     "experience_ratio",
 )
 _POLICY_FIELDS = ("parameterization", "variables")
-_DOE_FIELDS = ("method", "n_initial", "include_corners", "include_baselines", "baselines")
+_DOE_FIELDS = (
+    "method",
+    "n_initial",
+    "start_index",
+    "scramble",
+    "include_corners",
+    "include_baselines",
+    "include_corners_on_resume",
+    "include_baselines_on_resume",
+    "baselines",
+)
 _VARIABLE_FIELDS = ("type", "low", "high")
 
 
@@ -164,15 +174,25 @@ class PolicyConfig:
 class DoeConfig:
     method: str
     n_initial: int
+    start_index: int
+    scramble: bool
     include_corners: bool
     include_baselines: bool
+    include_corners_on_resume: bool
+    include_baselines_on_resume: bool
     baselines: list[dict[str, float]]
 
     def __post_init__(self) -> None:
         if self.n_initial < 0:
             raise ValueError("doe.n_initial must be non-negative")
+        if self.start_index < 0:
+            raise ValueError("doe.start_index must be non-negative")
         if self.method not in {"random", "sobol", "latin_hypercube", "lhs"}:
             raise ValueError(f"Unsupported DOE method {self.method!r}")
+        if self.start_index > 0 and self.method in {"latin_hypercube", "lhs"}:
+            raise ValueError(
+                "doe.start_index resume semantics are implemented for sobol and random only"
+            )
 
 
 @dataclass(frozen=True)
@@ -237,8 +257,20 @@ class ViabilityConfig:
         doe = DoeConfig(
             method=_require_key(doe_data, "doe", "method"),
             n_initial=_require_key(doe_data, "doe", "n_initial"),
+            start_index=_require_key(doe_data, "doe", "start_index"),
+            scramble=_require_key(doe_data, "doe", "scramble"),
             include_corners=_require_key(doe_data, "doe", "include_corners"),
             include_baselines=_require_key(doe_data, "doe", "include_baselines"),
+            include_corners_on_resume=_require_key(
+                doe_data,
+                "doe",
+                "include_corners_on_resume",
+            ),
+            include_baselines_on_resume=_require_key(
+                doe_data,
+                "doe",
+                "include_baselines_on_resume",
+            ),
             baselines=baselines,
         )
 

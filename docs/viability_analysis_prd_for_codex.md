@@ -390,8 +390,12 @@ policy:
 doe:
   method: sobol
   n_initial: 128
+  start_index: 0
+  scramble: true
   include_corners: true
   include_baselines: true
+  include_corners_on_resume: false
+  include_baselines_on_resume: false
 
 surrogate:
   enabled: true
@@ -430,6 +434,16 @@ plots:
 ```
 
 The config parser should validate required fields and provide helpful errors.
+
+For resumable Sobol campaigns, `start_index` and `n_initial` should define the
+contiguous Sobol block for the current run. For example, a first run can use
+`start_index: 0, n_initial: 128`; a continuation run can use
+`start_index: 128, n_initial: 128` with the same `random_seed` and `scramble`
+settings. Sobol sample `design_id` values should be stable strings such as
+`sobol_000128`. Corner and baseline designs should have separate IDs so they do
+not collide with resumed Sobol rows. By default, corners and baselines are only
+included for `start_index: 0`; set `include_corners_on_resume` or
+`include_baselines_on_resume` to repeat them in continuation batches.
 
 ### 6.1 Local brain artifact note
 

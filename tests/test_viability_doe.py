@@ -18,6 +18,35 @@ class ViabilityDoeTest(unittest.TestCase):
         self.assertTrue(np.all(samples >= 0.0))
         self.assertTrue(np.all(samples <= 1.0))
 
+    def test_sobol_start_index_matches_split_continuation(self):
+        first = _sample_unit_cube(
+            n=16,
+            dimension=3,
+            method="sobol",
+            random_seed=7,
+            start_index=0,
+            scramble=True,
+        )
+        split_a = _sample_unit_cube(
+            n=8,
+            dimension=3,
+            method="sobol",
+            random_seed=7,
+            start_index=0,
+            scramble=True,
+        )
+        split_b = _sample_unit_cube(
+            n=8,
+            dimension=3,
+            method="sobol",
+            random_seed=7,
+            start_index=8,
+            scramble=True,
+        )
+
+        self.assertTrue(np.allclose(first[:8], split_a))
+        self.assertTrue(np.allclose(first[8:], split_b))
+
 
 if __name__ == "__main__":
     unittest.main()

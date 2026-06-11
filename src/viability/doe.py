@@ -23,37 +23,63 @@ def generate_doe(
         raise ValueError("DOE sample count must be non-negative")
 
     selected_method = (config.doe.method if method is None else method).lower()
+    start_index = config.doe.start_index
     unit_samples = _sample_unit_cube(
         n=requested_n,
         dimension=space.dimension,
         method=selected_method,
         random_seed=config.run.random_seed,
+        start_index=start_index,
+        scramble=config.doe.scramble,
     )
 
     rows: list[dict[str, object]] = []
-    for unit_values in unit_samples:
+    for offset, unit_values in enumerate(unit_samples):
+        sample_index = start_index + offset
         raw, applied = space.denormalize_with_raw(unit_values)
-        row: dict[str, object] = {}
+        row: dict[str, object] = {
+            "design_id": f"{selected_method}_{sample_index:06d}",
+            "doe_source": selected_method,
+            "sample_index": sample_index,
+        }
         for name in space.variable_names:
             row[f"raw_{name}"] = raw[name]
             row[f"applied_{name}"] = applied[name]
             row[name] = applied[name]
         rows.append(row)
 
-    use_corners = config.doe.include_corners if include_corners is None else include_corners
+    default_corners = (
+        config.doe.include_corners
+        if start_index == 0
+        else config.doe.include_corners and config.doe.include_corners_on_resume
+    )
+    use_corners = default_corners if include_corners is None else include_corners
     if use_corners:
-        for applied in space.corner_designs():
-            row = {}
+        for corner_index, applied in enumerate(space.corner_designs()):
+            row = {
+                "design_id": f"corner_{corner_index:06d}",
+                "doe_source": "corner",
+                "sample_index": corner_index,
+            }
             for name in space.variable_names:
                 row[f"raw_{name}"] = float(applied[name])
                 row[f"applied_{name}"] = applied[name]
                 row[name] = applied[name]
             rows.append(row)
 
-    use_baselines = config.doe.include_baselines if include_baselines is None else include_baselines
+    default_baselines = (
+        config.doe.include_baselines
+        if start_index == 0
+        else config.doe.include_baselines and config.doe.include_baselines_on_resume
+    )
+    use_baselines = default_baselines if include_baselines is None else include_baselines
     if use_baselines:
-        for applied in space.baseline_designs(config.doe.baselines):
-            row = {}
+        for baseline_index, applied in enumerate(space.baseline_designs(config.doe.baselines)):
+            row = {
+                "design_id": f"baseline_{baseline_index:06d}",
+                "doe_source": "baseline",
+                "sample_index": baseline_index,
+            }
             for name in space.variable_names:
                 row[f"raw_{name}"] = float(applied[name])
                 row[f"applied_{name}"] = applied[name]
@@ -61,12 +87,10 @@ def generate_doe(
             rows.append(row)
 
     deduped = _dedupe_designs(rows, space.variable_names)
-    columns = ["design_id"]
+    columns = ["design_id", "doe_source", "sample_index"]
     for name in space.variable_names:
         columns.extend([f"raw_{name}", f"applied_{name}", name])
-    df = pd.DataFrame(deduped, columns=columns[1:])
-    df.insert(0, "design_id", range(len(df)))
-    return df
+    return pd.DataFrame(deduped, columns=columns)
 
 
 def dataframe_to_design_records(df: pd.DataFrame, config: ViabilityConfig) -> list[dict[str, object]]:
@@ -81,15 +105,25 @@ def dataframe_to_design_records(df: pd.DataFrame, config: ViabilityConfig) -> li
     return records
 
 
-def _sample_unit_cube(n: int, dimension: int, method: str, random_seed: int) -> np.ndarray:
+def _sample_unit_cube(
+    n: int,
+    dimension: int,
+    method: str,
+    random_seed: int,
+    start_index: int = 0,
+    scramble: bool = True,
+) -> np.ndarray:
     if n == 0:
         return np.empty((0, dimension), dtype=float)
     if dimension <= 0:
         raise ValueError("DOE dimension must be positive")
+    if start_index < 0:
+        raise ValueError("DOE start_index must be non-negative")
 
     if method == "random":
         rng = np.random.default_rng(random_seed)
-        return rng.random((n, dimension))
+        samples = rng.random((start_index + n, dimension))
+        return samples[start_index:]
 
     if method in {"sobol", "latin_hypercube", "lhs"}:
         try:
@@ -100,8 +134,12 @@ def _sample_unit_cube(n: int, dimension: int, method: str, random_seed: int) -> 
             ) from exc
 
         if method == "sobol":
-            sampler = qmc.Sobol(d=dimension, scramble=True, seed=random_seed)
+            sampler = qmc.Sobol(d=dimension, scramble=scramble, seed=random_seed)
+            if start_index > 0:
+                sampler.fast_forward(start_index)
             return sampler.random(n)
+        if start_index > 0:
+            raise ValueError("Latin hypercube resume via start_index is not implemented")
         sampler = qmc.LatinHypercube(d=dimension, seed=random_seed)
         return sampler.random(n)
 

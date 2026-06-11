@@ -71,8 +71,12 @@ policy:
 doe:
   method: sobol
   n_initial: 128
+  start_index: 0
+  scramble: true
   include_corners: true
   include_baselines: true
+  include_corners_on_resume: false
+  include_baselines_on_resume: false
   baselines:
     - annual_intake: 250
       retention_rate: 0.5

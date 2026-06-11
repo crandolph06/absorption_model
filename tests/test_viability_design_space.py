@@ -51,6 +51,9 @@ class ViabilityDesignSpaceTest(unittest.TestCase):
         )
 
         self.assertEqual(list(df.columns)[0], "design_id")
+        self.assertIn("doe_source", df.columns)
+        self.assertIn("sample_index", df.columns)
+        self.assertEqual(df.iloc[0]["design_id"], "random_000000")
         self.assertIn("raw_annual_intake", df.columns)
         self.assertIn("applied_annual_intake", df.columns)
         self.assertGreaterEqual(len(df), 10)
@@ -61,6 +64,21 @@ class ViabilityDesignSpaceTest(unittest.TestCase):
             & (df["paa"] == 24)
         ]
         self.assertEqual(len(baseline), 1)
+
+    def test_generate_doe_resume_omits_corners_and_baseline_by_default(self):
+        config_dict = self.config.to_dict()
+        config_dict["doe"]["start_index"] = 8
+        resumed_config = type(self.config).from_dict(config_dict)
+
+        df = generate_doe(
+            resumed_config,
+            n=4,
+            method="sobol",
+        )
+
+        self.assertEqual(list(df["doe_source"].unique()), ["sobol"])
+        self.assertEqual(df.iloc[0]["design_id"], "sobol_000008")
+        self.assertEqual(df.iloc[-1]["design_id"], "sobol_000011")
 
     def test_doe_records_convert_to_policy_design_dicts(self):
         df = generate_doe(

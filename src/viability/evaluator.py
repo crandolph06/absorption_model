@@ -148,7 +148,7 @@ def evaluate_designs_parallel(
             raw_values = {name: float(row[f"raw_{name}"]) for name in variable_names}
         jobs.append(
             (
-                int(design_id),
+                design_id,
                 values,
                 raw_values,
                 config,
@@ -174,7 +174,7 @@ def evaluate_designs_parallel(
         )
         checkpoint_buffer = []
 
-    def consume_result(design_id: int, result: EvaluationResult) -> None:
+    def consume_result(design_id: Any, result: EvaluationResult) -> None:
         row = _flatten_result(design_id, result, variable_names)
         flattened_rows.append(row)
         checkpoint_buffer.append(row)
@@ -194,15 +194,15 @@ def evaluate_designs_parallel(
 
 
 def _evaluate_design_job(
-    job: tuple[int, dict[str, Any], dict[str, float] | None, ViabilityConfig, int]
-) -> tuple[int, EvaluationResult]:
+    job: tuple[Any, dict[str, Any], dict[str, float] | None, ViabilityConfig, int]
+) -> tuple[Any, EvaluationResult]:
     design_id, values, raw_values, config, seed = job
     design = PolicyDesign.from_mapping(values, config.policy, raw_values=raw_values)
     return design_id, evaluate_design(design, config, seed=seed)
 
 
 def _flatten_result(
-    design_id: int,
+    design_id: Any,
     result: EvaluationResult,
     variable_names: list[str],
 ) -> dict[str, Any]:
