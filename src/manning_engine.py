@@ -35,40 +35,100 @@ class CAFSimulation:
 
         if brain:
             self.brain = brain
-        elif os.path.exists("brains/hpc_sortie_brain_multi_output_mlp.pkl"): # TODO add hybrid once complete
-            print(f"🧠 Loading Sortie Brain from disk...")
-            self.brain = joblib.load("brains/hpc_sortie_brain_multi_output_mlp.pkl")
         else:
-            raise FileNotFoundError(f"Could not find brains/hpc_sortie_brain_multi_output_mlp. Please confirm file path first.")
+            for path in (
+                "brains/hpc_sortie_brain_multi_output_mlp_16_out.pkl",
+                "brains/hpc_sortie_brain_multi_output_mlp.pkl",
+            ):
+                if os.path.exists(path):
+                    print(f"🧠 Loading Sortie Brain from {path}...")
+                    self.brain = joblib.load(path)
+                    break
+            else:
+                raise FileNotFoundError(
+                    "Could not find brains/hpc_sortie_brain_multi_output_mlp*.pkl"
+                )
         self.round_robin = round_robin
         self.sim_config = sim_config or SimulationConfig()
+        self._brain_output_count: Optional[int] = None
+
+    _DEFERRAL_NEGLIGIBLE = 0.10
+
+    def _brain_n_outputs(self) -> int:
+        if self._brain_output_count is None:
+            sample = np.zeros((1, len(self._PREDICT_FEATURE_COLS)))
+            preds = self.brain.predict(sample)
+            self._brain_output_count = int(preds.shape[1])
+        return self._brain_output_count
 
     def _phase_rates_from_brain_row(
         self, mqt_mo: float, row: np.ndarray, phase_length_days: float
     ) -> AgingRate:
         """Monthly ``AgingRate`` from one brain row, scaled to a phase (sorties + sim monthly)."""
+        if self._brain_n_outputs() >= 16:
+            sim = row[6:10]
+        else:
+            sim = (0.0, 0.0, 0.0, 0.0)
         monthly = AgingRate(
             mqt_mo, row[0], row[1], row[2],
             mqt_mo, row[3], row[4], row[5],
-            mqt_sim_phase=row[6],
-            wg_sim_phase=row[7],
-            fl_sim_phase=row[8],
-            ip_sim_phase=row[9],
-            mqt_sim_blue_phase=row[6],
-            wg_sim_blue_phase=row[7],
-            fl_sim_blue_phase=row[8],
-            ip_sim_blue_phase=row[9],
+            mqt_sim_phase=sim[0],
+            wg_sim_phase=sim[1],
+            fl_sim_phase=sim[2],
+            ip_sim_phase=sim[3],
+            mqt_sim_blue_phase=sim[0],
+            wg_sim_blue_phase=sim[1],
+            fl_sim_blue_phase=sim[2],
+            ip_sim_blue_phase=sim[3],
         )
         return monthly.monthly_to_phase(phase_length_days)
 
-    def _deferrals_from_brain_row(self, row: np.ndarray) -> Tuple[int, int, int, int, int, int]:
-        # Ignore negative deferrals (artifact of brain output)
-        # Assume < 0.10 is negligible and set to 0
-        deferrals = list(row[10:16])
-        for i, d in enumerate(deferrals):
-            if d < 0.10:
-                deferrals[i] = 0.0
-        return tuple(deferrals)
+    def _clean_deferral_frac(self, value: float) -> float:
+        if value < self._DEFERRAL_NEGLIGIBLE:
+            return 0.0
+        return max(0.0, float(value))
+
+    def _deferrals_from_brain_row(self, row: np.ndarray) -> Tuple[float, float, float, float, float, float]:
+        """
+        Brain deferral outputs are syllabi fractions; convert to sortie/sim line slots.
+
+        12-output: combined 6–8, sorties-only 9–11.
+        16-output: combined 10–12, sorties-only 13–15 (6–9 are sim monthly rates).
+        """
+        from src.syllabi import (
+            SORTIE_BURDEN_FLUG,
+            SORTIE_BURDEN_IPUG,
+            SORTIE_BURDEN_MQT,
+            SIM_BURDEN_FLUG,
+            SIM_BURDEN_IPUG,
+            SIM_BURDEN_MQT,
+        )
+
+        if self._brain_n_outputs() >= 16:
+            combined = row[10:13]
+            sorties_only = row[13:16]
+        else:
+            combined = row[6:9]
+            sorties_only = row[9:12]
+
+        sortie_burdens = (SORTIE_BURDEN_MQT, SORTIE_BURDEN_FLUG, SORTIE_BURDEN_IPUG)
+        sim_burdens = (SIM_BURDEN_MQT, SIM_BURDEN_FLUG, SIM_BURDEN_IPUG)
+
+        sortie_slots = []
+        sim_slots = []
+        for combined_frac, sortie_frac, sortie_burden, sim_burden in zip(
+            combined, sorties_only, sortie_burdens, sim_burdens
+        ):
+            sortie_f = self._clean_deferral_frac(sortie_frac)
+            combined_f = self._clean_deferral_frac(combined_frac)
+            sim_f = max(0.0, combined_f - sortie_f)
+            sortie_slots.append(sortie_f * sortie_burden)
+            sim_slots.append(sim_f * sim_burden)
+
+        return (
+            sortie_slots[0], sortie_slots[1], sortie_slots[2],
+            sim_slots[0], sim_slots[1], sim_slots[2],
+        )
 
     @property
     def all_pilots(self):
