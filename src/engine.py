@@ -620,7 +620,6 @@ def _print_allocation_debug(pilots: List[Pilot], stage: str) -> None:
 def run_phase_simulation(
     cfg: SquadronConfig,
     pilots: List[Pilot],
-    allocation_noise: Optional[float] = None,
     debug_verbose: bool = False,
     pre_seed_upgrades: bool = False,
     sim_config: Optional[SimulationConfig] = None,
@@ -632,7 +631,7 @@ def run_phase_simulation(
     sim = sim_config or SimulationConfig()
     phase_length_days = float(sim.phase_length_days)
     phase_months = sim.phase_length_months
-    noise = sim.allocation_noise if allocation_noise is None else allocation_noise
+    noise = sim.allocation_noise
     mqt_syllabus = mqt_syllabus or MQT_SYLLABUS
     flug_syllabus = flug_syllabus or FLUG_SYLLABUS
     ipug_syllabus = ipug_syllabus or IPUG_SYLLABUS
