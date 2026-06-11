@@ -18,6 +18,8 @@ SIM_SESSIONS_MONTHLY: float = float("inf")
 SIM_BAYS_PER_SESSION: int = 4
 # Max combined sorties + sims per pilot per month (single-phase allocation path).
 MAX_MONTHLY_EVENTS: float = 25.0
+# Single-ship CT sorties: at most this many count toward sortie RAP per month.
+SINGLE_SHIP_RAP_MONTHLY_CAP: float = 1.0
 
 
 # ----------------------
@@ -134,6 +136,7 @@ class Pilot:
     total_phase: float = 0 
     sortie_blue_phase: float = 0 
     sortie_red_phase: float = 0 
+    sortie_single_ship: float = 0
 
     target_sorties: float = 0
     target_sims: float = 0.0
@@ -146,6 +149,7 @@ class Pilot:
     sim_hours_monthly: float = 0.0
     sortie_blue_monthly: float = 0
     sortie_red_monthly: float = 0
+    sortie_rap_monthly: float = 0
 
     year_group: int = 9999
     squadron_id: int = 99
@@ -170,22 +174,33 @@ class Pilot:
         self.target_sorties = monthly_sortie_rap_target(self.qual)
         self.target_sims = monthly_sim_rap_target(self.qual)
 
+    def sortie_rap_credit(self, months: float) -> float:
+        """Sorties counting toward RAP; single-ship CT capped at ``SINGLE_SHIP_RAP_MONTHLY_CAP``/mo."""
+        if months <= 0:
+            return 0.0
+        formation = self.sortie_phase - self.sortie_single_ship
+        single_ship_cap = SINGLE_SHIP_RAP_MONTHLY_CAP * months
+        return formation + min(self.sortie_single_ship, single_ship_cap)
+
     def update_total(self, phase_length_days: Optional[float] = None):
         self.total_phase = self.sortie_phase + self.sim_phase
         if phase_length_days is not None and phase_length_days > 0:
             months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
-            exp_sorties = self.target_sorties * months
-            self.rap_shortfall = max(0.0, exp_sorties - self.sortie_phase)
-            exp_sims = self.target_sims * months
-            self.sim_rap_shortfall = max(0.0, exp_sims - self.sim_phase)
+            expected_sorties = self.target_sorties * months
+            credited = self.sortie_rap_credit(months)
+            self.rap_shortfall = max(0.0, expected_sorties - credited)
+            expected_sims = self.target_sims * months
+            self.sim_rap_shortfall = max(0.0, expected_sims - self.sim_phase)
         else:
-            self.rap_shortfall = max(0.0, self.target_sorties - self.sortie_phase)
+            credited = self.sortie_rap_credit(1.0)
+            self.rap_shortfall = max(0.0, self.target_sorties - credited)
             self.sim_rap_shortfall = max(0.0, self.target_sims - self.sim_phase)
 
     def update_monthly(self, phase_length_days: float):
         months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
         if months > 0:
             self.sortie_monthly = self.sortie_phase / months
+            self.sortie_rap_monthly = self.sortie_rap_credit(months) / months
             self.sim_monthly = self.sim_phase / months
             self.flight_hours_monthly = self.flight_hours_phase / months
             self.sim_hours_monthly = self.sim_hours_phase / months
@@ -198,6 +213,7 @@ class Pilot:
         self.sim_hours_phase = 0.0
         self.sortie_blue_phase = 0
         self.sortie_red_phase = 0
+        self.sortie_single_ship = 0
         self.sim_phase = 0
         self.ep_sim_phase = 0.0
 
@@ -211,8 +227,10 @@ class Pilot:
             return False
         return (self.phase_events() + additional) / months <= MAX_MONTHLY_EVENTS + 1e-9
 
-    def add_sortie(self, avg_sortie_dur: float, side: str = "Blue"):
+    def add_sortie(self, avg_sortie_dur: float, side: str = "Blue", *, single_ship: bool = False):
         self.sortie_phase += 1
+        if single_ship:
+            self.sortie_single_ship += 1
         if side == "Blue":
             self.sortie_blue_phase += 1
         elif side == "Red":
