@@ -186,6 +186,7 @@ def assign_sortie(
     side: str = "Blue",
     noise: float = 0.0,
     exclude: Optional[Set[int]] = None,
+    single_ship: bool = False,
 ) -> bool:
     """
     Selects the best candidate (lowest total events, then least blue/red sorties) to fly a sortie.
@@ -200,8 +201,9 @@ def assign_sortie(
     candidates.sort(key=lambda p: _allocation_sort_key(p, EventType.SORTIE, side, noise))
 
     winner = candidates[0]
-    winner.add_sortie(avg_sortie_dur=cfg.avg_sortie_dur, side=side)
-    print(f"Assigned Sortie to {winner.qual.name}/{winner.upgrade.name}: {winner.sortie_blue_phase} Blue, {winner.sortie_red_phase} Red, {winner.sim_phase} Sim,{winner.sim_phase + winner.sortie_phase} Total")
+    winner.add_sortie(avg_sortie_dur=cfg.avg_sortie_dur, side=side, single_ship=single_ship)
+    tag = " (single-ship)" if single_ship else ""
+    print(f"Assigned Sortie{tag} to {winner.qual.name}/{winner.upgrade.name}: {winner.sortie_blue_phase} Blue, {winner.sortie_red_phase} Red, {winner.sim_phase} Sim,{winner.sim_phase + winner.sortie_phase} Total")
     exclude.add(id(winner))
     return True
 
@@ -404,6 +406,45 @@ def _ct_bucket_round_robin_key(bucket: ContinuationBucket) -> int:
     return _CT_ROUND_ROBIN_ORDER.get((bucket.side, bucket.min_qual), 99)
 
 
+def _allocate_ct_buckets_round_robin(
+    buckets: List[ContinuationBucket],
+    remaining: dict,
+    ct_candidates: List[Pilot],
+    cfg: SquadronConfig,
+    phase_length_days: float,
+    noise: float,
+    single_ship: bool = False,
+) -> int:
+    """Assign CT sorties round-robin across ``buckets``; return count assigned."""
+    assigned = 0
+    while sum(remaining.get(b, 0) for b in buckets) > 0:
+        assigned_this_pass = False
+        for bucket in buckets:
+            if remaining.get(bucket, 0) <= 0:
+                continue
+            eligible = [
+                p for p in ct_candidates
+                if rules.can_fill_seat(pilot=p, min_qual=bucket.min_qual)
+            ]
+            if assign_sortie(
+                cfg=cfg,
+                candidates=eligible,
+                phase_length_days=phase_length_days,
+                side=bucket.side,
+                noise=noise,
+                single_ship=single_ship,
+            ):
+                remaining[bucket] -= 1
+                assigned += 1
+                assigned_this_pass = True
+            else:
+                remaining[bucket] = 0
+
+        if not assigned_this_pass:
+            break
+    return assigned
+
+
 def allocate_continuation_training(
     pilots: List[Pilot],
     profile: ContinuationProfile,
@@ -437,33 +478,34 @@ def allocate_continuation_training(
         bucket = sorted_remainders[i % len(sorted_remainders)][0]
         base_qty[bucket] += 1
 
-    # Assign one sortie per bucket per pass: Blue FL → Red FL → Blue WG → Red WG.
+    # FL-led CT first so we know shortfall before wingmen fly.
+    fl_buckets = sorted(
+        [b for b in base_qty if b.min_qual == Qual.FL],
+        key=_ct_bucket_round_robin_key,
+    )
+    wg_buckets = sorted(
+        [b for b in base_qty if b.min_qual == Qual.WG],
+        key=_ct_bucket_round_robin_key,
+    )
     remaining = dict(base_qty)
-    buckets = sorted(remaining.keys(), key=_ct_bucket_round_robin_key)
+    fl_planned = sum(base_qty[b] for b in fl_buckets)
 
-    while sum(remaining.values()) > 0:
-        assigned_this_pass = False
-        for bucket in buckets:
-            if remaining.get(bucket, 0) <= 0:
-                continue
-            eligible = [
-                p for p in ct_candidates
-                if rules.can_fill_seat(pilot=p, min_qual=bucket.min_qual)
-            ]
-            if assign_sortie(
-                cfg=cfg,
-                candidates=eligible,
-                phase_length_days=phase_length_days,
-                side=bucket.side,
-                noise=noise,
-            ):
-                remaining[bucket] -= 1
-                assigned_this_pass = True
-            else:
-                remaining[bucket] = 0
+    fl_assigned = _allocate_ct_buckets_round_robin(
+        fl_buckets, remaining, ct_candidates, cfg, phase_length_days, noise
+    )
+    fl_ct_shortfall = fl_planned - fl_assigned
 
-        if not assigned_this_pass:
-            break
+    # WG CT after FL mix; tag single-ship when FL buckets could not be fully staffed.
+    if wg_buckets:
+        _allocate_ct_buckets_round_robin(
+            wg_buckets,
+            remaining,
+            ct_candidates,
+            cfg,
+            phase_length_days,
+            noise,
+            single_ship=fl_ct_shortfall > 0,
+        )
 
 def allocate_sim_rap(
     pilots: List[Pilot],
