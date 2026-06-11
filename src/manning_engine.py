@@ -286,7 +286,7 @@ class CAFSimulation:
         separated_count = 0
         retained_count = 0
 
-        sq.graduate_current_upgrades(deferrals, sorties_only=True)
+        sq.graduate_current_upgrades(deferrals, sorties_only=False)
 
         sq.send_to_staff(priority_mode=self.staff_priority)
 
@@ -342,9 +342,9 @@ class CAFSimulation:
             # Training uses column name total_pilots but value is line pilot count (cockpit strength).
             total_pilots = sq.line_pilots
             exp_ratio = sq.experience_ratio
-            mqt_qty = sq.mqt_students + sq.mqt_carry
-            flug_qty = sq.flug_students + sq.flug_carry
-            ipug_qty = sq.ipug_students + sq.ipug_carry
+            mqt_qty = sq.mqt_students + sq.mqt_sortie_carry
+            flug_qty = sq.flug_students + sq.flug_sortie_carry
+            ipug_qty = sq.ipug_students + sq.ipug_sortie_carry
             wg_qty = sq.wg_qty
             fl_qty = sq.fl_qty
             ip_qty = sq.ip_qty
