@@ -139,11 +139,11 @@ with st.sidebar.form("sim_params"):
     )
 
     
-    run_sensitivity = st.checkbox(
-        "Run Detailed Intake Analysis", 
-        value=False,
-        help="If checked, runs sensitivity analysis over all intake rates."
-    )
+    # run_sensitivity = st.checkbox(
+    #     "Run Detailed Intake Analysis", 
+    #     value=False,
+    #     help="If checked, runs sensitivity analysis over all intake rates."
+    # )
 
     staff_priority_mode = priority_options[selected_label]
 
@@ -529,76 +529,76 @@ if submitted:
         fig_syll.update_yaxes(autorange=True, rangemode="tozero")
         st.plotly_chart(fig_syll, width="stretch")
 
-    # --- Stability Frontier Section ---
-    if run_sensitivity:
-        st.divider()
-        st.header("📉 Absorption Capacity")
-        st.write("Calculates the 'health' of the CAF across different intake levels.")
+#     # --- Stability Frontier Section ---
+#     if run_sensitivity:
+#         st.divider()
+#         st.header("📉 Absorption Capacity")
+#         st.write("Calculates the 'health' of the CAF across different intake levels.")
 
-        # Create a progress bar
-        sensitivity_progress = st.progress(0, text="Initializing Analysis...")
+#         # Create a progress bar
+#         sensitivity_progress = st.progress(0, text="Initializing Analysis...")
 
-        # Define range to test
-        test_range = list(range(100, 351, 25)) 
-        stability_data = []
+#         # Define range to test
+#         test_range = list(range(100, 351, 25)) 
+#         stability_data = []
 
-        master_sim, _ = setup_simulation(round_robin=round_robin,
-                                         ai_brain=cached_brain, flug_window_start=flug_start, annual_intake=intake,
-                                         ipug_window_start= ipug_start, max_manning_pct=max_manning_pct,
-                                         staff_priority_mode=staff_priority_mode, retention_rate=retention)
+#         master_sim, _ = setup_simulation(round_robin=round_robin,
+#                                          ai_brain=cached_brain, flug_window_start=flug_start, annual_intake=intake,
+#                                          ipug_window_start= ipug_start, max_manning_pct=max_manning_pct,
+#                                          staff_priority_mode=staff_priority_mode, retention_rate=retention)
 
-        # Loop with enumeration to update the bar
-        for i, val in enumerate(test_range):
+#         # Loop with enumeration to update the bar
+#         for i, val in enumerate(test_range):
 
-            pct_complete = (i + 1) / len(test_range)
-            sensitivity_progress.progress(pct_complete, text=f"Simulating Intake: {val} pilots/yr...")
+#             pct_complete = (i + 1) / len(test_range)
+#             sensitivity_progress.progress(pct_complete, text=f"Simulating Intake: {val} pilots/yr...")
 
-            t_sim, t_sqs = setup_simulation(round_robin=round_robin,
-                                            ai_brain=cached_brain, existing_sim=master_sim, annual_intake=val,
-                                            flug_window_start=flug_start, ipug_window_start=ipug_start,
-                                            max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode,
-                                            retention_rate=retention)
+#             t_sim, t_sqs = setup_simulation(round_robin=round_robin,
+#                                             ai_brain=cached_brain, existing_sim=master_sim, annual_intake=val,
+#                                             flug_window_start=flug_start, ipug_window_start=ipug_start,
+#                                             max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode,
+#                                             retention_rate=retention)
 
-            t_df = t_sim.run_simulation(
-                years_to_run=20, squadron_configs=t_sqs, ute=ute_val 
-            )
+#             t_df = t_sim.run_simulation(
+#                 years_to_run=20, squadron_configs=t_sqs, ute=ute_val 
+#             )
 
-            start_year = t_df['year'].min()
-            horizons = {"5-Year": 4, "10-Year": 9, "15-Year": 14, "20-Year": 19}
+#             start_year = t_df['year'].min()
+#             horizons = {"5-Year": 4, "10-Year": 9, "15-Year": 14, "20-Year": 19}
 
-            for label, year_offset in horizons.items():
-                target_year = start_year + year_offset
-                snapshot = t_df[t_df['year'] == target_year]
+#             for label, year_offset in horizons.items():
+#                 target_year = start_year + year_offset
+#                 snapshot = t_df[t_df['year'] == target_year]
                 
-                if not snapshot.empty:
-                    ratio = snapshot['exp_rat'].mean()
+#                 if not snapshot.empty:
+#                     ratio = snapshot['exp_rat'].mean()
                     
-                    stability_data.append({
-                        "Annual Intake": val, 
-                        "Exp Ratio": ratio, 
-                        "Horizon": label
-                    })
+#                     stability_data.append({
+#                         "Annual Intake": val, 
+#                         "Exp Ratio": ratio, 
+#                         "Horizon": label
+#                     })
 
-        # Clear bar when done
-        sensitivity_progress.empty()
+#         # Clear bar when done
+#         sensitivity_progress.empty()
 
-        analysis_df = pd.DataFrame(stability_data)
+#         analysis_df = pd.DataFrame(stability_data)
 
-        fig_frontier = px.line(
-            analysis_df, 
-            x="Annual Intake", 
-            y="Exp Ratio",
-            color="Horizon",
-            title="System Health Decay",
-            labels={"Exp Ratio": "Experience Ratio", "Annual Intake": "Annual Intake"},
-            color_discrete_sequence=px.colors.sequential.Reds_r 
-        )
-        fig_frontier.add_hline(y=0.60, line_dash="dot", line_color="green", annotation_text="Healthy (> 60%)")
-        fig_frontier.add_hline(y=0.45, line_dash="dash", line_color="yellow", annotation_text="Sortie Inequity (< 45%)")
-        fig_frontier.add_hline(y=0.40, line_dash="dot", line_color="red", annotation_text="Broken (< 40%)")
-        st.plotly_chart(fig_frontier, width='stretch')
-else:
-    st.info("Set parameters and click 'Run Simulation'.")
+#         fig_frontier = px.line(
+#             analysis_df, 
+#             x="Annual Intake", 
+#             y="Exp Ratio",
+#             color="Horizon",
+#             title="System Health Decay",
+#             labels={"Exp Ratio": "Experience Ratio", "Annual Intake": "Annual Intake"},
+#             color_discrete_sequence=px.colors.sequential.Reds_r 
+#         )
+#         fig_frontier.add_hline(y=0.60, line_dash="dot", line_color="green", annotation_text="Healthy (> 60%)")
+#         fig_frontier.add_hline(y=0.45, line_dash="dash", line_color="yellow", annotation_text="Sortie Inequity (< 45%)")
+#         fig_frontier.add_hline(y=0.40, line_dash="dot", line_color="red", annotation_text="Broken (< 40%)")
+#         st.plotly_chart(fig_frontier, width='stretch')
+# else:
+#     st.info("Set parameters and click 'Run Simulation'.")
 
 # --- Footer / Contact Section ---
 st.divider()
