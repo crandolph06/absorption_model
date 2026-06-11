@@ -631,19 +631,30 @@ def run_phase_simulation(
     phase_months = sim.phase_length_months
     noise = sim.allocation_noise if allocation_noise is None else allocation_noise
 
+    # Pilots with open syllabus lines at phase start retry those in step 3 only (not step 4).
+    carryover_ids = {id(p) for p in pilots if p.incomplete_syllabus_items}
+
     for p in pilots:
         p.reset_phase_counters()
         p.set_rap_requirement()
 
-    # 2. New students only (carryover already have upgrade MQT/FLUG/IPUG)
     if not pre_seed_upgrades:
-        mqt_students = select_upgrade_students(pilots, Upgrade.MQT, cfg.mqt_students)
-        flug_students = select_upgrade_students(pilots, Upgrade.FLUG, cfg.flug_students)
-        ipug_students = select_upgrade_students(pilots, Upgrade.IPUG, cfg.ipug_students)
+        syllabus_mqt = select_upgrade_students(pilots, Upgrade.MQT, cfg.mqt_students)
+        syllabus_flug = select_upgrade_students(pilots, Upgrade.FLUG, cfg.flug_students)
+        syllabus_ipug = select_upgrade_students(pilots, Upgrade.IPUG, cfg.ipug_students)
     else:
-        mqt_students = [p for p in pilots if p.upgrade == Upgrade.MQT]
-        flug_students = [p for p in pilots if p.upgrade == Upgrade.FLUG]
-        ipug_students = [p for p in pilots if p.upgrade == Upgrade.IPUG]
+        syllabus_mqt = [
+            p for p in pilots
+            if p.upgrade == Upgrade.MQT and id(p) not in carryover_ids
+        ]
+        syllabus_flug = [
+            p for p in pilots
+            if p.upgrade == Upgrade.FLUG and id(p) not in carryover_ids
+        ]
+        syllabus_ipug = [
+            p for p in pilots
+            if p.upgrade == Upgrade.IPUG and id(p) not in carryover_ids
+        ]
 
     total_capacity = max(
         0,
@@ -659,14 +670,14 @@ def run_phase_simulation(
                     cfg, phase_length_days, total_capacity,
                 )
 
-    # 4. Full syllabus for new students only
-    run_upgrade_program(TEST_MQT_SYLLABUS, mqt_students, pilots, Upgrade.MQT, noise, cfg, phase_length_days, total_capacity)
+    # 4. Full syllabus for new students only (carryover excluded above)
+    run_upgrade_program(TEST_MQT_SYLLABUS, syllabus_mqt, pilots, Upgrade.MQT, noise, cfg, phase_length_days, total_capacity)
     if debug_verbose:
         _print_allocation_debug(pilots, "MQT")
-    run_upgrade_program(TEST_IPUG_SYLLABUS, ipug_students, pilots, Upgrade.IPUG, noise, cfg, phase_length_days, total_capacity)
+    run_upgrade_program(TEST_IPUG_SYLLABUS, syllabus_ipug, pilots, Upgrade.IPUG, noise, cfg, phase_length_days, total_capacity)
     if debug_verbose:
         _print_allocation_debug(pilots, "IPUG")
-    run_upgrade_program(TEST_FLUG_SYLLABUS, flug_students, pilots, Upgrade.FLUG, noise, cfg, phase_length_days, total_capacity)
+    run_upgrade_program(TEST_FLUG_SYLLABUS, syllabus_flug, pilots, Upgrade.FLUG, noise, cfg, phase_length_days, total_capacity)
     if debug_verbose:
         _print_allocation_debug(pilots, "FLUG")
     # 5. Continuation Training
