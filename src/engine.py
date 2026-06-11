@@ -503,10 +503,13 @@ def allocate_continuation_training(
     noise: float,
     cfg: SquadronConfig,
     phase_length_days: float,
+    ct_sortie_cap: Optional[int] = None,
 ):
-    # Calculate how much capacity is left
-    used_sorties = sum(p.sortie_phase for p in pilots)
-    remaining_capacity = max(0, total_capacity - used_sorties)
+    if ct_sortie_cap is not None:
+        remaining_capacity = max(0, ct_sortie_cap)
+    else:
+        used_sorties = sum(p.sortie_phase for p in pilots)
+        remaining_capacity = max(0, total_capacity - used_sorties)
 
     if remaining_capacity <= 0:
         return
@@ -659,10 +662,11 @@ def run_phase_simulation(
             if p.upgrade == Upgrade.IPUG and id(p) not in carryover_ids
         ]
 
-    total_capacity = max(
+    total_iron = max(
         0,
         int(total_phase_capacity(cfg) * phase_months) - cfg.deferred_sortie_burden,
     )
+    upgrade_capacity, ct_sortie_cap = sim.phase_sortie_budgets(total_iron)
 
     # 3. Carryover: incomplete lines only (not a full new syllabus)
     for upgrade_type in (Upgrade.MQT, Upgrade.FLUG, Upgrade.IPUG):
@@ -670,21 +674,24 @@ def run_phase_simulation(
             for event in list(student.incomplete_syllabus_items):
                 process_syllabus_event(
                     event, [student], pilots, upgrade_type, noise,
-                    cfg, phase_length_days, total_capacity,
+                    cfg, phase_length_days, upgrade_capacity,
                 )
 
     # 4. Full syllabus for new students only (carryover excluded above)
-    run_upgrade_program(mqt_syllabus, syllabus_mqt, pilots, Upgrade.MQT, noise, cfg, phase_length_days, total_capacity)
+    run_upgrade_program(mqt_syllabus, syllabus_mqt, pilots, Upgrade.MQT, noise, cfg, phase_length_days, upgrade_capacity)
     if debug_verbose:
         _print_allocation_debug(pilots, "MQT")
-    run_upgrade_program(ipug_syllabus, syllabus_ipug, pilots, Upgrade.IPUG, noise, cfg, phase_length_days, total_capacity)
+    run_upgrade_program(ipug_syllabus, syllabus_ipug, pilots, Upgrade.IPUG, noise, cfg, phase_length_days, upgrade_capacity)
     if debug_verbose:
         _print_allocation_debug(pilots, "IPUG")
-    run_upgrade_program(flug_syllabus, syllabus_flug, pilots, Upgrade.FLUG, noise, cfg, phase_length_days, total_capacity)
+    run_upgrade_program(flug_syllabus, syllabus_flug, pilots, Upgrade.FLUG, noise, cfg, phase_length_days, upgrade_capacity)
     if debug_verbose:
         _print_allocation_debug(pilots, "FLUG")
     # 5. Continuation Training
-    allocate_continuation_training(pilots, continuation_profile, total_capacity, noise, cfg, phase_length_days)
+    allocate_continuation_training(
+        pilots, continuation_profile, total_iron, noise, cfg, phase_length_days,
+        ct_sortie_cap=ct_sortie_cap,
+    )
     if debug_verbose:
         _print_allocation_debug(pilots, "CT")
 
