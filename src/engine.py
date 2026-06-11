@@ -18,10 +18,6 @@ from src.syllabi import (
     FLUG_SYLLABUS,
     IPUG_SYLLABUS,
     CONTINUATION_PROFILE,
-    TEST_MQT_SYLLABUS,
-    TEST_FLUG_SYLLABUS,
-    TEST_IPUG_SYLLABUS,
-    TEST_CONTINUATION_PROFILE,
     incomplete_burden,
     syllabus_burden_fraction,
     syllabus_burden_per_student,
@@ -116,6 +112,9 @@ def phase_upgrade_metrics(
         "held_back_mqt": held_back_mqt,
         "held_back_flug": held_back_flug,
         "held_back_ipug": held_back_ipug,
+        "remaining_mqt_syllabi": mqt_sortie_frac + mqt_sim_frac,
+        "remaining_flug_syllabi": flug_sortie_frac + flug_sim_frac,
+        "remaining_ipug_syllabi": ipug_sortie_frac + ipug_sim_frac,
         "remaining_mqt_syllabi_sorties_only": mqt_sortie_frac,
         "remaining_flug_syllabi_sorties_only": flug_sortie_frac,
         "remaining_ipug_syllabi_sorties_only": ipug_sortie_frac,
@@ -625,11 +624,19 @@ def run_phase_simulation(
     debug_verbose: bool = False,
     pre_seed_upgrades: bool = False,
     sim_config: Optional[SimulationConfig] = None,
+    mqt_syllabus: Optional[List[SyllabusEvent]] = None,
+    flug_syllabus: Optional[List[SyllabusEvent]] = None,
+    ipug_syllabus: Optional[List[SyllabusEvent]] = None,
+    continuation_profile: Optional[ContinuationProfile] = None,
 ):
     sim = sim_config or SimulationConfig()
     phase_length_days = float(sim.phase_length_days)
     phase_months = sim.phase_length_months
     noise = sim.allocation_noise if allocation_noise is None else allocation_noise
+    mqt_syllabus = mqt_syllabus or MQT_SYLLABUS
+    flug_syllabus = flug_syllabus or FLUG_SYLLABUS
+    ipug_syllabus = ipug_syllabus or IPUG_SYLLABUS
+    continuation_profile = continuation_profile or CONTINUATION_PROFILE
 
     # Pilots with open syllabus lines at phase start retry those in step 3 only (not step 4).
     carryover_ids = {id(p) for p in pilots if p.incomplete_syllabus_items}
@@ -671,17 +678,17 @@ def run_phase_simulation(
                 )
 
     # 4. Full syllabus for new students only (carryover excluded above)
-    run_upgrade_program(TEST_MQT_SYLLABUS, syllabus_mqt, pilots, Upgrade.MQT, noise, cfg, phase_length_days, total_capacity)
+    run_upgrade_program(mqt_syllabus, syllabus_mqt, pilots, Upgrade.MQT, noise, cfg, phase_length_days, total_capacity)
     if debug_verbose:
         _print_allocation_debug(pilots, "MQT")
-    run_upgrade_program(TEST_IPUG_SYLLABUS, syllabus_ipug, pilots, Upgrade.IPUG, noise, cfg, phase_length_days, total_capacity)
+    run_upgrade_program(ipug_syllabus, syllabus_ipug, pilots, Upgrade.IPUG, noise, cfg, phase_length_days, total_capacity)
     if debug_verbose:
         _print_allocation_debug(pilots, "IPUG")
-    run_upgrade_program(TEST_FLUG_SYLLABUS, syllabus_flug, pilots, Upgrade.FLUG, noise, cfg, phase_length_days, total_capacity)
+    run_upgrade_program(flug_syllabus, syllabus_flug, pilots, Upgrade.FLUG, noise, cfg, phase_length_days, total_capacity)
     if debug_verbose:
         _print_allocation_debug(pilots, "FLUG")
     # 5. Continuation Training
-    allocate_continuation_training(pilots, TEST_CONTINUATION_PROFILE, total_capacity, noise, cfg, phase_length_days)
+    allocate_continuation_training(pilots, continuation_profile, total_capacity, noise, cfg, phase_length_days)
     if debug_verbose:
         _print_allocation_debug(pilots, "CT")
 
@@ -693,9 +700,9 @@ def run_phase_simulation(
 
     metrics = phase_upgrade_metrics(
         pilots,
-        mqt_syllabus=TEST_MQT_SYLLABUS,
-        flug_syllabus=TEST_FLUG_SYLLABUS,
-        ipug_syllabus=TEST_IPUG_SYLLABUS,
+        mqt_syllabus=mqt_syllabus,
+        flug_syllabus=flug_syllabus,
+        ipug_syllabus=ipug_syllabus,
     )
     apply_deferred_burden_to_squadron(cfg, metrics)
 
