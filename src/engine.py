@@ -206,6 +206,18 @@ def _allocation_sort_key(
     )
 
 
+def _deterministic_blue_sortie_key(p: Pilot) -> tuple:
+    return (p.sortie_phase + p.sim_phase, p.sortie_blue_phase, _QUAL_RANK[p.qual])
+
+
+def _deterministic_red_sortie_key(p: Pilot) -> tuple:
+    return (p.sortie_phase + p.sim_phase, p.sortie_red_phase, _QUAL_RANK[p.qual])
+
+
+def _deterministic_sim_key(p: Pilot) -> tuple:
+    return (p.sortie_phase + p.sim_phase, p.sim_phase, _QUAL_RANK[p.qual])
+
+
 def _can_assign_distinct_from_pool(pool: List[Pilot], count: int, phase_length_days: float) -> bool:
     """Whether ``count`` distinct pilots in ``pool`` can each take one more event under the cap."""
     if count <= 0:
@@ -252,9 +264,14 @@ def assign_sortie(
     if not candidates:
         return False
 
-    candidates.sort(key=lambda p: _allocation_sort_key(p, EventType.SORTIE, side, noise))
-
-    winner = candidates[0]
+    if noise == 0.0:
+        key = _deterministic_red_sortie_key if side == "Red" else _deterministic_blue_sortie_key
+        winner = min(candidates, key=key)
+    else:
+        winner = min(
+            candidates,
+            key=lambda p: _allocation_sort_key(p, EventType.SORTIE, side, noise),
+        )
     winner.add_sortie(avg_sortie_dur=cfg.avg_sortie_dur, side=side, single_ship=single_ship)
     exclude.add(id(winner))
     return True
@@ -277,8 +294,13 @@ def assign_sim(
     if not candidates:
         return False
 
-    candidates.sort(key=lambda p: _allocation_sort_key(p, EventType.SIM, noise=noise))
-    winner = candidates[0]
+    if noise == 0.0:
+        winner = min(candidates, key=_deterministic_sim_key)
+    else:
+        winner = min(
+            candidates,
+            key=lambda p: _allocation_sort_key(p, EventType.SIM, noise=noise),
+        )
     winner.add_sim(cfg.avg_sortie_dur)
     exclude.add(id(winner))
     return True
@@ -467,16 +489,20 @@ def _allocate_ct_buckets_round_robin(
     single_ship: bool = False,
 ) -> int:
     """Assign CT sorties round-robin across ``buckets``; return count assigned."""
+    candidate_pools = {
+        min_qual: [
+            p for p in ct_candidates
+            if rules.can_fill_seat(pilot=p, min_qual=min_qual)
+        ]
+        for min_qual in {bucket.min_qual for bucket in buckets}
+    }
     assigned = 0
     while sum(remaining.get(b, 0) for b in buckets) > 0:
         assigned_this_pass = False
         for bucket in buckets:
             if remaining.get(bucket, 0) <= 0:
                 continue
-            eligible = [
-                p for p in ct_candidates
-                if rules.can_fill_seat(pilot=p, min_qual=bucket.min_qual)
-            ]
+            eligible = candidate_pools[bucket.min_qual]
             if assign_sortie(
                 cfg=cfg,
                 candidates=eligible,

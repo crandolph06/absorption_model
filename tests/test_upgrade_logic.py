@@ -5,9 +5,15 @@ Run: python -m unittest tests.test_upgrade_logic -v
 """
 import contextlib
 import io
+import random
 import unittest
+from unittest.mock import patch
 
+from src import rules
 from src.engine import (
+    _allocate_ct_buckets_round_robin,
+    assign_sim,
+    assign_sortie,
     create_pilots,
     phase_upgrade_metrics,
     process_syllabus_event,
@@ -15,9 +21,10 @@ from src.engine import (
     select_upgrade_students,
     total_phase_capacity,
 )
-from src.models import Qual, SquadronConfig, Upgrade
+from src.models import Pilot, Qual, SquadronConfig, Upgrade
 from src.simulation_config import SimulationConfig
 from src.syllabi import (
+    ContinuationBucket,
     TEST_MQT_SYLLABUS,
     TEST_FLUG_SYLLABUS,
     TEST_IPUG_SYLLABUS,
@@ -220,7 +227,70 @@ class TestSelectUpgradeStudents(unittest.TestCase):
         self.assertEqual(len(selected), 1)
 
 
+class TestAllocationHelpers(unittest.TestCase):
+    def test_assign_sortie_prefers_lower_qual_when_event_loads_tie(self):
+        cfg = SquadronConfig(ute=10.0, paa=10, id=1, total_pilots=2, ip_qty=1, experience_ratio=0.5)
+        ip = Pilot(Qual.IP)
+        wg = Pilot(Qual.WG)
+
+        assigned = assign_sortie(cfg, [ip, wg], phase_length_days=30, noise=0.0)
+
+        self.assertTrue(assigned)
+        self.assertEqual(wg.sortie_phase, 1)
+        self.assertEqual(ip.sortie_phase, 0)
+
+    def test_zero_noise_sortie_assignment_does_not_consume_rng(self):
+        cfg = SquadronConfig(ute=10.0, paa=10, id=1, total_pilots=2, ip_qty=1, experience_ratio=0.5)
+        pilots = [Pilot(Qual.WG), Pilot(Qual.WG)]
+        random.seed(12345)
+        expected_next = random.random()
+        random.seed(12345)
+
+        assign_sortie(cfg, pilots, phase_length_days=30, noise=0.0)
+
+        self.assertEqual(random.random(), expected_next)
+
+    def test_assign_sim_prefers_lower_qual_when_event_loads_tie(self):
+        cfg = SquadronConfig(ute=10.0, paa=10, id=1, total_pilots=2, ip_qty=1, experience_ratio=0.5)
+        ip = Pilot(Qual.IP)
+        wg = Pilot(Qual.WG)
+
+        assigned = assign_sim(cfg, [ip, wg], phase_length_days=30, noise=0.0)
+
+        self.assertTrue(assigned)
+        self.assertEqual(wg.sim_phase, 1)
+        self.assertEqual(ip.sim_phase, 0)
+
+
 class TestContinuationTraining(unittest.TestCase):
+    def test_ct_round_robin_caches_static_eligibility_by_bucket_qual(self):
+        cfg, pilots = _make_roster(wg=4, fl=1, ip=1, ute=10.0, paa=10)
+        buckets = [
+            ContinuationBucket("Blue WG", Qual.WG, "Blue", 0.5),
+            ContinuationBucket("Red WG", Qual.WG, "Red", 0.5),
+        ]
+        remaining = {buckets[0]: 3, buckets[1]: 3}
+        real_can_fill = rules.can_fill_seat
+        calls = 0
+
+        def counted_can_fill(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return real_can_fill(*args, **kwargs)
+
+        with patch("src.engine.rules.can_fill_seat", side_effect=counted_can_fill):
+            assigned = _allocate_ct_buckets_round_robin(
+                buckets=buckets,
+                remaining=remaining,
+                ct_candidates=pilots,
+                cfg=cfg,
+                phase_length_days=30,
+                noise=0.0,
+            )
+
+        self.assertEqual(assigned, 6)
+        self.assertEqual(calls, len(pilots))
+
     def test_mqt_students_do_not_receive_ct_sorties(self):
         """CT pool excludes MQT; MQT sorties come from syllabus only (not CT top-up)."""
         cfg, pilots = _make_roster(mqt=2, ute=3.0, paa=9, wg=5, fl=2, ip=2)
