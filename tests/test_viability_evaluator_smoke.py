@@ -14,6 +14,7 @@ from src.viability.evaluator import (
     _validate_brain_output,
     evaluate_design,
     evaluate_designs_parallel,
+    simulate_design_history,
 )
 from src.viability.policy import PolicyDesign
 
@@ -67,6 +68,91 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
         self.assertIn("active_constraint_value", row)
         self.assertIn("status", row)
         self.assertIn("error", row)
+        self.assertEqual(row["phase_backend"], self.config.model.phase_backend)
+
+    def test_flatten_result_records_phase_backend(self):
+        result = EvaluationResult(
+            design={},
+            raw_design={},
+            applied_design={},
+            raw_metrics={},
+            constraints={},
+            phi=0.0,
+            feasible=True,
+            active_constraint=None,
+            active_constraint_value=None,
+            status="ok",
+            phase_backend="physics",
+        )
+
+        row = _flatten_result(3, result, self.variable_names)
+
+        self.assertEqual(row["phase_backend"], "physics")
+
+    def test_physics_backend_does_not_load_brain_and_enables_allocator(self):
+        captured = {}
+
+        class FakeSimulation:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+                self.current_year = 2026
+                self.current_phase = 1
+                self.sq_phase_flug_intake = None
+                self.sq_phase_ipug_intake = None
+
+            def run_simulation(self, years_to_run, squadron_configs, ute):
+                return pd.DataFrame(
+                    [
+                        {
+                            "year": 2026,
+                            "phase": 1,
+                            "total_pilots": 100,
+                            "line_pilots": 80,
+                            "staff_ips": 1,
+                            "staff_fls": 2,
+                            "wg_rap_shortfall": 0.0,
+                            "fl_rap_shortfall": 0.0,
+                            "ip_rap_shortfall": 0.0,
+                        }
+                    ]
+                )
+
+        physics_config = replace(
+            self.config,
+            model=replace(
+                self.config.model,
+                phase_backend="physics",
+                brain_path=None,
+                expected_brain_outputs=None,
+                years_to_run=1,
+                assessment_start_year=self.config.model.start_year,
+                target_year=self.config.model.start_year,
+            ),
+        )
+        design = PolicyDesign.from_mapping(
+            {
+                "annual_intake": 250,
+                "retention_rate": 0.5,
+                "ute": 12,
+                "paa": 24,
+                "max_manning_pct": 150,
+                "flug_quota_per_phase": 3,
+                "ipug_quota_per_phase": 2,
+            },
+            physics_config.policy,
+        )
+
+        with (
+            patch("src.viability.evaluator._load_brain") as load_brain,
+            patch("src.viability.evaluator.CAFSimulation", FakeSimulation),
+        ):
+            history = simulate_design_history(design, physics_config)
+
+        load_brain.assert_not_called()
+        self.assertFalse(history.empty)
+        self.assertIsNone(captured["brain"])
+        self.assertTrue(captured["use_physics_allocator"])
+        self.assertIs(captured["sim_config"], physics_config.model.simulation)
 
     def test_parallel_evaluation_keeps_doe_metadata_and_sample_seed(self):
         values = {

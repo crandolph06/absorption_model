@@ -34,10 +34,12 @@ class EvaluationResult:
     active_constraint: str | None
     active_constraint_value: float | None
     status: str
+    phase_backend: str | None = None
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "phase_backend": self.phase_backend,
             "design": self.design,
             "raw_design": self.raw_design,
             "applied_design": self.applied_design,
@@ -67,6 +69,7 @@ def evaluate_design(
             constraints, config.constraint_scales
         )
         return EvaluationResult(
+            phase_backend=config.model.phase_backend,
             design=design.to_dict(),
             raw_design=design.to_raw_dict(),
             applied_design=design.to_applied_dict(),
@@ -80,6 +83,7 @@ def evaluate_design(
         )
     except Exception as exc:
         return EvaluationResult(
+            phase_backend=config.model.phase_backend,
             design=design.to_dict(),
             raw_design=design.to_raw_dict(),
             applied_design=design.to_applied_dict(),
@@ -102,8 +106,17 @@ def simulate_design_history(
     random.seed(run_seed)
     np.random.seed(run_seed)
 
-    brain = _load_brain(config.model.brain_path)
-    _validate_brain_output(brain, config.model.expected_brain_outputs)
+    use_physics_allocator = config.model.phase_backend == "physics"
+    brain = None
+    if config.model.phase_backend == "brain":
+        if config.model.brain_path is None:
+            raise ValueError("model.brain_path is required for brain-backed evaluation")
+        if config.model.expected_brain_outputs is None:
+            raise ValueError(
+                "model.expected_brain_outputs is required for brain-backed evaluation"
+            )
+        brain = _load_brain(config.model.brain_path)
+        _validate_brain_output(brain, config.model.expected_brain_outputs)
 
     sim = CAFSimulation(
         annual_intake=design.annual_intake,
@@ -113,6 +126,8 @@ def simulate_design_history(
         max_manning_pct=design.max_manning_pct,
         staff_priority_mode=_parse_priority_mode(config.model.staff_priority_mode),
         use_upgrade_quotas=config.model.use_upgrade_quotas,
+        sim_config=config.model.simulation,
+        use_physics_allocator=use_physics_allocator,
     )
     sim.current_year = config.model.start_year
     sim.current_phase = 1
@@ -232,6 +247,7 @@ def _flatten_result(
         row.update(metadata)
     row.update(
         {
+            "phase_backend": result.phase_backend,
             "phi": result.phi,
             "feasible": result.feasible,
             "active_constraint": result.active_constraint,

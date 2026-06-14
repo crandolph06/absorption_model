@@ -456,6 +456,27 @@ Recommendation:
   sim/deferral targets still have weak individual R2, so downstream validation
   should focus on whether those sparse-output errors change policy feasibility.
 
+## Near-Term Execution Checklist
+
+1. Wire `model.phase_backend: brain | physics` into the viability evaluator and
+   dashboard so "direct verification" can mean true direct single-phase physics,
+   not just bypassing the outer viability surrogate. Completed locally on
+   2026-06-14.
+2. Find feasible policies under the selected authoritative backend so the next
+   comparison uses policy points that matter operationally, not just inherited
+   static-policy candidates.
+3. Add a small brain-vs-physics long-horizon comparison on known feasible,
+   infeasible, and near-boundary policies. Use this to determine whether the
+   MLP or GPR backend changes feasibility labels.
+4. Add a loader/adapter for the new GPR bundle if it should replace the current
+   `.predict()` MLP brain for fast screening.
+5. Relax the long-term policy representation so the single-phase backend remains
+   a static policy over one phase, but long-horizon viability can represent
+   dynamic policies across phases or years.
+6. Clean up the dashboard UX after backend status and source-of-truth labels are
+   first-class data in the app.
+7. Do a final review pass and only then push/open the PR.
+
 ## Phase 6: Viability Recheck With The Selected Phase Backend
 
 Purpose: quantify whether changing the phase backend changes the outer

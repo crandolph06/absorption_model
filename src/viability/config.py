@@ -4,6 +4,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from src.simulation_config import SimulationConfig
+
 STANDARD_POLICY_VARIABLES = frozenset(
     {
         "annual_intake",
@@ -24,13 +26,13 @@ _MODEL_FIELDS = (
     "start_year",
     "assessment_start_year",
     "target_year",
-    "brain_path",
-    "expected_brain_outputs",
     "round_robin",
     "use_upgrade_quotas",
     "staff_priority_mode",
     "n_replications",
 )
+_MODEL_OPTIONAL_FIELDS = ("phase_backend", "brain_path", "expected_brain_outputs", "simulation")
+_SIMULATION_FIELDS = ("phase_length_days", "allocation_noise", "upgrade_sortie_fraction")
 _REQUIREMENTS_FIELDS = (
     "target_total_pilots",
     "target_line_pilots",
@@ -128,16 +130,22 @@ class RunConfig:
 
 @dataclass(frozen=True)
 class ModelConfig:
+    phase_backend: str
     years_to_run: int
     start_year: int
     assessment_start_year: int
     target_year: int
-    brain_path: str
-    expected_brain_outputs: int
+    brain_path: str | None
+    expected_brain_outputs: int | None
     round_robin: bool
     use_upgrade_quotas: bool
     staff_priority_mode: str
     n_replications: int
+    simulation: SimulationConfig
+
+    def __post_init__(self) -> None:
+        if self.phase_backend not in {"brain", "physics"}:
+            raise ValueError("model.phase_backend must be either 'brain' or 'physics'")
 
 
 @dataclass(frozen=True)
@@ -396,8 +404,26 @@ class ViabilityConfig:
         run = RunConfig(
             **{key: _require_key(run_data, "run", key) for key in _RUN_FIELDS}
         )
+        simulation_data = model_data.get("simulation", {})
+        if simulation_data is None:
+            simulation_data = {}
+        if not isinstance(simulation_data, Mapping):
+            raise ValueError("Config key model.simulation must be a mapping")
+        simulation_defaults = asdict(SimulationConfig())
+        simulation_values = {}
+        for key in _SIMULATION_FIELDS:
+            simulation_values[key] = simulation_data.get(key, simulation_defaults[key])
+
+        model_values = {key: _require_key(model_data, "model", key) for key in _MODEL_FIELDS}
+        for key in _MODEL_OPTIONAL_FIELDS:
+            if key == "simulation":
+                continue
+            model_values[key] = model_data.get(key)
+        if model_values["phase_backend"] is None:
+            model_values["phase_backend"] = "brain"
         model = ModelConfig(
-            **{key: _require_key(model_data, "model", key) for key in _MODEL_FIELDS}
+            **model_values,
+            simulation=SimulationConfig(**simulation_values),
         )
         requirements = RequirementsConfig(
             **{
@@ -526,8 +552,29 @@ class ViabilityConfig:
             raise ValueError("model.years_to_run must be positive")
         if self.model.n_replications != 1:
             raise ValueError("Only model.n_replications=1 is implemented in this first slice")
-        if self.model.expected_brain_outputs < 16:
-            raise ValueError("The current CAFSimulation path requires a 16-output internal surrogate layout")
+        if self.model.phase_backend == "brain":
+            if not self.model.brain_path:
+                raise ValueError(
+                    "model.brain_path is required when model.phase_backend='brain'"
+                )
+            if self.model.expected_brain_outputs is None:
+                raise ValueError(
+                    "model.expected_brain_outputs is required when model.phase_backend='brain'"
+                )
+            if self.model.expected_brain_outputs < 16:
+                raise ValueError(
+                    "The current CAFSimulation brain path requires a 16-output "
+                    "internal surrogate layout"
+                )
+        if self.model.simulation.phase_length_days <= 0:
+            raise ValueError("model.simulation.phase_length_days must be positive")
+        if self.model.simulation.allocation_noise < 0.0:
+            raise ValueError("model.simulation.allocation_noise must be non-negative")
+        upgrade_fraction = self.model.simulation.upgrade_sortie_fraction
+        if upgrade_fraction is not None and not 0.0 <= float(upgrade_fraction) <= 1.0:
+            raise ValueError(
+                "model.simulation.upgrade_sortie_fraction must be null or between 0 and 1"
+            )
 
         horizon_end = self.model.start_year + self.model.years_to_run - 1
         if not (

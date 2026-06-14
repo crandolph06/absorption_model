@@ -10,6 +10,8 @@ from src.viability.dashboard import (
     POLICY_LABELS,
     DashboardArtifactPaths,
     default_artifact_paths,
+    direct_verification_caveat,
+    direct_verification_label,
     envelope_plot_paths,
     load_dashboard_artifacts,
     local_feasible_sweep,
@@ -312,9 +314,10 @@ conservative_sigma = (
 )
 
 st.title("Interactive Viability Dashboard")
+direct_label = direct_verification_label(config)
 st.caption(
-    "Live sliders use the signed-RAP surrogate for guidance. Direct evaluation remains "
-    "the source of truth and runs only when requested."
+    "Live sliders use the signed-RAP surrogate for guidance. "
+    f"{direct_label} runs only when requested."
 )
 
 control_col, main_col = st.columns([1, 2], gap="large")
@@ -398,8 +401,10 @@ with main_col:
         "sliders fixed. They are guidance, not direct verification."
     )
 
-    if st.button("Run direct verification for current sliders", type="primary"):
-        with st.spinner("Running direct long-horizon evaluator..."):
+    st.caption(direct_verification_caveat(config))
+
+    if st.button(f"Run {direct_label} for current sliders", type="primary"):
+        with st.spinner(f"Running {direct_label}..."):
             st.session_state.viability_direct_result = run_direct_policy(
                 current_values,
                 config,
@@ -418,12 +423,16 @@ with main_col:
             "Yes" if direct_result.evaluation.feasible else "No",
         )
         direct_cols[2].metric(
+            "Backend",
+            str(direct_result.evaluation.phase_backend),
+        )
+        direct_cols[3].metric(
             "Direct active constraint",
             str(direct_result.evaluation.active_constraint),
         )
-        direct_cols[3].metric(
-            "Active value",
-            f"{direct_result.evaluation.active_constraint_value:.3g}",
+        st.caption(
+            "Active value: "
+            f"{direct_result.evaluation.active_constraint_value:.3g}"
         )
         st.plotly_chart(
             _plot_inventory_trajectory(
@@ -488,6 +497,8 @@ with direct_tab:
     elif direct_result.evaluation.status != "ok":
         st.error(direct_result.evaluation.error)
     else:
+        st.write("Backend")
+        st.code(str(direct_result.evaluation.phase_backend))
         st.write("Raw metrics")
         st.json(direct_result.evaluation.raw_metrics)
         st.write("Constraints")

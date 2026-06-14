@@ -78,6 +78,28 @@ class DirectPolicyResult:
     trajectory: pd.DataFrame
 
 
+def phase_backend_label(config: ViabilityConfig) -> str:
+    if config.model.phase_backend == "physics":
+        return "physics backend"
+    return "brain backend"
+
+
+def direct_verification_label(config: ViabilityConfig) -> str:
+    return f"Direct long-horizon verification ({phase_backend_label(config)})"
+
+
+def direct_verification_caveat(config: ViabilityConfig) -> str:
+    if config.model.phase_backend == "physics":
+        return (
+            "This bypasses the outer signed-RAP surrogate and the internal sortie "
+            "brain by using direct single-phase physics inside the long-horizon model."
+        )
+    return (
+        "This bypasses the outer signed-RAP surrogate, but it still uses the "
+        "configured internal sortie brain for each simulated phase."
+    )
+
+
 def default_artifact_paths(root: str | Path = ".") -> DashboardArtifactPaths:
     base = Path(root)
     search_dir = base / "outputs" / "viability" / "runs" / "search"
@@ -440,6 +462,7 @@ def run_direct_policy(
             config.constraint_scales,
         )
         evaluation = EvaluationResult(
+            phase_backend=config.model.phase_backend,
             design=design.to_dict(),
             raw_design=design.to_raw_dict(),
             applied_design=design.to_applied_dict(),
@@ -459,6 +482,7 @@ def run_direct_policy(
         )
     except Exception as exc:
         evaluation = EvaluationResult(
+            phase_backend=config.model.phase_backend,
             design=design.to_dict(),
             raw_design=design.to_raw_dict(),
             applied_design=design.to_applied_dict(),

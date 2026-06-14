@@ -5,6 +5,7 @@ run:
   workers: 1
 
 model:
+  phase_backend: brain
   years_to_run: 20
   start_year: 2026
   assessment_start_year: 2040
@@ -15,6 +16,10 @@ model:
   use_upgrade_quotas: true
   staff_priority_mode: random
   n_replications: 1
+  simulation:
+    phase_length_days: 120
+    allocation_noise: 0.0
+    upgrade_sortie_fraction: null
 
 requirements:
   target_total_pilots: 3500

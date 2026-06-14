@@ -11,6 +11,8 @@ from src.viability.config import load_config
 from src.viability.dashboard import (
     DashboardArtifactPaths,
     aggregate_history_trajectory,
+    direct_verification_caveat,
+    direct_verification_label,
     feasible_intervals,
     load_dashboard_artifacts,
     local_feasible_sweep,
@@ -207,6 +209,10 @@ class ViabilityDashboardTest(unittest.TestCase):
                 artifacts.envelope_summary["slices"][0]["x"],
                 "annual_intake",
             )
+
+    def test_direct_verification_labels_include_backend(self):
+        self.assertIn("brain backend", direct_verification_label(self.config))
+        self.assertIn("internal sortie brain", direct_verification_caveat(self.config))
 
 
 def _policy_values(**overrides):
