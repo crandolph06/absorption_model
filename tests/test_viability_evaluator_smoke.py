@@ -203,6 +203,12 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
         self.assertEqual(result.loc[0, "doe_source"], "sobol")
         self.assertEqual(captured_jobs[0][-1], self.config.run.random_seed + 1024)
 
+    def test_parallel_evaluation_rejects_invalid_worker_override(self):
+        designs = pd.DataFrame([{"design_id": "d0"}])
+
+        with self.assertRaisesRegex(ValueError, "workers"):
+            evaluate_designs_parallel(designs, self.config, workers=0)
+
     def test_evaluate_design_one_year_when_compatible_brain_is_available(self):
         brain_path = Path(self.config.model.brain_path)
         if not brain_path.exists():

@@ -127,6 +127,10 @@ class RunConfig:
     output_dir: str
     workers: int
 
+    def __post_init__(self) -> None:
+        if self.workers <= 0:
+            raise ValueError("run.workers must be positive")
+
 
 @dataclass(frozen=True)
 class ModelConfig:

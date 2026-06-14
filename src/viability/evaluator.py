@@ -156,6 +156,8 @@ def evaluate_designs_parallel(
 ) -> pd.DataFrame:
     """Evaluate a batch of constant-policy input combinations."""
     worker_count = config.run.workers if workers is None else workers
+    if worker_count <= 0:
+        raise ValueError("workers must be positive")
     variable_names = list(config.policy.variables)
     missing = sorted(set(variable_names) - set(designs.columns))
     if missing:

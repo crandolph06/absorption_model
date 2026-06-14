@@ -52,7 +52,12 @@ def main() -> int:
     run_doe_parser.add_argument("--config", required=True, help="Path to viability YAML config")
     run_doe_parser.add_argument("--n", type=int, default=None, help="Override doe.n_initial")
     run_doe_parser.add_argument("--method", default=None, help="Override doe.method")
-    run_doe_parser.add_argument("--workers", type=int, default=None, help="Override run.workers")
+    run_doe_parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Override run.workers; direct physics batches should normally use multiple workers",
+    )
     run_doe_parser.add_argument(
         "--output-dir",
         default=None,
@@ -194,7 +199,12 @@ def main() -> int:
     verify_parser.add_argument("--config", required=True, help="Path to viability YAML config")
     verify_parser.add_argument("--candidates", required=True, help="candidate_policies.csv path")
     verify_parser.add_argument("--output-dir", required=True, help="Verification output directory")
-    verify_parser.add_argument("--workers", type=int, default=None, help="Override run.workers")
+    verify_parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Override run.workers; direct physics batches should normally use multiple workers",
+    )
     verify_parser.add_argument(
         "--checkpoint-every",
         type=int,
@@ -309,6 +319,7 @@ def main() -> int:
         write_config_resolved(config, output_dir)
         designs = generate_doe(config, n=args.n, method=args.method)
         write_table(designs, output_dir / "doe.csv", prefer_parquet=False)
+        worker_count = config.run.workers if args.workers is None else args.workers
         results = evaluate_designs_parallel(
             designs,
             config,
@@ -318,6 +329,20 @@ def main() -> int:
         )
         write_table(results, output_dir / "evaluations.parquet")
         all_ok = bool(len(results) > 0 and (results["status"] == "ok").all())
+        print(
+            json.dumps(
+                {
+                    "output_dir": str(output_dir),
+                    "design_count": int(len(designs)),
+                    "evaluated_count": int(len(results)),
+                    "ok_count": int((results["status"] == "ok").sum()),
+                    "workers": worker_count,
+                    "phase_backend": config.model.phase_backend,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
         return 0 if all_ok else 1
 
     if args.command == "fit-surrogate":

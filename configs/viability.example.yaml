@@ -2,7 +2,7 @@ run:
   name: viability_smoke
   random_seed: 42
   output_dir: outputs/viability
-  workers: 1
+  workers: 4
 
 model:
   phase_backend: brain

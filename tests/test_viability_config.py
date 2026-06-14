@@ -11,6 +11,7 @@ class ViabilityConfigTest(unittest.TestCase):
     def test_example_config_loads(self):
         config = load_config("configs/viability.example.yaml")
         self.assertEqual(config.run.name, "viability_smoke")
+        self.assertEqual(config.run.workers, 4)
         self.assertEqual(config.model.phase_backend, "brain")
         self.assertEqual(config.model.expected_brain_outputs, 16)
         self.assertEqual(config.model.simulation.phase_length_days, 120)
@@ -64,6 +65,16 @@ class ViabilityConfigTest(unittest.TestCase):
             path.write_text(yaml.safe_dump(data), encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "model.phase_backend"):
+                load_config(path)
+
+    def test_invalid_worker_count_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bad_workers.yaml"
+            data = yaml.safe_load(Path("configs/viability.example.yaml").read_text(encoding="utf-8"))
+            data["run"]["workers"] = 0
+            path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "run.workers"):
                 load_config(path)
 
     def test_dump_resolved_config_round_trip(self):
