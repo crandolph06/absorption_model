@@ -12,6 +12,7 @@ from unittest.mock import patch
 from src import rules
 from src.engine import (
     _allocate_ct_buckets_round_robin,
+    _can_assign_distinct_from_pool,
     assign_sim,
     assign_sortie,
     create_pilots,
@@ -228,6 +229,16 @@ class TestSelectUpgradeStudents(unittest.TestCase):
 
 
 class TestAllocationHelpers(unittest.TestCase):
+    def test_distinct_pool_check_counts_pilots_with_remaining_event_capacity(self):
+        pilots = [Pilot(Qual.WG), Pilot(Qual.WG), Pilot(Qual.WG)]
+        pilots[0].sortie_phase = 20
+        pilots[1].sortie_phase = 19
+        pilots[2].sortie_phase = 18
+
+        self.assertTrue(_can_assign_distinct_from_pool(pilots, 2, phase_length_days=30))
+        self.assertFalse(_can_assign_distinct_from_pool(pilots, 3, phase_length_days=30))
+        self.assertFalse(_can_assign_distinct_from_pool(pilots, 1, phase_length_days=0))
+
     def test_assign_sortie_prefers_lower_qual_when_event_loads_tie(self):
         cfg = SquadronConfig(ute=10.0, paa=10, id=1, total_pilots=2, ip_qty=1, experience_ratio=0.5)
         ip = Pilot(Qual.IP)
@@ -290,6 +301,28 @@ class TestContinuationTraining(unittest.TestCase):
 
         self.assertEqual(assigned, 6)
         self.assertEqual(calls, len(pilots))
+
+    def test_ct_round_robin_heap_stops_at_event_capacity(self):
+        cfg, pilots = _make_roster(wg=2, fl=0, ip=0, ute=10.0, paa=10)
+        pilots[0].sortie_phase = 19
+        pilots[0].sortie_blue_phase = 19
+        pilots[1].sortie_phase = 20
+        pilots[1].sortie_blue_phase = 20
+        bucket = ContinuationBucket("Blue WG", Qual.WG, "Blue", 1.0)
+        remaining = {bucket: 2}
+
+        assigned = _allocate_ct_buckets_round_robin(
+            buckets=[bucket],
+            remaining=remaining,
+            ct_candidates=pilots,
+            cfg=cfg,
+            phase_length_days=30,
+            noise=0.0,
+        )
+
+        self.assertEqual(assigned, 1)
+        self.assertEqual(pilots[0].sortie_phase, 20)
+        self.assertEqual(pilots[1].sortie_phase, 20)
 
     def test_mqt_students_do_not_receive_ct_sorties(self):
         """CT pool excludes MQT; MQT sorties come from syllabus only (not CT top-up)."""
