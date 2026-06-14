@@ -4,13 +4,15 @@ import joblib
 from src.models import PriorityMode
 from src.manning_engine import CAFSimulation
 from src.manning_config import get_initial_squadrons, SQUADRON_DATA
+from src.simulation_config import SimulationConfig
 
 def setup_simulation(round_robin: bool, annual_intake: int,
                      ai_brain, 
                      existing_sim: Optional[CAFSimulation] = None, 
                      flug_window_start: int = 250, ipug_window_start: int = 400, 
                      max_manning_pct: int = 150, retention_rate: float = .4,
-                     staff_priority_mode: PriorityMode = PriorityMode.RANDOM):
+                     staff_priority_mode: PriorityMode = PriorityMode.FL_FIRST,
+                     sim_config: Optional[SimulationConfig] = None):
     if existing_sim:
         sim = copy.deepcopy(existing_sim)
         sim.reset()
@@ -25,6 +27,8 @@ def setup_simulation(round_robin: bool, annual_intake: int,
         sim.retention_rate = retention_rate
 
         sim.brain = ai_brain
+        if sim_config is not None:
+            sim.sim_config = sim_config
 
         if len(sim.squadrons) > 0:
             return sim, sim.squadrons  
@@ -34,7 +38,7 @@ def setup_simulation(round_robin: bool, annual_intake: int,
                             brain = ai_brain, flug_window_start=flug_window_start, 
                             ipug_window_start=ipug_window_start, max_manning_pct=max_manning_pct, 
                             staff_priority_mode=staff_priority_mode, annual_intake=annual_intake,
-                            retention_rate=retention_rate)
+                            retention_rate=retention_rate, sim_config=sim_config)
 
     # Used 1.5 CCR for all units
     # Used 50% of exp pilots as starting IP value 

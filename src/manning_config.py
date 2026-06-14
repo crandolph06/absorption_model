@@ -6,24 +6,29 @@ FL_YEAR_RANGE = (2016, 2024); FL_HOUR_RANGE = (200, 500);  FL_SORTIE_RANGE = (15
 WG_YEAR_RANGE = (2024, 2026); WG_HOUR_RANGE = (50, 350);   WG_SORTIE_RANGE = (50, 325)
 
 SQUADRON_DATA = [
-    (14, 18, 7, 27, ()), (493, 24, 9, 36, ()), (495, 24, 9, 36, ()), (95, 24, 9, 36, ()),
-    (355, 24, 9, 36, ()), (356, 24, 9, 36, ()), (4, 24, 9, 36, ()), (34, 24, 9, 36, ()),
-    (421, 24, 9, 36, ()), (27, 24, 9, 36, ()), (94, 24, 9, 36, ()), (90, 24, 9, 36, ()),
-    (525, 24, 9, 36, ()), (35, 18, 8, 27, ()), (80, 18, 8, 27, ()), (55, 21, 8, 32, ()),
-    (77, 21, 8, 32, ()), (79, 21, 8, 32, ()), (510, 20, 8, 30, ()), (555, 20, 8, 30, ()),
-    (13, 18, 7, 27, ()), (36, 21, 8, 32, ()), (480, 23, 9, 35, ()), (18, 18, 7, 27, ()),
-    (335, 21, 8, 32, ()), (336, 21, 8, 32, ()), (492, 21, 8, 32, ()), (494, 21, 8, 32, ()),
-    (389, 18, 7, 27, ()), (391, 24, 9, 36, ())
+    (14, 18, 7, 27, 10.0, 0.5, (0, 0, 0)), (493, 24, 9, 36, 10.0, 0.5, (0, 0, 0)), (495, 24, 9, 36, 10.0, 0.5, (0, 0, 0)), (95, 24, 9, 36, 10.0, 0.5, (0, 0, 0)),
+    (355, 24, 9, 36, 10.0, 0.5, (0, 0, 0)), (356, 24, 9, 36, 10.0, 0.5, (0, 0, 0)), (4, 24, 9, 36, 10.0, 0.5, (0, 0, 0)), (34, 24, 9, 36, 10.0, 0.5, (0, 0, 0)),
+    (421, 24, 9, 36, 10.0, 0.5, (0, 0, 0)), (27, 24, 9, 36, 10.0, 0.5, (0, 0, 0)), (94, 24, 9, 36, 10.0, 0.5, (0, 0, 0)), (90, 24, 9, 36, 10.0, 0.5, (0, 0, 0)),
+    (525, 24, 9, 36, 10.0, 0.5, (0, 0, 0)), (35, 18, 8, 27, 10.0, 0.5, (0, 0, 0)), (80, 18, 8, 27, 10.0, 0.5, (0, 0, 0)), (55, 21, 8, 32, 10.0, 0.5, (0, 0, 0)),
+    (77, 21, 8, 32, 10.0, 0.5, (0, 0, 0)), (79, 21, 8, 32, 10.0, 0.5, (0, 0, 0)), (510, 20, 8, 30, 10.0, 0.5, (0, 0, 0)), (555, 20, 8, 30, 10.0, 0.5, (0, 0, 0)),
+    (13, 18, 7, 27, 10.0, 0.5, (0, 0, 0)), (36, 21, 8, 32, 10.0, 0.5, (0, 0, 0)), (480, 23, 9, 35, 10.0, 0.5, (0, 0, 0)), (18, 18, 7, 27, 10.0, 0.5, (0, 0, 0)),
+    (335, 21, 8, 32, 10.0, 0.5, (0, 0, 0)), (336, 21, 8, 32, 10.0, 0.5, (0, 0, 0)), (492, 21, 8, 32, 10.0, 0.5, (0, 0, 0)), (494, 21, 8, 32, 10.0, 0.5, (0, 0, 0)),
+    (389, 18, 7, 27, 10.0, 0.5, (0, 0, 0)), (391, 24, 9, 36, 10.0, 0.5, (0, 0, 0))
 ]
 
 TEST_SQUADRON_DATA = [
-    (14, 10, 2, 10, (1, 0, 0))#, (493, 10, 2, 10), (495, 10, 2, 10), (95, 10, 2, 10) # All units 10 PAA, 2 IPs, 10 pilots total
+    (14, 9, 2, 10, 3.0, 0.5, (2, 0, 0))#, (493, 10, 2, 10), (495, 10, 2, 10), (95, 10, 2, 10) # All units 10 PAA, 2 IPs, 10 pilots total
 ]
 
-def get_initial_squadrons(current_year: int, squadron_data: list):
+def get_initial_squadrons(current_year: int, squadron_data: list | None = None):
+    if squadron_data is None:
+        squadron_data = SQUADRON_DATA
     squadrons = []
-    for sq_id, paa, ip_qty, target_total, upgradees in squadron_data:
-        sq = SquadronConfig(id=sq_id, paa=paa, ute=10.0, ip_qty=ip_qty, pilots=[])
+    for seed in squadron_data:
+        sq_id, paa, ip_qty, target_total, ute, exp_ratio, upgradees = (
+            _normalize_squadron_seed(seed)
+        )
+        sq = SquadronConfig(id=sq_id, paa=paa, ute=ute, ip_qty=ip_qty, pilots=[], experience_ratio=exp_ratio)
         
         # 1. Seed IPs
         while sum(1 for p in sq.pilots if p.qual == Qual.IP) < ip_qty:
@@ -32,8 +37,8 @@ def get_initial_squadrons(current_year: int, squadron_data: list):
                              sorties_flown=random.randint(*IP_SORTIE_RANGE), flight_hours_flown=random.randint(*IP_HOUR_RANGE), 
                              squadron_id=sq_id, current_assignment=Assignment.LINE, active=True))
         
-        # 2. Seed FLs (target 50% experience ratio)
-        target_exp = int(target_total * 0.5)
+        # 2. Seed FLs 
+        target_exp = int(target_total * exp_ratio)
         while sum(1 for p in sq.pilots if p.qual in [Qual.IP, Qual.FL]) < target_exp:
             yg = random.randint(*FL_YEAR_RANGE)
             sq.pilots.append(Pilot(qual=Qual.FL, upgrade=Upgrade.NONE, year_group=yg, adsc_remaining=max(0, 120-((current_year-yg-2)*12)), 
@@ -83,3 +88,16 @@ def get_initial_squadrons(current_year: int, squadron_data: list):
         sq.update_stats()
         squadrons.append(sq)
     return squadrons
+
+
+def _normalize_squadron_seed(seed):
+    if len(seed) == 5:
+        sq_id, paa, ip_qty, target_total, upgradees = seed
+        return sq_id, paa, ip_qty, target_total, 10.0, 0.5, upgradees
+    if len(seed) == 7:
+        return seed
+    raise ValueError(
+        "Squadron seed must be (id, paa, ip_qty, target_total, upgradees) "
+        "or (id, paa, ip_qty, target_total, ute, experience_ratio, upgradees); "
+        f"got {seed!r}"
+    )

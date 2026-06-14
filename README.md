@@ -1,12 +1,15 @@
 # USAF Pilot Readiness & Manning Model
 
-Python model for exploring how pilot production, squadron manning, and training capacity interact over time. The project has three complementary layers:
+Python model for exploring how pilot production, squadron manning, and training capacity interact over time. The project has four complementary paths:
 
 1. **Single-phase physics** — detailed sortie/sim allocation for one squadron over a 120-day training phase (syllabus events, RAP, capacity limits).
-2. **Long-term manning model** — multi-squadron CAF simulation over 20+ years, driven by a learned “sortie brain” that predicts monthly flying rates from manning inputs.
-3. **RL policy search** — reinforcement learning on top of the manning model to explore intake, UTE, retention, upgrade gates, and related levers under different reward assumptions.
+2. **Long-term manning model** — multi-squadron CAF simulation over 20+ years. Two plant options:
+   - **Brain path (default):** a learned “sortie brain” predicts monthly flying rates from manning inputs.
+   - **Physics path:** `run_phase_simulation` runs per squadron each phase (capacity-constrained, same rules as Layer 1).
+3. **Simulation optimization** — search constant CAF levers (intake, retention, upgrade quotas, UTE, etc.) by minimizing an explicit objective on the **physics** manning rollout (`optimize_constant_policy.py`).
+4. **RL policy search** — reinforcement learning on top of the manning model to explore levers phase-by-phase under clipped gym rewards (today still uses the brain plant).
 
-Layers 1 → 2 → 3 build on each other: physics generates training data for the brain; the brain powers the manning sim; RL searches for policies within that sim. The long-term goal is to find policies that achieve manning and readiness targets without the “absorption death spiral.”
+Layers 1 → 2 (brain) → 4 was the original stack. **Path 3** (physics + direct optimization) is the preferred rigorous route for policy recommendations: same allocator as Layer 1, explicit cost function instead of a surrogate brain or PPO rewards. RL on the physics plant is a natural follow-on comparison.
 
 ---
 
@@ -42,6 +45,16 @@ streamlit run rl_app.py        # Layer 3: evaluate trained RL policies on mannin
 python -m src.main
 ```
 
+**Run physics-backed policy optimization** (no brain; slow on full CAF):
+
+```bash
+# Fast iteration: 1 test squadron
+python optimize_constant_policy.py --preset test --years 5 --trials 20
+
+# Full ~30-squadron CAF (profile runtime first)
+python optimize_constant_policy.py --preset full --years 10 --method de --trials 30 --output results/best_policy.json
+```
+
 ---
 
 ## Repository map
@@ -51,17 +64,20 @@ absorption_model/
 ├── src/                    # Core simulation logic (start here)
 │   ├── engine.py           # Single-phase: pilot creation, sortie/sim allocation, syllabi
 │   ├── models.py           # Pilot, SquadronConfig, enums, RAP constants, manning aging
+│   ├── simulation_config.py # SimulationConfig: phase length, allocation noise (fleet-wide variables)
 │   ├── syllabi.py          # MQT / FLUG / IPUG event definitions
 │   ├── rules.py            # Who can fly, upgrade eligibility
 │   ├── rap_state.py        # RAP shortfall assessment (sortie + sim)
-│   ├── manning_engine.py   # Layer 2: CAFSimulation, brain-driven phase aging
+│   ├── manning_engine.py   # Layer 2: CAFSimulation (brain or physics plant)
+│   ├── manning_objective.py # Explicit scalar cost J for simulation optimization
 │   ├── manning_config.py   # Layer 2: initial 30-squadron CAF roster (PAA, IPs, targets)
 │   ├── manning_main.py     # Layer 2: setup_simulation() helper for apps
-│   └── manning_gym.py      # Layer 3: Gymnasium env (ManningEnv, SingleActionManningEnv)
+│   └── manning_gym.py      # Layer 4: Gymnasium env (ManningEnv, SingleActionManningEnv)
 │
+├── optimize_constant_policy.py  # Path 3: random / scipy DE search on constant levers
 ├── app.py                  # Layer 1 UI (+ brain predictions for sweeps)
 ├── manning_app.py          # Layer 2 UI: long-horizon manning + sensitivity
-├── rl_app.py               # Layer 3 UI: load PPO agent + manning charts
+├── rl_app.py               # Layer 4 UI: load PPO agent + manning charts
 │
 ├── brains/                 # Local copy of trained MLP (not always in git)
 │
@@ -85,14 +101,14 @@ absorption_model/
 
 ### Layer 1 — Single-phase physics (`src/engine.py`)
 
-**What it does:** For one `SquadronConfig`, creates pilots, runs syllabus programs (MQT/FLUG/IPUG), continuation training, and sim RAP. Sorties are allocated against **hard capacity** `PAA × UTE` per phase, with a per-pilot monthly event cap (`MAX_MONTHLY_EVENTS` in `models.py`). Syllabus requirements and CT makeup are based on 20 FW flying training.
+**What it does:** For one `SquadronConfig`, creates pilots, runs syllabus programs (MQT/FLUG/IPUG), continuation training, and sim RAP. Sorties are allocated against **hard capacity** `PAA × UTE × phase_months`, with a per-pilot monthly event cap (`MAX_MONTHLY_EVENTS` in `models.py`). Phase length comes from `SimulationConfig` (default 120 days), not squadron config. Syllabus requirements and CT makeup are based on 20 FW flying training.
 
 **Key functions:**
 
 | Function | Role |
 |----------|------|
 | `create_pilots()` | Build WG / FL / IP roster from config |
-| `run_phase_simulation()` | Full phase: upgrades → syllabus → CT → sim RAP |
+| `run_phase_simulation()` | Full phase: upgrades → syllabus → CT → sim RAP (`sim_config` optional) |
 | `assign_sortie()` / `assign_sim()` | Pick lowest-utilization pilot (total events, then type-specific tie-break) |
 | `rap_assess()` | Per-cohort sortie RAP vs targets (`rap_state.py`) |
 
@@ -105,28 +121,48 @@ absorption_model/
 **What it does:** ~30 squadrons over many years. Each CAF phase:
 
 1. Adds B-course graduates  
-2. Starts upgrades (FLUG / IPUG windows)  
-3. Calls **sortie brain** → predicted monthly sortie/sim rates per squadron  
-4. Ages pilots via `apply_phase_aging()` (fractional sorties/sims, not discrete allocation)  
-5. Graduates, staff funnel, retention  
+2. Starts upgrades (FLUG / IPUG windows and optional per-phase quotas)  
+3. **Plant step** (one of two modes):
+   - **Brain (default):** sortie brain → `apply_phase_aging()` with predicted rates; graduation via `graduate_current_upgrades(deferrals)` from brain deferral outputs.
+   - **Physics:** `run_phase_simulation()` per squadron; graduation and deferrals come from the allocator (`graduate_completed_upgrades`, `apply_deferred_burden_to_squadron`). End-of-phase uses `skip_graduation=True` so brain deferrals are not applied twice.
+4. Staff funnel, retention, history  
 
-**Important:** The manning model does **not** re-run `engine.py` each phase. It uses the brain’s predicted rates as realized flying. RAP shortfall in history is computed as `RAP_target − brain_predicted_rate`, not fleet capacity balance.
+Enable physics plant: `CAFSimulation(..., use_physics_allocator=True, brain=None)`.
 
-**Entry points:** `manning_app.py`, `src/manning_main.py` (`setup_simulation()`). You set levers manually (intake, retention, UTE, etc.) in the sidebar and run forward.
+**Brain path caveat:** Does **not** re-run `engine.py` each phase. RAP shortfall in history is `RAP_target − brain_predicted_rate`, not capacity balance.
 
-### Layer 3 — RL policy search (`src/manning_gym.py`, `rl_trainers/`)
+**Physics path:** RAP shortfall comes from observed pilot rates via `store_stats_from_physics()` (line pilots with `upgrade == NONE`; syllabus students excluded from RAP cohort means).
+
+**Entry points:** `manning_app.py`, `src/manning_main.py` (`setup_simulation()`). Apps today use the brain path; physics is used from `optimize_constant_policy.py` and programmatic rollouts.
+
+### Path 3 — Simulation optimization (`optimize_constant_policy.py`, `src/manning_objective.py`)
+
+**What it does:** Rolls out the **physics** manning model for N years and minimizes an explicit cost `J` (lower is better):
+
+- Weighted mean RAP shortfall (WG / FL / IP)  
+- Manning gap vs 3,500 target at horizon  
+- Mean deferral burden (sortie line slots)  
+- Small bonus for experience ratio  
+
+**Policy levers searched (constant over horizon):** annual intake, retention, max manning %, FLUG/IPUG phase quotas, UTE. FLUG/IPUG **gates** (250 sorties / 400 hrs vs 150 / 300) are intended as fixed scenario conditions or a separate sensitivity sweep—not jointly optimized with quotas on the first pass.
+
+**Methods:** `--method random` (default) or `--method de` (scipy differential evolution; falls back to random if scipy missing).
+
+**Presets:** `--preset test` (one squadron, fast), `--preset full` (30-squadron `SQUADRON_DATA`).
+
+### Layer 4 — RL policy search (`src/manning_gym.py`, `rl_trainers/`)
 
 **What it does:** Wraps the Layer 2 `CAFSimulation` in a Gymnasium environment. A PPO agent adjusts policy levers each phase (which levers depend on `run_mode`) to maximize a `reward_mode` objective (headcount vs RAP shortfall vs key staff).
 
 **Entry points:** `rl_trainers/train_rl_parallelized_*.py`, `evaluate_manning_agent.py`, `rl_app.py` (load a saved policy and roll out 20 years with charts).
 
-**Depends on:** A trained sortie brain (Layer 2) and optionally a trained PPO checkpoint in `saved_models/`.
+**Depends on:** A trained sortie brain (Layer 2 brain path) and optionally a trained PPO checkpoint in `saved_models/`. RL on the physics plant is not wired yet; Path 3 is the recommended first policy-search baseline.
 
 ---
 
-## Sortie brain (MLP) — bridge from Layer 1 to Layer 2
+## Sortie brain (MLP) — bridge from Layer 1 to Layer 2 (brain path)
 
-The brain is trained on Layer 1 sweep data and consumed by the Layer 2 manning model (and Layer 3 RL, which uses the same sim).
+The brain is trained on Layer 1 sweep data and consumed by the Layer 2 manning model when `use_physics_allocator=False` (and by Layer 4 RL today).
 
 **File:** `brains/hpc_sortie_brain_multi_output_mlp.pkl`  
 **Trainer:** `hpc_train_brain_multi_output.py`  
@@ -177,8 +213,11 @@ Layer 1 → 2 — brain training
   5. Verify                   submit_verify.slurm
   6. Copy .pkl to local       brains/
 
-Layer 3 — RL (optional)
-  7. RL training              slurm/submit_train_rl_parallelized_*.slurm
+Path 3 — simulation optimization (local / future HPC)
+  7. Constant-policy search   optimize_constant_policy.py  →  results/*.json
+
+Layer 4 — RL (optional)
+  8. RL training              slurm/submit_train_rl_parallelized_*.slurm
 ```
 
 **Repartition:** `tools/do_repartition.py` globs all `parquet/*.parquet` and writes ~50 parts. Training samples 10% of high-exp rows and keeps 100% of `exp_ratio ≤ 0.10` plus all `batch_low_*` files (see trainer constants).
@@ -194,7 +233,7 @@ HPC sessions are limited to **4 hours**; sweep scripts use `timeout` and checkpo
 
 ---
 
-## RL training (Layer 3)
+## RL training (Layer 4)
 
 | Location | Description |
 |----------|-------------|
@@ -218,7 +257,7 @@ HPC sessions are limited to **4 hours**; sweep scripts use `timeout` and checkpo
 | **PAA** | Primary assigned aircraft per squadron |
 | **UTE** | Utilization rate (sorties per aircraft per month) |
 | **RAP** | Ready Aircrew Program — monthly sortie/sim targets by qual (WG 9/mo sorties, FL/IP 8/mo, sim 3/mo) |
-| **Phase** | 120-day notional period; 3 phases per year |
+| **Phase** | Typical phase length (default 120 days via `SimulationConfig`); 3 phases per year |
 | **MQT / FLUG / IPUG** | Upgrade syllabi (wingman → FL → IP) |
 | **Exp ratio** | (IPs + FLs) / line pilots |
 | **Staff funnel** | Over-manned line IPs/FLs moved to staff billets |
@@ -229,16 +268,19 @@ HPC sessions are limited to **4 hours**; sweep scripts use `timeout` and checkpo
 
 1. **Import paths:** Run apps and scripts from **repo root** so `src.*` and `brains/` resolve correctly.
 2. **Brain / code alignment:** Mismatched 12 vs 16 outputs silently breaks syllabus charts or sim deferrals. Always verify output count after pulling a new `.pkl`.
-3. **Layer 1 vs Layer 2:** Single-phase sweeps train the brain on **capacity-constrained** outcomes; the manning model applies brain rates **without** re-enforcing `PAA × UTE` fleet totals. Document any policy conclusions accordingly.
-4. **`total_pilots` in training data** = line pilot count in manning prediction, not including staff.
-5. **`archive/`:** Historical scripts; not part of the active pipeline unless you know you need them.
+3. **Layer 1 vs Layer 2 (brain):** Single-phase sweeps train the brain on **capacity-constrained** outcomes; the brain manning path applies predicted rates **without** re-enforcing `PAA × UTE` fleet totals. Use `use_physics_allocator=True` when conclusions must match Layer 1 rules.
+4. **Physics end-of-phase:** `skip_graduation=True` in `_run_squadron_physics_phase` — graduation already happened inside `run_phase_simulation`; do not call `graduate_current_upgrades` afterward.
+5. **`total_pilots` in training data** = line pilot count in manning prediction, not including staff.
+6. **`SimulationConfig`:** Fleet-wide phase length and (Layer 1) allocation noise live in `src/simulation_config.py`, not on `SquadronConfig`. Pass `sim_config=` to `run_phase_simulation()` or `CAFSimulation(...)`.
+7. **`archive/`:** Historical scripts; not part of the active pipeline unless you know you need them.
 
 ---
 
 ## Current BIG PROBLEMS
 1. **RL as end state:** Unsure the best way to explore and communicate the intra-variable interactions since most are non-linear.
 2. **Reward hacking:** RL agents find their way to edge cases (primarily VERY low experience ratio -- < .10) where the ML brain performs poorly due to different physics (FLs and IPs hit monthly sortie maximum, resulting in different sortie allocation logic). 
-3. **Inconsistent rules throughout pipeline:** To make compute efficient, the long-term simulation and RL are based on the trained brain, not the actual sortie allocation logic. The errors here are turning out to be significant, making the results of the RL agents and long-term simulation largely irrelevant.
+3. **Inconsistent rules throughout pipeline:** Brain-based long-term sim and RL do not re-run Layer 1 allocation; errors can be large. **Mitigation:** Path 3 (`use_physics_allocator=True` + `manning_objective.py`) — slower but rule-consistent. Brain path remains useful for fast what-if and training-data generation.
+4. **Runtime:** Full CAF × 20 years × one `run_phase_simulation` per squadron per phase is expensive; profile before large optimization runs.
 
 ---
 
@@ -254,14 +296,19 @@ HPC sessions are limited to **4 hours**; sweep scripts use `timeout` and checkpo
 
 **Layer 2 — long-term manning**
 
-6. `src/manning_engine.py` — how the brain plugs into multi-year sim  
-7. `manning_app.py` — full CAF run + charts  
+6. `src/manning_engine.py` — brain vs physics plant, `run_phase` flow  
+7. `manning_app.py` — full CAF run + charts (brain path)  
 
-**Layer 3 — RL**
+**Path 3 — simulation optimization**
 
-8. `src/manning_gym.py` — action space, observations, rewards  
-9. `rl_trainers/train_rl_parallelized_*.py` — PPO training loop  
-10. `rl_app.py` — policy evaluation UI  
+8. `src/manning_objective.py` — explicit cost `J` and breakdown  
+9. `optimize_constant_policy.py` — rollout driver and search  
+
+**Layer 4 — RL**
+
+10. `src/manning_gym.py` — action space, observations, rewards  
+11. `rl_trainers/train_rl_parallelized_*.py` — PPO training loop  
+12. `rl_app.py` — policy evaluation UI  
 
 ---
 

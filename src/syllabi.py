@@ -146,6 +146,49 @@ TEST_CONTINUATION_PROFILE = ContinuationProfile(
 )
 
 
+def syllabus_line_sortie_burden(event: SyllabusEvent) -> int:
+    """Iron sortie slots for one student line (student + all support seats)."""
+    if event.event_type != EventType.SORTIE:
+        return 0
+    return (
+        event.num_student + event.num_instructor + event.num_blue_wg
+        + event.num_blue_fl + event.num_red_wg + event.num_red_fl
+    )
+
+
+def syllabus_line_sim_burden(event: SyllabusEvent) -> int:
+    """Simulator event slots for one student line (student + all support seats)."""
+    if event.event_type != EventType.SIM:
+        return 0
+    return (
+        event.num_student + event.num_instructor + event.num_blue_wg
+        + event.num_blue_fl + event.num_red_wg + event.num_red_fl
+    )
+
+
+def syllabus_burden_per_student(syllabus: List[SyllabusEvent]) -> tuple[int, int]:
+    """Total sortie and sim line slots one student consumes to finish the syllabus."""
+    sortie_burden = sum(syllabus_line_sortie_burden(e) for e in syllabus)
+    sim_burden = sum(syllabus_line_sim_burden(e) for e in syllabus)
+    return sortie_burden, sim_burden
+
+
+def incomplete_burden(incomplete_items: List[SyllabusEvent]) -> tuple[int, int]:
+    """Deferred sortie/sim line slots from incomplete syllabus events."""
+    sortie_burden = sum(syllabus_line_sortie_burden(e) for e in incomplete_items)
+    sim_burden = sum(syllabus_line_sim_burden(e) for e in incomplete_items)
+    return sortie_burden, sim_burden
+
+
+def syllabus_burden_fraction(
+    deferred_sorties: float, deferred_sims: float, sortie_burden: int, sim_burden: int
+) -> tuple[float, float]:
+    """Syllabi-worth of deferred work (sortie track and sim track separately)."""
+    sortie_frac = deferred_sorties / sortie_burden if sortie_burden > 0 else 0.0
+    sim_frac = deferred_sims / sim_burden if sim_burden > 0 else 0.0
+    return sortie_frac, sim_frac
+
+
 def syllabus_sortie_events_only(syllabus: List[SyllabusEvent]) -> List[SyllabusEvent]:
     """This simulator only allocates flying for SORTIE syllabus lines (not SIM)."""
     return [ev for ev in syllabus if ev.event_type == EventType.SORTIE]
@@ -178,3 +221,10 @@ SORTIE_SLOTS_IPUG = count_sortie_student_slots(IPUG_SYLLABUS)
 SIM_SLOTS_MQT = count_sim_student_slots(MQT_SYLLABUS)
 SIM_SLOTS_FLUG = count_sim_student_slots(FLUG_SYLLABUS)
 SIM_SLOTS_IPUG = count_sim_student_slots(IPUG_SYLLABUS)
+
+SORTIE_BURDEN_MQT, SIM_BURDEN_MQT = syllabus_burden_per_student(MQT_SYLLABUS)
+SORTIE_BURDEN_FLUG, SIM_BURDEN_FLUG = syllabus_burden_per_student(FLUG_SYLLABUS)
+SORTIE_BURDEN_IPUG, SIM_BURDEN_IPUG = syllabus_burden_per_student(IPUG_SYLLABUS)
+SORTIE_BURDEN_TEST_MQT, SIM_BURDEN_TEST_MQT = syllabus_burden_per_student(TEST_MQT_SYLLABUS)
+SORTIE_BURDEN_TEST_FLUG, SIM_BURDEN_TEST_FLUG = syllabus_burden_per_student(TEST_FLUG_SYLLABUS)
+SORTIE_BURDEN_TEST_IPUG, SIM_BURDEN_TEST_IPUG = syllabus_burden_per_student(TEST_IPUG_SYLLABUS)

@@ -1,6 +1,7 @@
 import pandas as pd
 from typing import List, Optional, Tuple
 from src.models import Pilot, Qual, SquadronConfig, Upgrade, Assignment, PriorityMode, AgingRate
+from src.simulation_config import SimulationConfig
 import os
 import numpy as np
 import joblib
@@ -11,7 +12,9 @@ class CAFSimulation:
                  round_robin: bool, brain = None, flug_window_start: int = 250, 
                  ipug_window_start: int = 400, max_manning_pct: int = 150, 
                  staff_priority_mode: PriorityMode = PriorityMode.RANDOM,
-                 use_upgrade_quotas: bool = False):
+                 use_upgrade_quotas: bool = False,
+                 sim_config: Optional[SimulationConfig] = None,
+                 use_physics_allocator: bool = False):
         self.history = []
         self.current_year = 2026
         self.current_phase = 1
@@ -24,6 +27,7 @@ class CAFSimulation:
         self.phase_intake = annual_intake // 3 # APPROXIMATE +/- 2
         self.retention_rate = retention_rate
         self.use_upgrade_quotas = use_upgrade_quotas
+        self.use_physics_allocator = use_physics_allocator
         if self.use_upgrade_quotas == False:
             self.sq_phase_flug_intake = 999
             self.sq_phase_ipug_intake = 999
@@ -33,39 +37,102 @@ class CAFSimulation:
 
         if brain:
             self.brain = brain
-        elif os.path.exists("brains/hpc_sortie_brain_multi_output_mlp.pkl"): # TODO add hybrid once complete
-            print(f"🧠 Loading Sortie Brain from disk...")
-            self.brain = joblib.load("brains/hpc_sortie_brain_multi_output_mlp.pkl")
+        elif use_physics_allocator:
+            self.brain = None
         else:
-            raise FileNotFoundError(f"Could not find brains/hpc_sortie_brain_multi_output_mlp. Please confirm file path first.")
+            for path in (
+                "brains/hpc_sortie_brain_multi_output_mlp_16_out.pkl",
+                "brains/hpc_sortie_brain_multi_output_mlp.pkl",
+            ):
+                if os.path.exists(path):
+                    print(f"🧠 Loading Sortie Brain from {path}...")
+                    self.brain = joblib.load(path)
+                    break
+            else:
+                raise FileNotFoundError(
+                    "Could not find brains/hpc_sortie_brain_multi_output_mlp*.pkl"
+                )
         self.round_robin = round_robin
+        self.sim_config = sim_config or SimulationConfig()
+        self._brain_output_count: Optional[int] = None
+
+    _DEFERRAL_NEGLIGIBLE = 0.10
+
+    def _brain_n_outputs(self) -> int:
+        if self._brain_output_count is None:
+            sample = np.zeros((1, len(self._PREDICT_FEATURE_COLS)))
+            preds = self.brain.predict(sample)
+            self._brain_output_count = int(preds.shape[1])
+        return self._brain_output_count
 
     def _phase_rates_from_brain_row(
         self, mqt_mo: float, row: np.ndarray, phase_length_days: float
     ) -> AgingRate:
         """Monthly ``AgingRate`` from one brain row, scaled to a phase (sorties + sim monthly)."""
+        if self._brain_n_outputs() >= 16:
+            sim = row[6:10]
+        else:
+            sim = (0.0, 0.0, 0.0, 0.0)
         monthly = AgingRate(
             mqt_mo, row[0], row[1], row[2],
             mqt_mo, row[3], row[4], row[5],
-            mqt_sim_phase=row[6],
-            wg_sim_phase=row[7],
-            fl_sim_phase=row[8],
-            ip_sim_phase=row[9],
-            mqt_sim_blue_phase=row[6],
-            wg_sim_blue_phase=row[7],
-            fl_sim_blue_phase=row[8],
-            ip_sim_blue_phase=row[9],
+            mqt_sim_phase=sim[0],
+            wg_sim_phase=sim[1],
+            fl_sim_phase=sim[2],
+            ip_sim_phase=sim[3],
+            mqt_sim_blue_phase=sim[0],
+            wg_sim_blue_phase=sim[1],
+            fl_sim_blue_phase=sim[2],
+            ip_sim_blue_phase=sim[3],
         )
         return monthly.monthly_to_phase(phase_length_days)
 
-    def _deferrals_from_brain_row(self, row: np.ndarray) -> Tuple[int, int, int, int, int, int]:
-        # Ignore negative deferrals (artifact of brain output)
-        # Assume < 0.10 is negligible and set to 0
-        deferrals = list(row[10:16])
-        for i, d in enumerate(deferrals):
-            if d < 0.10:
-                deferrals[i] = 0.0
-        return tuple(deferrals)
+    def _clean_deferral_frac(self, value: float) -> float:
+        if value < self._DEFERRAL_NEGLIGIBLE:
+            return 0.0
+        return max(0.0, float(value))
+
+    def _deferrals_from_brain_row(self, row: np.ndarray) -> Tuple[float, float, float, float, float, float]:
+        """
+        Brain deferral outputs are syllabi fractions; convert to sortie/sim line slots.
+
+        12-output: combined 6–8, sorties-only 9–11.
+        16-output: combined 10–12, sorties-only 13–15 (6–9 are sim monthly rates).
+        """
+        from src.syllabi import (
+            SORTIE_BURDEN_FLUG,
+            SORTIE_BURDEN_IPUG,
+            SORTIE_BURDEN_MQT,
+            SIM_BURDEN_FLUG,
+            SIM_BURDEN_IPUG,
+            SIM_BURDEN_MQT,
+        )
+
+        if self._brain_n_outputs() >= 16:
+            combined = row[10:13]
+            sorties_only = row[13:16]
+        else:
+            combined = row[6:9]
+            sorties_only = row[9:12]
+
+        sortie_burdens = (SORTIE_BURDEN_MQT, SORTIE_BURDEN_FLUG, SORTIE_BURDEN_IPUG)
+        sim_burdens = (SIM_BURDEN_MQT, SIM_BURDEN_FLUG, SIM_BURDEN_IPUG)
+
+        sortie_slots = []
+        sim_slots = []
+        for combined_frac, sortie_frac, sortie_burden, sim_burden in zip(
+            combined, sorties_only, sortie_burdens, sim_burdens
+        ):
+            sortie_f = self._clean_deferral_frac(sortie_frac)
+            combined_f = self._clean_deferral_frac(combined_frac)
+            sim_f = max(0.0, combined_f - sortie_f)
+            sortie_slots.append(sortie_f * sortie_burden)
+            sim_slots.append(sim_f * sim_burden)
+
+        return (
+            sortie_slots[0], sortie_slots[1], sortie_slots[2],
+            sim_slots[0], sim_slots[1], sim_slots[2],
+        )
 
     @property
     def all_pilots(self):
@@ -210,6 +277,35 @@ class CAFSimulation:
             target_sq.pilots.append(new_pilot)
             target_sq.update_stats()
 
+    def _run_squadron_physics_phase(self, sq: SquadronConfig, year: int, phase_num: int):
+        """One CAF phase using ``run_phase_simulation`` instead of the sortie brain."""
+        from src.engine import run_phase_simulation
+        from src.rap_state import mqt_observed_sortie_metrics
+
+        phase_days = self.sim_config.phase_length_days
+        run_phase_simulation(
+            sq,
+            sq.pilots,
+            debug_verbose=False,
+            pre_seed_upgrades=False,
+            sim_config=self.sim_config,
+        )
+
+        mqt_metrics = mqt_observed_sortie_metrics(sq.pilots)
+        if mqt_metrics["sortie_mo"] > 0:
+            sq.observed_mqt_monthly = mqt_metrics["sortie_mo"]
+
+        current_stats = sq.store_stats_from_physics(year, phase_num, phase_days)
+        self.process_end_of_phase(
+            sq,
+            year,
+            phase_num,
+            self.retention_rate,
+            current_stats,
+            deferrals=(0, 0, 0, 0, 0, 0),
+            skip_graduation=True,
+        )
+
     def run_phase(self, phase_num: int, year: int):
 
         # print(f"Running phase {phase_num} of {year}")
@@ -230,22 +326,28 @@ class CAFSimulation:
                 use_upgrade_quotas=use_upgrade_quotas, flug_quota=flug_quota, ipug_quota=ipug_quota)
             sq.update_stats()            
 
+        if self.use_physics_allocator:
+            for sq in self.squadrons:
+                self._run_squadron_physics_phase(sq, year, phase_num)
+            return
+
         preds = self.predict_rates_fast()
 
         for i, sq in enumerate(self.squadrons):
             row = preds[i]
             mqt_mo = self._resolve_mqt_monthly(sq)
-            rates = self._phase_rates_from_brain_row(mqt_mo, row, sq.phase_length_days)
+            phase_days = self.sim_config.phase_length_days
+            rates = self._phase_rates_from_brain_row(mqt_mo, row, phase_days)
             mqt_baseline = {
                 id(p): p.sorties_flown
                 for p in sq.pilots
                 if p.upgrade == Upgrade.MQT and p.active
             }
 
-            sq.apply_phase_aging(rates)
+            sq.apply_phase_aging(rates, phase_days)
 
             if mqt_baseline:
-                months = sq.phase_length_months
+                months = self.sim_config.phase_length_months
                 if months > 0:
                     deltas = [
                         p.sorties_flown - mqt_baseline[id(p)]
@@ -255,7 +357,7 @@ class CAFSimulation:
                     if deltas:
                         sq.observed_mqt_monthly = sum(deltas) / len(deltas) / months
 
-            current_stats = sq.store_stats(year, phase_num, rates)
+            current_stats = sq.store_stats(year, phase_num, rates, phase_days)
 
             deferrals = self._deferrals_from_brain_row(row)
             self.process_end_of_phase(sq, year, phase_num, self.retention_rate, current_stats, deferrals) 
@@ -275,14 +377,15 @@ class CAFSimulation:
         return pd.DataFrame(self.history)
     
 
-    def process_end_of_phase(self, sq: SquadronConfig, year: int, phase_num: int, retention_rate, current_stats: dict, deferrals: Tuple[int, int, int, int, int, int]):
+    def process_end_of_phase(self, sq: SquadronConfig, year: int, phase_num: int, retention_rate, current_stats: dict, deferrals: Tuple[int, int, int, int, int, int], skip_graduation: bool = False):
         
         staff_ips = 0
         staff_fls = 0
         separated_count = 0
         retained_count = 0
 
-        sq.graduate_current_upgrades(deferrals, sorties_only=True)
+        if not skip_graduation:
+            sq.graduate_current_upgrades(deferrals, sorties_only=False)
 
         sq.send_to_staff(priority_mode=self.staff_priority)
 
@@ -338,9 +441,9 @@ class CAFSimulation:
             # Training uses column name total_pilots but value is line pilot count (cockpit strength).
             total_pilots = sq.line_pilots
             exp_ratio = sq.experience_ratio
-            mqt_qty = sq.mqt_students + sq.mqt_carry
-            flug_qty = sq.flug_students + sq.flug_carry
-            ipug_qty = sq.ipug_students + sq.ipug_carry
+            mqt_qty = sq.mqt_students + sq.mqt_sortie_carry
+            flug_qty = sq.flug_students + sq.flug_sortie_carry
+            ipug_qty = sq.ipug_students + sq.ipug_sortie_carry
             wg_qty = sq.wg_qty
             fl_qty = sq.fl_qty
             ip_qty = sq.ip_qty

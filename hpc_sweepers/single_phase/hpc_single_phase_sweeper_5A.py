@@ -5,6 +5,7 @@ import itertools
 from concurrent.futures import ProcessPoolExecutor
 from src.engine import run_phase_simulation, create_pilots, phase_upgrade_metrics
 from src.models import SquadronConfig
+from src.simulation_config import DEFAULT_PHASE_LENGTH_DAYS, SimulationConfig
 from src.rap_state import (
     rap_assess,
     rap_state_code,
@@ -17,7 +18,7 @@ from src.rap_state import (
 )
 
 # --- HPC CONFIGURATION ---
-PHASE_DAYS = 120
+SIM_CONFIG = SimulationConfig(phase_length_days=DEFAULT_PHASE_LENGTH_DAYS)
 ITERATIONS_PER_CONFIG = 3
 OUTPUT_DIR = "outputs/single_phase/parquet"  
 CHUNK_SIZE = 500000 
@@ -72,7 +73,7 @@ def process_single_config(args):
     cfg = SquadronConfig(
         paa=int(paa), ute=float(ute), experience_ratio=float(exp), ip_qty=int(ip_q),
         mqt_students=int(mqt), flug_students=int(flug), ipug_students=int(ipug),
-        phase_length_days=PHASE_DAYS, total_pilots=int(total), id=99
+        total_pilots=int(total), id=99
     )
 
     # 3. Run Loop
@@ -82,7 +83,7 @@ def process_single_config(args):
         try:
             # We MUST create pilots to give the engine containers for sorties
             pilots = create_pilots(cfg)
-            final_pilots = run_phase_simulation(cfg, pilots, allocation_noise=0.0)
+            final_pilots = run_phase_simulation(cfg, pilots, sim_config=SIM_CONFIG)
             
             rap, blue_rap, red = rap_assess(final_pilots)
             simm = sim_rap_metrics(final_pilots)
@@ -135,7 +136,7 @@ def process_single_config(args):
     fl_qty = experienced - ip_q
     return {
         "paa": paa, "ute": ute,
-        "total_capacity": cfg.paa * cfg.ute * cfg.phase_length_months,
+        "total_capacity": cfg.paa * cfg.ute * SIM_CONFIG.phase_length_months,
         "exp_ratio": exp, "ip_qty": ip_q, "total_pilots": total,
         "mqt_qty": mqt, "flug_qty": flug, "ipug_qty": ipug,
         "wg_qty": wg_qty, "fl_qty": fl_qty,
