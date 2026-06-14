@@ -12,8 +12,9 @@ def compute_raw_metrics(history: pd.DataFrame, assessment_start_year: int) -> di
     """Aggregate simulator history into force-level feasibility metrics.
 
     ``CAFSimulation.history`` contains one row per squadron per phase. Force inventory
-    metrics are summed by phase. RAP shortfalls mirror ``CAFSimulation.current_*``:
-    positive squadron shortfalls are averaged across squadrons, then assessed over time.
+    metrics are summed by phase. RAP values are signed margins from the model's
+    ``target - observed_rate`` convention: positive is a shortfall, zero exactly
+    meets RAP, and negative is slack above the RAP target.
     """
     required = {
         "year",
@@ -33,8 +34,6 @@ def compute_raw_metrics(history: pd.DataFrame, assessment_start_year: int) -> di
         raise ValueError("History is empty")
 
     frame = history.copy()
-    for column in ["wg_rap_shortfall", "fl_rap_shortfall", "ip_rap_shortfall"]:
-        frame.loc[:, column] = frame[column].clip(lower=0.0)
 
     phase_groups = frame.groupby(["year", "phase"], sort=True)
     per_phase = phase_groups.agg(

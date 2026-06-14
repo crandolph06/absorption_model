@@ -59,38 +59,8 @@ def evaluate_design(
     design: PolicyDesign, config: ViabilityConfig, seed: int | None = None
 ) -> EvaluationResult:
     """Evaluate one constant policy design with the existing long-horizon model."""
-    run_seed = config.run.random_seed if seed is None else seed
-    random.seed(run_seed)
-    np.random.seed(run_seed)
-
     try:
-        brain = _load_brain(config.model.brain_path)
-        _validate_brain_output(brain, config.model.expected_brain_outputs)
-
-        sim = CAFSimulation(
-            annual_intake=design.annual_intake,
-            retention_rate=design.retention_rate,
-            round_robin=config.model.round_robin,
-            brain=brain,
-            max_manning_pct=design.max_manning_pct,
-            staff_priority_mode=_parse_priority_mode(config.model.staff_priority_mode),
-            use_upgrade_quotas=config.model.use_upgrade_quotas,
-        )
-        sim.current_year = config.model.start_year
-        sim.current_phase = 1
-        sim.sq_phase_flug_intake = design.flug_quota_per_phase
-        sim.sq_phase_ipug_intake = design.ipug_quota_per_phase
-
-        squadrons = get_initial_squadrons(config.model.start_year, SQUADRON_DATA)
-        for sq in squadrons:
-            sq.paa = design.paa
-            sq.update_stats()
-
-        history = sim.run_simulation(
-            years_to_run=config.model.years_to_run,
-            squadron_configs=squadrons,
-            ute=design.ute,
-        )
+        history = simulate_design_history(design, config, seed=seed)
         raw_metrics = compute_raw_metrics(history, config.model.assessment_start_year)
         constraints = compute_constraints(raw_metrics, config.requirements)
         phi, active_constraint, active_constraint_value = aggregate_violation(
@@ -124,6 +94,43 @@ def evaluate_design(
         )
 
 
+def simulate_design_history(
+    design: PolicyDesign, config: ViabilityConfig, seed: int | None = None
+) -> pd.DataFrame:
+    """Run the long-horizon simulator and return per-squadron phase history."""
+    run_seed = config.run.random_seed if seed is None else seed
+    random.seed(run_seed)
+    np.random.seed(run_seed)
+
+    brain = _load_brain(config.model.brain_path)
+    _validate_brain_output(brain, config.model.expected_brain_outputs)
+
+    sim = CAFSimulation(
+        annual_intake=design.annual_intake,
+        retention_rate=design.retention_rate,
+        round_robin=config.model.round_robin,
+        brain=brain,
+        max_manning_pct=design.max_manning_pct,
+        staff_priority_mode=_parse_priority_mode(config.model.staff_priority_mode),
+        use_upgrade_quotas=config.model.use_upgrade_quotas,
+    )
+    sim.current_year = config.model.start_year
+    sim.current_phase = 1
+    sim.sq_phase_flug_intake = design.flug_quota_per_phase
+    sim.sq_phase_ipug_intake = design.ipug_quota_per_phase
+
+    squadrons = get_initial_squadrons(config.model.start_year, SQUADRON_DATA)
+    for sq in squadrons:
+        sq.paa = design.paa
+        sq.update_stats()
+
+    return sim.run_simulation(
+        years_to_run=config.model.years_to_run,
+        squadron_configs=squadrons,
+        ute=design.ute,
+    )
+
+
 def evaluate_designs_parallel(
     designs: pd.DataFrame,
     config: ViabilityConfig,
@@ -142,6 +149,7 @@ def evaluate_designs_parallel(
     jobs = []
     for index, row in designs.reset_index(drop=True).iterrows():
         design_id = row["design_id"] if "design_id" in row else index
+        metadata = _design_metadata(row)
         values = {name: row[name] for name in variable_names}
         raw_values = None
         if all(f"raw_{name}" in row for name in variable_names):
@@ -151,8 +159,9 @@ def evaluate_designs_parallel(
                 design_id,
                 values,
                 raw_values,
+                metadata,
                 config,
-                config.run.random_seed + int(index),
+                config.run.random_seed + _seed_offset(row, int(index)),
             )
         )
 
@@ -174,47 +183,63 @@ def evaluate_designs_parallel(
         )
         checkpoint_buffer = []
 
-    def consume_result(design_id: Any, result: EvaluationResult) -> None:
-        row = _flatten_result(design_id, result, variable_names)
+    def consume_result(
+        design_id: Any,
+        metadata: dict[str, Any],
+        result: EvaluationResult,
+    ) -> None:
+        row = _flatten_result(design_id, result, variable_names, metadata=metadata)
         flattened_rows.append(row)
         checkpoint_buffer.append(row)
         flush_checkpoint()
 
     if worker_count <= 1:
         for job in jobs:
-            design_id, result = _evaluate_design_job(job)
-            consume_result(design_id, result)
+            design_id, metadata, result = _evaluate_design_job(job)
+            consume_result(design_id, metadata, result)
     else:
         with ProcessPoolExecutor(max_workers=worker_count) as executor:
-            for design_id, result in executor.map(_evaluate_design_job, jobs):
-                consume_result(design_id, result)
+            for design_id, metadata, result in executor.map(_evaluate_design_job, jobs):
+                consume_result(design_id, metadata, result)
 
     flush_checkpoint(force=True)
     return pd.DataFrame(flattened_rows)
 
 
 def _evaluate_design_job(
-    job: tuple[Any, dict[str, Any], dict[str, float] | None, ViabilityConfig, int]
-) -> tuple[Any, EvaluationResult]:
-    design_id, values, raw_values, config, seed = job
+    job: tuple[
+        Any,
+        dict[str, Any],
+        dict[str, float] | None,
+        dict[str, Any],
+        ViabilityConfig,
+        int,
+    ]
+) -> tuple[Any, dict[str, Any], EvaluationResult]:
+    design_id, values, raw_values, metadata, config, seed = job
     design = PolicyDesign.from_mapping(values, config.policy, raw_values=raw_values)
-    return design_id, evaluate_design(design, config, seed=seed)
+    return design_id, metadata, evaluate_design(design, config, seed=seed)
 
 
 def _flatten_result(
     design_id: Any,
     result: EvaluationResult,
     variable_names: list[str],
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    row: dict[str, Any] = {
-        "design_id": design_id,
-        "phi": result.phi,
-        "feasible": result.feasible,
-        "active_constraint": result.active_constraint,
-        "active_constraint_value": result.active_constraint_value,
-        "status": result.status,
-        "error": result.error,
-    }
+    row: dict[str, Any] = {"design_id": design_id}
+    if metadata:
+        row.update(metadata)
+    row.update(
+        {
+            "phi": result.phi,
+            "feasible": result.feasible,
+            "active_constraint": result.active_constraint,
+            "active_constraint_value": result.active_constraint_value,
+            "status": result.status,
+            "error": result.error,
+        }
+    )
     for name in variable_names:
         row[f"raw_{name}"] = result.raw_design.get(name)
         row[f"applied_{name}"] = result.applied_design.get(name)
@@ -226,12 +251,34 @@ def _flatten_result(
     return row
 
 
+def _design_metadata(row: pd.Series) -> dict[str, Any]:
+    metadata = {}
+    for column in ["doe_source", "sample_index"]:
+        if column in row and pd.notna(row[column]):
+            value = row[column]
+            if hasattr(value, "item"):
+                value = value.item()
+            metadata[column] = value
+    return metadata
+
+
+def _seed_offset(row: pd.Series, index: int) -> int:
+    source = str(row["doe_source"]) if "doe_source" in row and pd.notna(row["doe_source"]) else ""
+    if (
+        source not in {"corner", "baseline"}
+        and "sample_index" in row
+        and pd.notna(row["sample_index"])
+    ):
+        return int(row["sample_index"])
+    return index
+
+
 def _load_brain(path: str) -> Any:
     brain_path = Path(path)
     if not brain_path.exists():
         raise FileNotFoundError(
-            f"Configured brain_path does not exist: {brain_path}. "
-            "Train or provide the sortie brain before running viability analysis."
+            f"Configured internal surrogate path model.brain_path does not exist: {brain_path}. "
+            "Train or provide the sortie/sim internal surrogate before running viability analysis."
         )
     cache_key = str(brain_path.resolve())
     if cache_key not in _BRAIN_CACHE:
@@ -246,15 +293,17 @@ def _validate_brain_output(brain: Any, expected_outputs: int) -> None:
     probe = pd.DataFrame(np.zeros((1, len(columns))), columns=columns)
     predicted = np.asarray(brain.predict(probe))
     if predicted.ndim != 2:
-        raise ValueError(f"Brain predict() must return a 2D array; got shape {predicted.shape}")
+        raise ValueError(
+            f"Internal surrogate predict() must return a 2D array; got shape {predicted.shape}"
+        )
     actual_outputs = predicted.shape[1]
     if actual_outputs != expected_outputs:
         raise ValueError(
-            "Brain output layout is incompatible with the current manning engine: "
+            "Internal surrogate output layout is incompatible with the current manning engine: "
             f"expected {expected_outputs} outputs, got {actual_outputs}. "
             "The checked engine indexes the 16-output layout with sim rates at columns "
             "6-9 and deferrals at columns 10-15; do not run viability evaluation with "
-            "a legacy 12-output brain without an explicit adapter or retrained brain."
+            "a legacy 12-output internal surrogate without an explicit adapter or retrained artifact."
         )
 
 

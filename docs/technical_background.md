@@ -193,7 +193,7 @@ Examples:
 ```text
 g_total_pilots = target_total_pilots - observed_total_pilots
 
-g_wg_readiness = observed_wg_shortfall - allowed_wg_shortfall
+g_wg_readiness = observed_wg_signed_margin - allowed_wg_shortfall
 
 g_line_pilots = target_line_pilots - observed_line_pilots
 
@@ -201,6 +201,12 @@ g_training_backlog = observed_training_backlog - allowed_training_backlog
 
 g_experience_ratio = minimum_experience_ratio - observed_experience_ratio
 ```
+
+For RAP, the signed margin follows the repository's `target - observed_rate`
+convention. Positive values mean the cohort is below RAP, zero means it exactly
+meets RAP, and negative values mean it exceeds the RAP sortie/sim target. The
+viability layer should preserve negative RAP slack instead of clipping it to
+zero.
 
 Normalize and aggregate:
 
@@ -1383,4 +1389,3 @@ phi(x) = maximum normalized constraint violation
 ```
 
 Use the existing model as the evaluator. Use a surrogate only to accelerate search and boundary mapping. Start with constant policies, direct parallel evaluation, ridge/GPR surrogates, and 2-D envelope plots. Verify all candidate feasible policies in the direct model. Report feasible designs, infeasible near-misses, active constraints, and margins.
-

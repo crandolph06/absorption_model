@@ -1,0 +1,528 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+from pathlib import Path
+from typing import Any, Mapping
+
+import numpy as np
+import pandas as pd
+
+from src.viability.config import ViabilityConfig, load_config
+from src.viability.evaluator import EvaluationResult, simulate_design_history
+from src.viability.metrics import (
+    aggregate_violation,
+    compute_constraints,
+    compute_raw_metrics,
+)
+from src.viability.plots import apply_policy_value, predict_policy_frame
+from src.viability.policy import PolicyDesign
+from src.viability.search import load_signed_constraint_surrogate
+from src.viability.surrogate import read_evaluations_table
+
+
+POLICY_LABELS = {
+    "annual_intake": "Annual B-course intake",
+    "retention_rate": "Retention rate",
+    "ute": "UTE",
+    "paa": "PAA",
+    "max_manning_pct": "Maximum manning %",
+    "flug_quota_per_phase": "FLUG quota / phase",
+    "ipug_quota_per_phase": "IPUG quota / phase",
+}
+
+
+@dataclass(frozen=True)
+class DashboardArtifactPaths:
+    config: Path
+    surrogate: Path
+    evaluations: Path
+    verified_candidates: Path
+    search_summary: Path
+    verification_summary: Path
+    envelope_summary: Path
+    report: Path | None = None
+
+
+@dataclass(frozen=True)
+class DashboardArtifacts:
+    paths: DashboardArtifactPaths
+    config: ViabilityConfig
+    surrogate: dict[str, Any]
+    evaluations: pd.DataFrame
+    verified_candidates: pd.DataFrame
+    search_summary: dict[str, Any]
+    verification_summary: dict[str, Any]
+    envelope_summary: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class SliderInterval:
+    lever: str
+    low: float
+    high: float
+    n_points: int
+
+
+@dataclass(frozen=True)
+class SliderSweepResult:
+    lever: str
+    sweep: pd.DataFrame
+    intervals: list[SliderInterval]
+
+
+@dataclass(frozen=True)
+class DirectPolicyResult:
+    evaluation: EvaluationResult
+    history: pd.DataFrame
+    trajectory: pd.DataFrame
+
+
+def default_artifact_paths(root: str | Path = ".") -> DashboardArtifactPaths:
+    base = Path(root)
+    search_dir = base / "outputs" / "viability" / "runs" / "search"
+    return DashboardArtifactPaths(
+        config=base / "configs" / "viability.example.yaml",
+        surrogate=(
+            base
+            / "outputs"
+            / "viability"
+            / "runs"
+            / "rap_signed"
+            / "gpr"
+            / "surrogate_constraints_gpr.joblib"
+        ),
+        evaluations=(
+            base
+            / "outputs"
+            / "viability"
+            / "runs"
+            / "rap_signed"
+            / "evaluations.parquet"
+        ),
+        verified_candidates=search_dir / "verified_candidates.parquet",
+        search_summary=search_dir / "search_summary.json",
+        verification_summary=search_dir / "verification_summary.json",
+        envelope_summary=search_dir / "envelope" / "envelope_summary.json",
+        report=search_dir / "report.md",
+    )
+
+
+def load_dashboard_artifacts(paths: DashboardArtifactPaths) -> DashboardArtifacts:
+    config = load_config(paths.config)
+    surrogate = load_signed_constraint_surrogate(paths.surrogate)
+    evaluations = read_evaluations_table(paths.evaluations)
+    _require_columns(
+        evaluations,
+        ["phi", *config.policy.variables],
+        "evaluations",
+    )
+    verified_candidates = read_evaluations_table(paths.verified_candidates)
+    _require_columns(
+        verified_candidates,
+        [
+            "candidate_id",
+            "design_id",
+            "phi",
+            "feasible",
+            "active_constraint",
+            *config.policy.variables,
+        ],
+        "verified candidates",
+    )
+    search_summary = _read_json_object(paths.search_summary)
+    verification_summary = _read_json_object(paths.verification_summary)
+    envelope_summary = _read_json_object(paths.envelope_summary)
+    _validate_envelope_paths(envelope_summary)
+    if paths.report is not None and not paths.report.exists():
+        raise FileNotFoundError(f"Report artifact does not exist: {paths.report}")
+    return DashboardArtifacts(
+        paths=paths,
+        config=config,
+        surrogate=surrogate,
+        evaluations=evaluations,
+        verified_candidates=verified_candidates,
+        search_summary=search_summary,
+        verification_summary=verification_summary,
+        envelope_summary=envelope_summary,
+    )
+
+
+def select_dashboard_candidate(
+    verified_candidates: pd.DataFrame,
+    *,
+    mode: str,
+    candidate_id: str | None = None,
+) -> pd.Series:
+    _require_columns(
+        verified_candidates,
+        ["candidate_id", "phi", "feasible"],
+        "verified candidates",
+    )
+    if mode == "near_boundary_feasible":
+        feasible = _feasible_candidates(verified_candidates)
+        ranked = feasible.assign(_abs_phi=feasible["phi"].astype(float).abs())
+        return ranked.sort_values(["_abs_phi", "phi", "candidate_id"]).iloc[0].drop(
+            labels=["_abs_phi"]
+        )
+    if mode == "best_margin_feasible":
+        feasible = _feasible_candidates(verified_candidates)
+        return feasible.sort_values(["phi", "candidate_id"]).iloc[0]
+    if mode == "candidate_id":
+        if candidate_id is None:
+            raise ValueError("candidate_id must be supplied when mode='candidate_id'")
+        matches = verified_candidates.loc[
+            verified_candidates["candidate_id"].astype(str) == str(candidate_id)
+        ]
+        if matches.empty:
+            raise ValueError(f"No verified candidate has candidate_id={candidate_id!r}")
+        return matches.iloc[0]
+    raise ValueError(
+        "mode must be one of 'near_boundary_feasible', "
+        "'best_margin_feasible', or 'candidate_id'"
+    )
+
+
+def policy_values_from_row(
+    row: pd.Series | Mapping[str, Any], config: ViabilityConfig
+) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for name in config.policy.variables:
+        if name in row:
+            values[name] = row[name]
+        elif f"applied_{name}" in row:
+            values[name] = row[f"applied_{name}"]
+        else:
+            raise ValueError(f"Candidate row is missing policy value {name!r}")
+    return PolicyDesign.from_mapping(values, config.policy).to_dict()
+
+
+def policy_frame_from_values(
+    values: Mapping[str, Any], config: ViabilityConfig
+) -> pd.DataFrame:
+    row: dict[str, Any] = {}
+    for name in config.policy.variables:
+        if name not in values:
+            raise ValueError(f"Policy values are missing {name!r}")
+        raw_value = float(values[name])
+        applied = apply_policy_value(raw_value, config, name)
+        row[f"raw_{name}"] = raw_value
+        row[f"applied_{name}"] = applied
+        row[name] = applied
+    return pd.DataFrame([row])
+
+
+def score_policy_values(
+    surrogate: dict[str, Any],
+    config: ViabilityConfig,
+    values: Mapping[str, Any],
+    *,
+    conservative_sigma: float,
+) -> pd.Series:
+    frame = policy_frame_from_values(values, config)
+    prediction = predict_policy_frame(
+        surrogate,
+        frame,
+        config,
+        conservative_sigma=conservative_sigma,
+        chunk_size=1,
+    )
+    return prediction.iloc[0]
+
+
+def one_lever_sweep(
+    config: ViabilityConfig,
+    base_values: Mapping[str, Any],
+    lever: str,
+    *,
+    max_points: int = 121,
+) -> pd.DataFrame:
+    if lever not in config.policy.variables:
+        raise ValueError(f"Unknown policy lever {lever!r}")
+    if max_points < 2:
+        raise ValueError("max_points must be at least 2")
+
+    variable = config.policy.variables[lever]
+    if variable.type == "int":
+        low = int(np.ceil(variable.low))
+        high = int(np.floor(variable.high))
+        raw_values = np.arange(low, high + 1, dtype=float)
+        if len(raw_values) > max_points:
+            raw_values = np.unique(np.rint(np.linspace(low, high, max_points))).astype(float)
+    else:
+        raw_values = np.linspace(variable.low, variable.high, max_points)
+
+    rows = []
+    for raw_value in raw_values:
+        values = dict(base_values)
+        values[lever] = float(raw_value)
+        policy_frame = policy_frame_from_values(values, config)
+        rows.append(policy_frame.to_dict(orient="records")[0])
+    return pd.DataFrame(rows).reset_index(drop=True)
+
+
+def local_feasible_sweep(
+    surrogate: dict[str, Any],
+    config: ViabilityConfig,
+    base_values: Mapping[str, Any],
+    lever: str,
+    *,
+    conservative_sigma: float,
+    max_points: int = 121,
+) -> SliderSweepResult:
+    sweep = one_lever_sweep(config, base_values, lever, max_points=max_points)
+    prediction = predict_policy_frame(
+        surrogate,
+        sweep,
+        config,
+        conservative_sigma=conservative_sigma,
+        chunk_size=max_points,
+    )
+    scored = pd.concat([sweep.reset_index(drop=True), prediction], axis=1)
+    intervals = feasible_intervals(
+        scored,
+        lever,
+        feasible_column="conservative_phi",
+        threshold=0.0,
+    )
+    return SliderSweepResult(lever=lever, sweep=scored, intervals=intervals)
+
+
+def feasible_intervals(
+    scored_sweep: pd.DataFrame,
+    lever: str,
+    *,
+    feasible_column: str,
+    threshold: float,
+) -> list[SliderInterval]:
+    value_column = f"raw_{lever}" if f"raw_{lever}" in scored_sweep.columns else lever
+    _require_columns(scored_sweep, [value_column, feasible_column], "scored sweep")
+    ordered = scored_sweep.sort_values(value_column).reset_index(drop=True)
+    feasible_mask = ordered[feasible_column].astype(float) <= float(threshold)
+    intervals: list[SliderInterval] = []
+    start_index: int | None = None
+    for index, is_feasible in enumerate(feasible_mask.to_list()):
+        if is_feasible and start_index is None:
+            start_index = index
+        next_infeasible = not is_feasible
+        last_row = index == len(ordered) - 1
+        if start_index is not None and (next_infeasible or last_row):
+            end_index = index if is_feasible and last_row else index - 1
+            section = ordered.iloc[start_index:end_index + 1]
+            intervals.append(
+                SliderInterval(
+                    lever=lever,
+                    low=float(section[value_column].min()),
+                    high=float(section[value_column].max()),
+                    n_points=int(len(section)),
+                )
+            )
+            start_index = None
+    return intervals
+
+
+def aggregate_history_trajectory(
+    history: pd.DataFrame,
+    config: ViabilityConfig,
+) -> pd.DataFrame:
+    required = [
+        "year",
+        "phase",
+        "total_pilots",
+        "line_pilots",
+        "staff_ips",
+        "staff_fls",
+        "wg_rap_shortfall",
+        "fl_rap_shortfall",
+        "ip_rap_shortfall",
+    ]
+    _require_columns(history, required, "simulation history")
+    if history.empty:
+        raise ValueError("simulation history is empty")
+
+    frame = history.copy()
+    groups = frame.groupby(["year", "phase"], sort=True)
+    trajectory = groups.agg(
+        total_pilots=("total_pilots", "sum"),
+        line_pilots=("line_pilots", "sum"),
+        staff_ips=("staff_ips", "sum"),
+        staff_fls=("staff_fls", "sum"),
+        wg_rap_margin=("wg_rap_shortfall", "mean"),
+        fl_rap_margin=("fl_rap_shortfall", "mean"),
+        ip_rap_margin=("ip_rap_shortfall", "mean"),
+    ).reset_index()
+
+    if {"fl_qty", "ip_qty"}.issubset(frame.columns):
+        experienced = groups[["fl_qty", "ip_qty"]].sum().sum(axis=1).reset_index(drop=True)
+        line = trajectory["line_pilots"].replace(0, np.nan)
+        trajectory.loc[:, "experience_ratio"] = (experienced / line).fillna(0.0)
+    elif "exp_rat" in frame.columns:
+        weighted = frame.assign(_weighted_exp=frame["exp_rat"] * frame["line_pilots"])
+        weighted_groups = weighted.groupby(["year", "phase"], sort=True)
+        numerator = weighted_groups["_weighted_exp"].sum().reset_index(drop=True)
+        line = trajectory["line_pilots"].replace(0, np.nan)
+        trajectory.loc[:, "experience_ratio"] = (numerator / line).fillna(0.0)
+    else:
+        trajectory.loc[:, "experience_ratio"] = np.nan
+
+    active_names = []
+    active_values = []
+    phi_values = []
+    feasible_values = []
+    for _, row in trajectory.iterrows():
+        constraints = per_phase_constraints(row, config)
+        phi, active_name, active_value = aggregate_violation(
+            constraints,
+            config.constraint_scales,
+        )
+        active_names.append(active_name)
+        active_values.append(active_value)
+        phi_values.append(phi)
+        feasible_values.append(phi <= 0.0)
+
+    trajectory.loc[:, "phi"] = phi_values
+    trajectory.loc[:, "feasible"] = feasible_values
+    trajectory.loc[:, "active_constraint"] = active_names
+    trajectory.loc[:, "active_constraint_value"] = active_values
+    trajectory.loc[:, "timeline"] = (
+        trajectory["year"].astype(str) + " P" + trajectory["phase"].astype(str)
+    )
+    return trajectory
+
+
+def per_phase_constraints(row: pd.Series, config: ViabilityConfig) -> dict[str, float]:
+    requirements = config.requirements
+    constraints: dict[str, float] = {}
+    if requirements.target_total_pilots is not None:
+        constraints["total_pilots_window"] = (
+            requirements.target_total_pilots - float(row["total_pilots"])
+        )
+    if requirements.target_line_pilots is not None:
+        constraints["line_pilots_window"] = (
+            requirements.target_line_pilots - float(row["line_pilots"])
+        )
+    if requirements.allowed_wg_rap_shortfall is not None:
+        constraints["wg_rap"] = (
+            float(row["wg_rap_margin"]) - requirements.allowed_wg_rap_shortfall
+        )
+    if requirements.allowed_fl_rap_shortfall is not None:
+        constraints["fl_rap"] = (
+            float(row["fl_rap_margin"]) - requirements.allowed_fl_rap_shortfall
+        )
+    if requirements.allowed_ip_rap_shortfall is not None:
+        constraints["ip_rap"] = (
+            float(row["ip_rap_margin"]) - requirements.allowed_ip_rap_shortfall
+        )
+    if requirements.target_staff_ips is not None:
+        constraints["staff_ips"] = requirements.target_staff_ips - float(row["staff_ips"])
+    if requirements.target_staff_fls is not None:
+        constraints["staff_fls"] = requirements.target_staff_fls - float(row["staff_fls"])
+    if requirements.min_experience_ratio is not None:
+        constraints["experience_ratio"] = (
+            requirements.min_experience_ratio - float(row["experience_ratio"])
+        )
+    return constraints
+
+
+def run_direct_policy(
+    values: Mapping[str, Any],
+    config: ViabilityConfig,
+    *,
+    seed: int | None = None,
+) -> DirectPolicyResult:
+    design = PolicyDesign.from_mapping(values, config.policy)
+    try:
+        history = simulate_design_history(design, config, seed=seed)
+        raw_metrics = compute_raw_metrics(history, config.model.assessment_start_year)
+        constraints = compute_constraints(raw_metrics, config.requirements)
+        phi, active_constraint, active_constraint_value = aggregate_violation(
+            constraints,
+            config.constraint_scales,
+        )
+        evaluation = EvaluationResult(
+            design=design.to_dict(),
+            raw_design=design.to_raw_dict(),
+            applied_design=design.to_applied_dict(),
+            raw_metrics=raw_metrics,
+            constraints=constraints,
+            phi=phi,
+            feasible=phi <= 0.0,
+            active_constraint=active_constraint,
+            active_constraint_value=active_constraint_value,
+            status="ok",
+        )
+        trajectory = aggregate_history_trajectory(history, config)
+        return DirectPolicyResult(
+            evaluation=evaluation,
+            history=history,
+            trajectory=trajectory,
+        )
+    except Exception as exc:
+        evaluation = EvaluationResult(
+            design=design.to_dict(),
+            raw_design=design.to_raw_dict(),
+            applied_design=design.to_applied_dict(),
+            raw_metrics={},
+            constraints={},
+            phi=float("inf"),
+            feasible=False,
+            active_constraint=None,
+            active_constraint_value=None,
+            status="failed",
+            error=str(exc),
+        )
+        return DirectPolicyResult(
+            evaluation=evaluation,
+            history=pd.DataFrame(),
+            trajectory=pd.DataFrame(),
+        )
+
+
+def envelope_plot_paths(envelope_summary: Mapping[str, Any]) -> list[tuple[str, Path, Path]]:
+    slices = envelope_summary.get("slices")
+    if not isinstance(slices, list):
+        raise ValueError("envelope_summary must include a list of slices")
+    paths = []
+    for slice_summary in slices:
+        x_name = str(slice_summary["x"])
+        y_name = str(slice_summary["y"])
+        fixed = Path(str(slice_summary["fixed_plot_path"]))
+        projected = Path(str(slice_summary["projected_plot_path"]))
+        paths.append((f"{x_name} vs {y_name}", fixed, projected))
+    return paths
+
+
+def _read_json_object(path: str | Path) -> dict[str, Any]:
+    input_path = Path(path)
+    if not input_path.exists():
+        raise FileNotFoundError(f"Required JSON artifact does not exist: {input_path}")
+    data = json.loads(input_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected JSON object in {input_path}")
+    return data
+
+
+def _validate_envelope_paths(envelope_summary: Mapping[str, Any]) -> None:
+    missing_paths = []
+    for _label, fixed, projected in envelope_plot_paths(envelope_summary):
+        for path in (fixed, projected):
+            if not path.exists():
+                missing_paths.append(str(path))
+    if missing_paths:
+        raise FileNotFoundError(
+            "Envelope summary references missing plot files: "
+            + ", ".join(missing_paths)
+        )
+
+
+def _require_columns(frame: pd.DataFrame, columns: list[str], name: str) -> None:
+    missing = [column for column in columns if column not in frame.columns]
+    if missing:
+        raise ValueError(f"{name} is missing required columns: {missing}")
+
+
+def _feasible_candidates(verified_candidates: pd.DataFrame) -> pd.DataFrame:
+    feasible = verified_candidates.loc[verified_candidates["feasible"].astype(bool)].copy()
+    if feasible.empty:
+        raise ValueError("No verified feasible candidates are available")
+    return feasible

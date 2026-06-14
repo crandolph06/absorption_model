@@ -13,6 +13,7 @@ def generate_doe(
     config: ViabilityConfig,
     n: int | None = None,
     method: str | None = None,
+    start_index: int | None = None,
     include_corners: bool | None = None,
     include_baselines: bool | None = None,
 ) -> pd.DataFrame:
@@ -23,19 +24,19 @@ def generate_doe(
         raise ValueError("DOE sample count must be non-negative")
 
     selected_method = (config.doe.method if method is None else method).lower()
-    start_index = config.doe.start_index
+    selected_start_index = config.doe.start_index if start_index is None else start_index
     unit_samples = _sample_unit_cube(
         n=requested_n,
         dimension=space.dimension,
         method=selected_method,
         random_seed=config.run.random_seed,
-        start_index=start_index,
+        start_index=selected_start_index,
         scramble=config.doe.scramble,
     )
 
     rows: list[dict[str, object]] = []
     for offset, unit_values in enumerate(unit_samples):
-        sample_index = start_index + offset
+        sample_index = selected_start_index + offset
         raw, applied = space.denormalize_with_raw(unit_values)
         row: dict[str, object] = {
             "design_id": f"{selected_method}_{sample_index:06d}",
@@ -50,7 +51,7 @@ def generate_doe(
 
     default_corners = (
         config.doe.include_corners
-        if start_index == 0
+        if selected_start_index == 0
         else config.doe.include_corners and config.doe.include_corners_on_resume
     )
     use_corners = default_corners if include_corners is None else include_corners
@@ -69,7 +70,7 @@ def generate_doe(
 
     default_baselines = (
         config.doe.include_baselines
-        if start_index == 0
+        if selected_start_index == 0
         else config.doe.include_baselines and config.doe.include_baselines_on_resume
     )
     use_baselines = default_baselines if include_baselines is None else include_baselines

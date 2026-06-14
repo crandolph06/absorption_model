@@ -1,15 +1,19 @@
 from dataclasses import replace
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 import numpy as np
+import pandas as pd
 
 from src.viability.config import load_config
 from src.viability.evaluator import (
+    EvaluationResult,
     _flatten_result,
     _load_brain,
     _validate_brain_output,
     evaluate_design,
+    evaluate_designs_parallel,
 )
 from src.viability.policy import PolicyDesign
 
@@ -63,6 +67,55 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
         self.assertIn("active_constraint_value", row)
         self.assertIn("status", row)
         self.assertIn("error", row)
+
+    def test_parallel_evaluation_keeps_doe_metadata_and_sample_seed(self):
+        values = {
+            "annual_intake": 250,
+            "retention_rate": 0.5,
+            "ute": 12,
+            "paa": 24,
+            "max_manning_pct": 150,
+            "flug_quota_per_phase": 3,
+            "ipug_quota_per_phase": 2,
+        }
+        designs = pd.DataFrame(
+            [
+                {
+                    "design_id": "sobol_001024",
+                    "doe_source": "sobol",
+                    "sample_index": 1024,
+                    **values,
+                }
+            ]
+        )
+        captured_jobs = []
+
+        def fake_job(job):
+            captured_jobs.append(job)
+            design_id, _values, raw_values, metadata, _config, _seed = job
+            return (
+                design_id,
+                metadata,
+                EvaluationResult(
+                    design=_values,
+                    raw_design=raw_values or _values,
+                    applied_design=_values,
+                    raw_metrics={},
+                    constraints={"total_pilots_final": -1.0},
+                    phi=-0.01,
+                    feasible=True,
+                    active_constraint="total_pilots_final",
+                    active_constraint_value=-1.0,
+                    status="ok",
+                ),
+            )
+
+        with patch("src.viability.evaluator._evaluate_design_job", side_effect=fake_job):
+            result = evaluate_designs_parallel(designs, self.config, workers=1)
+
+        self.assertEqual(result.loc[0, "sample_index"], 1024)
+        self.assertEqual(result.loc[0, "doe_source"], "sobol")
+        self.assertEqual(captured_jobs[0][-1], self.config.run.random_seed + 1024)
 
     def test_evaluate_design_one_year_when_compatible_brain_is_available(self):
         brain_path = Path(self.config.model.brain_path)

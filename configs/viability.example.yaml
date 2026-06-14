@@ -85,3 +85,49 @@ doe:
       max_manning_pct: 150
       flug_quota_per_phase: 3
       ipug_quota_per_phase: 2
+
+active_learning:
+  candidate_method: sobol
+  candidate_start_index: 2048
+  candidate_pool_size: 8192
+  iterations: 3
+  batch_size: 64
+  acquisition: boundary_stratified_uncertainty
+  boundary_batch_fraction: 0.75
+  min_normalized_distance: 0.05
+  candidate_report_rows: 500
+
+search:
+  candidate_method: sobol
+  candidate_start_index: 51200
+  candidate_pool_size: 65536
+  n_candidates_to_verify: 50
+  conservative_sigma: 1.0
+  min_normalized_distance: 0.02
+  candidate_report_rows: 1000
+
+envelope:
+  anchor: near_boundary_feasible
+  conservative_sigma: 1.0
+  grid_size: 45
+  prediction_chunk_size: 20000
+  sobol_hidden_samples: 256
+  sobol_hidden_start_index: 0
+  de_compare_enabled: true
+  de_compare_points_per_slice: 12
+  de_maxiter: 25
+  de_popsize: 8
+  de_polish: false
+  slices:
+    - x: annual_intake
+      y: retention_rate
+    - x: annual_intake
+      y: ute
+    - x: paa
+      y: ute
+    - x: retention_rate
+      y: paa
+
+report:
+  top_candidate_count: 10
+  near_boundary_count: 10

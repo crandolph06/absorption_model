@@ -63,6 +63,42 @@ _DOE_FIELDS = (
     "include_baselines_on_resume",
     "baselines",
 )
+_ACTIVE_LEARNING_FIELDS = (
+    "candidate_method",
+    "candidate_start_index",
+    "candidate_pool_size",
+    "iterations",
+    "batch_size",
+    "acquisition",
+    "boundary_batch_fraction",
+    "min_normalized_distance",
+    "candidate_report_rows",
+)
+_SEARCH_FIELDS = (
+    "candidate_method",
+    "candidate_start_index",
+    "candidate_pool_size",
+    "n_candidates_to_verify",
+    "conservative_sigma",
+    "min_normalized_distance",
+    "candidate_report_rows",
+)
+_ENVELOPE_FIELDS = (
+    "anchor",
+    "conservative_sigma",
+    "grid_size",
+    "prediction_chunk_size",
+    "sobol_hidden_samples",
+    "sobol_hidden_start_index",
+    "de_compare_enabled",
+    "de_compare_points_per_slice",
+    "de_maxiter",
+    "de_popsize",
+    "de_polish",
+    "slices",
+)
+_ENVELOPE_SLICE_FIELDS = ("x", "y")
+_REPORT_FIELDS = ("top_candidate_count", "near_boundary_count")
 _VARIABLE_FIELDS = ("type", "low", "high")
 
 
@@ -196,6 +232,143 @@ class DoeConfig:
 
 
 @dataclass(frozen=True)
+class ActiveLearningConfig:
+    candidate_method: str
+    candidate_start_index: int
+    candidate_pool_size: int
+    iterations: int
+    batch_size: int
+    acquisition: str
+    boundary_batch_fraction: float
+    min_normalized_distance: float
+    candidate_report_rows: int
+
+    def __post_init__(self) -> None:
+        if self.candidate_method != "sobol":
+            raise ValueError("active_learning.candidate_method currently supports only 'sobol'")
+        if self.candidate_start_index < 0:
+            raise ValueError("active_learning.candidate_start_index must be non-negative")
+        if self.candidate_pool_size <= 0:
+            raise ValueError("active_learning.candidate_pool_size must be positive")
+        if self.iterations < 0:
+            raise ValueError("active_learning.iterations must be non-negative")
+        if self.batch_size <= 0:
+            raise ValueError("active_learning.batch_size must be positive")
+        if self.acquisition not in {"uncertainty", "boundary_stratified_uncertainty"}:
+            raise ValueError(
+                "active_learning.acquisition supports only 'uncertainty' "
+                "and 'boundary_stratified_uncertainty'"
+            )
+        if not 0.0 <= self.boundary_batch_fraction <= 1.0:
+            raise ValueError("active_learning.boundary_batch_fraction must be between 0 and 1")
+        if self.acquisition == "uncertainty" and self.boundary_batch_fraction != 0.0:
+            raise ValueError(
+                "active_learning.boundary_batch_fraction must be 0.0 when acquisition='uncertainty'"
+            )
+        if self.acquisition == "boundary_stratified_uncertainty" and self.boundary_batch_fraction <= 0.0:
+            raise ValueError(
+                "active_learning.boundary_batch_fraction must be positive when "
+                "acquisition='boundary_stratified_uncertainty'"
+            )
+        if self.min_normalized_distance < 0.0:
+            raise ValueError("active_learning.min_normalized_distance must be non-negative")
+        if self.candidate_report_rows <= 0:
+            raise ValueError("active_learning.candidate_report_rows must be positive")
+
+
+@dataclass(frozen=True)
+class SearchConfig:
+    candidate_method: str
+    candidate_start_index: int
+    candidate_pool_size: int
+    n_candidates_to_verify: int
+    conservative_sigma: float
+    min_normalized_distance: float
+    candidate_report_rows: int
+
+    def __post_init__(self) -> None:
+        if self.candidate_method != "sobol":
+            raise ValueError("search.candidate_method currently supports only 'sobol'")
+        if self.candidate_start_index < 0:
+            raise ValueError("search.candidate_start_index must be non-negative")
+        if self.candidate_pool_size <= 0:
+            raise ValueError("search.candidate_pool_size must be positive")
+        if self.n_candidates_to_verify <= 0:
+            raise ValueError("search.n_candidates_to_verify must be positive")
+        if self.conservative_sigma < 0.0:
+            raise ValueError("search.conservative_sigma must be non-negative")
+        if self.min_normalized_distance < 0.0:
+            raise ValueError("search.min_normalized_distance must be non-negative")
+        if self.candidate_report_rows <= 0:
+            raise ValueError("search.candidate_report_rows must be positive")
+
+
+@dataclass(frozen=True)
+class EnvelopeSliceConfig:
+    x: str
+    y: str
+
+    def __post_init__(self) -> None:
+        if self.x == self.y:
+            raise ValueError("envelope.slices entries must use distinct x and y variables")
+
+
+@dataclass(frozen=True)
+class EnvelopeConfig:
+    anchor: str
+    conservative_sigma: float
+    grid_size: int
+    prediction_chunk_size: int
+    sobol_hidden_samples: int
+    sobol_hidden_start_index: int
+    de_compare_enabled: bool
+    de_compare_points_per_slice: int
+    de_maxiter: int
+    de_popsize: int
+    de_polish: bool
+    slices: list[EnvelopeSliceConfig]
+
+    def __post_init__(self) -> None:
+        if self.anchor != "near_boundary_feasible":
+            raise ValueError("envelope.anchor currently supports only 'near_boundary_feasible'")
+        if self.conservative_sigma < 0.0:
+            raise ValueError("envelope.conservative_sigma must be non-negative")
+        if self.grid_size < 2:
+            raise ValueError("envelope.grid_size must be at least 2")
+        if self.prediction_chunk_size <= 0:
+            raise ValueError("envelope.prediction_chunk_size must be positive")
+        if self.sobol_hidden_samples <= 0:
+            raise ValueError("envelope.sobol_hidden_samples must be positive")
+        if self.sobol_hidden_start_index < 0:
+            raise ValueError("envelope.sobol_hidden_start_index must be non-negative")
+        if self.de_compare_points_per_slice < 0:
+            raise ValueError("envelope.de_compare_points_per_slice must be non-negative")
+        if self.de_compare_enabled and self.de_compare_points_per_slice <= 0:
+            raise ValueError(
+                "envelope.de_compare_points_per_slice must be positive when "
+                "envelope.de_compare_enabled is true"
+            )
+        if self.de_maxiter <= 0:
+            raise ValueError("envelope.de_maxiter must be positive")
+        if self.de_popsize <= 0:
+            raise ValueError("envelope.de_popsize must be positive")
+        if not self.slices:
+            raise ValueError("envelope.slices must include at least one slice")
+
+
+@dataclass(frozen=True)
+class ReportConfig:
+    top_candidate_count: int
+    near_boundary_count: int
+
+    def __post_init__(self) -> None:
+        if self.top_candidate_count <= 0:
+            raise ValueError("report.top_candidate_count must be positive")
+        if self.near_boundary_count <= 0:
+            raise ValueError("report.near_boundary_count must be positive")
+
+
+@dataclass(frozen=True)
 class ViabilityConfig:
     run: RunConfig
     model: ModelConfig
@@ -203,6 +376,10 @@ class ViabilityConfig:
     constraint_scales: ConstraintScalesConfig
     policy: PolicyConfig
     doe: DoeConfig
+    active_learning: ActiveLearningConfig | None = None
+    search: SearchConfig | None = None
+    envelope: EnvelopeConfig | None = None
+    report: ReportConfig | None = None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "ViabilityConfig":
@@ -274,6 +451,61 @@ class ViabilityConfig:
             baselines=baselines,
         )
 
+        active_learning = None
+        if "active_learning" in data:
+            active_learning_data = _require_mapping(data, "active_learning")
+            active_learning = ActiveLearningConfig(
+                **{
+                    key: _require_key(active_learning_data, "active_learning", key)
+                    for key in _ACTIVE_LEARNING_FIELDS
+                }
+            )
+
+        search = None
+        if "search" in data:
+            search_data = _require_mapping(data, "search")
+            search = SearchConfig(
+                **{
+                    key: _require_key(search_data, "search", key)
+                    for key in _SEARCH_FIELDS
+                }
+            )
+
+        envelope = None
+        if "envelope" in data:
+            envelope_data = _require_mapping(data, "envelope")
+            envelope_slices_raw = _require_key(envelope_data, "envelope", "slices")
+            if not isinstance(envelope_slices_raw, list):
+                raise ValueError("envelope.slices must be a list")
+            envelope_slices = []
+            for index, value in enumerate(envelope_slices_raw):
+                if not isinstance(value, Mapping):
+                    raise ValueError(f"envelope.slices[{index}] must be a mapping")
+                envelope_slices.append(
+                    EnvelopeSliceConfig(
+                        **{
+                            key: _require_key(value, f"envelope.slices[{index}]", key)
+                            for key in _ENVELOPE_SLICE_FIELDS
+                        }
+                    )
+                )
+            envelope_values = {
+                key: _require_key(envelope_data, "envelope", key)
+                for key in _ENVELOPE_FIELDS
+                if key != "slices"
+            }
+            envelope = EnvelopeConfig(**envelope_values, slices=envelope_slices)
+
+        report = None
+        if "report" in data:
+            report_data = _require_mapping(data, "report")
+            report = ReportConfig(
+                **{
+                    key: _require_key(report_data, "report", key)
+                    for key in _REPORT_FIELDS
+                }
+            )
+
         config = cls(
             run=run,
             model=model,
@@ -281,6 +513,10 @@ class ViabilityConfig:
             constraint_scales=constraint_scales,
             policy=policy,
             doe=doe,
+            active_learning=active_learning,
+            search=search,
+            envelope=envelope,
+            report=report,
         )
         config.validate()
         return config
@@ -291,7 +527,7 @@ class ViabilityConfig:
         if self.model.n_replications != 1:
             raise ValueError("Only model.n_replications=1 is implemented in this first slice")
         if self.model.expected_brain_outputs < 16:
-            raise ValueError("The current CAFSimulation path requires a 16-output brain layout")
+            raise ValueError("The current CAFSimulation path requires a 16-output internal surrogate layout")
 
         horizon_end = self.model.start_year + self.model.years_to_run - 1
         if not (
@@ -313,7 +549,17 @@ class ViabilityConfig:
         if self.doe.include_baselines and not self.doe.baselines:
             raise ValueError("doe.include_baselines is true but doe.baselines is empty")
 
+        self._validate_envelope_slices()
         self._validate_enabled_constraint_scales()
+
+    def _validate_envelope_slices(self) -> None:
+        if self.envelope is None:
+            return
+        variable_names = set(self.policy.variables)
+        for slice_config in self.envelope.slices:
+            missing = [name for name in (slice_config.x, slice_config.y) if name not in variable_names]
+            if missing:
+                raise ValueError(f"envelope.slices references unknown policy variables: {missing}")
 
     def _validate_enabled_constraint_scales(self) -> None:
         req = self.requirements
@@ -348,7 +594,7 @@ class ViabilityConfig:
                 )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "run": asdict(self.run),
             "model": asdict(self.model),
             "requirements": asdict(self.requirements),
@@ -362,6 +608,15 @@ class ViabilityConfig:
             },
             "doe": asdict(self.doe),
         }
+        if self.active_learning is not None:
+            data["active_learning"] = asdict(self.active_learning)
+        if self.search is not None:
+            data["search"] = asdict(self.search)
+        if self.envelope is not None:
+            data["envelope"] = asdict(self.envelope)
+        if self.report is not None:
+            data["report"] = asdict(self.report)
+        return data
 
     def dump_resolved_config(self, path: str | Path) -> Path:
         try:

@@ -48,7 +48,7 @@ Relevant files to inspect before implementation:
   - This file is useful for bounds and lever definitions, but the viability prototype should not depend on the RL `step()` logic.
 
 - `hpc_train_brain_multi_output.py`
-  - Current training path for the sortie/sim/deferral surrogate, referred to as the “brain.”
+  - Current training path for the sortie/sim/deferral internal surrogate.
   - Uses engineered features and multi-output MLP regression.
 
 - `hpc_sweepers/single_phase/hpc_single_phase_sweeper.py`
@@ -66,7 +66,7 @@ Relevant files to inspect before implementation:
 
 ### 2.2 Important integration point
 
-For this prototype, do **not** replace the existing sortie/sim “brain.” The viability prototype should use the current model stack as-is, then build a higher-level surrogate over the **end-to-end policy-to-outcome response**.
+For this prototype, do **not** replace the existing sortie/sim internal surrogate. The viability prototype should use the current model stack as-is, then build a higher-level surrogate over the **end-to-end policy-to-outcome response**.
 
 There are therefore two surrogate concepts:
 
@@ -180,7 +180,12 @@ Use one or both depending on config.
 
 #### Readiness constraints
 
-The model already stores RAP shortfalls by WG/FL/IP. Use those directly.
+The model stores RAP values by WG/FL/IP using a `target - observed_rate`
+convention. Treat these as signed readiness margins, even if legacy column names
+say `shortfall`: positive values are below RAP, zero exactly meets RAP, and
+negative values are slack above the RAP target. Do not clip negative RAP margins
+to zero in the viability layer; the feasible side of the boundary needs this
+signed slack for surrogate modeling.
 
 ```text
 g_wg_rap = max_wg_rap_shortfall_after_assessment_start - allowed_wg_rap_shortfall
@@ -190,7 +195,9 @@ g_fl_rap = max_fl_rap_shortfall_after_assessment_start - allowed_fl_rap_shortfal
 g_ip_rap = max_ip_rap_shortfall_after_assessment_start - allowed_ip_rap_shortfall
 ```
 
-If threshold-based sortie rates are easier to reason about, convert shortfalls to margins, but preserve the sign convention above.
+If threshold-based sortie rates are easier to reason about, compute the same
+signed margin explicitly from sortie rates, but preserve the sign convention
+above.
 
 #### Line / staff / experience constraints
 
@@ -250,7 +257,7 @@ As an analyst, I want to:
 Do not attempt the following in the first prototype:
 
 - Do not replace or rewrite the existing manning engine.
-- Do not rewrite the existing sortie/sim brain training pipeline.
+- Do not rewrite the existing sortie/sim internal surrogate training pipeline.
 - Do not train a new RL agent.
 - Do not implement a full OpenMDAO or multidisciplinary optimization framework.
 - Do not optimize hundreds of per-phase decision variables.
@@ -407,10 +414,13 @@ surrogate:
   cv_folds: 5
 
 search:
-  method: differential_evolution
-  surrogate_screen_n: 50000
-  n_candidates_to_verify: 25
+  candidate_method: sobol
+  candidate_start_index: 51200
+  candidate_pool_size: 65536
+  n_candidates_to_verify: 50
   conservative_sigma: 1.0
+  min_normalized_distance: 0.02
+  candidate_report_rows: 1000
 
 plots:
   enabled: true
@@ -445,7 +455,7 @@ not collide with resumed Sobol rows. By default, corners and baselines are only
 included for `start_index: 0`; set `include_corners_on_resume` or
 `include_baselines_on_resume` to repeat them in continuation batches.
 
-### 6.1 Local brain artifact note
+### 6.1 Local internal surrogate artifact note
 
 The tracked local artifact at `brains/hpc_sortie_brain_multi_output_mlp.pkl`
 may be a stale 12-output model. Do not delete it as part of this prototype and
@@ -461,7 +471,7 @@ The long-horizon `CAFSimulation` currently expects the 16-output layout:
 10-15  remaining syllabus outputs
 ```
 
-If a configured brain produces any other output count, the viability evaluator
+If a configured internal surrogate produces any other output count, the viability evaluator
 should fail clearly before running the long-horizon model. A silent fallback to a
 legacy 12-output layout would make the long-horizon results difficult to trust.
 
@@ -475,7 +485,7 @@ python hpc_train_brain_multi_output.py
 
 That writes the configured local artifact at
 `outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl`. Treat this
-as a smoke/review brain unless it is trained on a production-sized sweep.
+as a smoke/review internal surrogate unless it is trained on a production-sized sweep.
 
 ### 6.2 Prototype simplification
 
@@ -751,7 +761,18 @@ all enabled individual constraints g_j
 selected raw metrics if useful
 ```
 
-The primary search target should be `phi`.
+The default GPR path should fit normalized constraints, not scalar `phi`
+directly:
+
+```text
+h_j = g_j / scale_j
+predicted_phi = max_j(mu_h_j)
+conservative_phi = max_j(mu_h_j + k * sigma_h_j)
+```
+
+This preserves the physical `phi = max_j(h_j)` contract while avoiding a
+single nonsmooth scalar target at active-constraint switches. Scalar `phi`
+models may remain only as comparison baselines.
 
 ### Metrics
 
@@ -787,9 +808,8 @@ python -m src.viability.cli fit-surrogate \
 Expected outputs:
 
 ```text
-surrogate_phi_gpr.joblib
+surrogate_constraints_gpr.joblib
 surrogate_phi_ridge.joblib
-surrogate_constraints_*.joblib
 surrogate_metrics.json
 ```
 
@@ -799,6 +819,25 @@ surrogate_metrics.json
 - Metrics are written to JSON.
 - Model artifacts can be reloaded and used for prediction.
 - The surrogate code handles cases with no feasible points without crashing.
+
+### GPR convergence study
+
+Before using the viability surrogate for search, run a fixed-holdout convergence
+study over direct long-horizon evaluations:
+
+```bash
+python -m src.viability.cli converge-surrogate \
+  --config configs/viability.example.yaml \
+  --evaluations outputs/viability/runs/<run_name>/evaluations.parquet \
+  --target-r2 0.99 \
+  --target-normalized-mae 0.02 \
+  --target-normalized-rmse 0.05
+```
+
+The command writes `gpr_convergence_metrics.csv`,
+`gpr_convergence_summary.json`, `surrogate_constraints_gpr.joblib`, and normalized
+prediction-vs-truth/convergence plots. Use a fixed held-out set for all train
+sizes; do not judge convergence on training data.
 
 ---
 
@@ -818,36 +857,35 @@ src/viability/search.py
 
 ### Search methods
 
-Implement at least two methods:
+Implemented first slice:
 
-1. Large random/Sobol surrogate screening.
-2. `scipy.optimize.differential_evolution` on the surrogate prediction of `phi`.
+1. Large Sobol surrogate screening from explicit `search.candidate_start_index`.
+2. Deterministic selection of a small diverse verification batch.
 
-Optional later methods:
+Deferred methods:
 
-```text
-CMA-ES
-NSGA-II
-Bayesian optimization
-multi-start local optimization
-```
+- differential evolution
+- CMA-ES
+- NSGA-II
+- Bayesian optimization
+- multi-start local optimization
 
 ### Candidate categories
 
 Generate candidate policies in several categories:
 
 ```text
-best predicted phi
-predicted feasible with largest margin
+conservative feasible
+predicted feasible margin
 near-boundary: abs(predicted_phi) small
-uncertain boundary if GPR uncertainty is available
-high-diversity candidates across the design space
+minimum predicted violation
+uncertainty near boundary
 ```
 
 For GPR, support conservative feasibility:
 
 ```text
-mu_phi + k * sigma_phi <= 0
+max_j(mu_h_j + k * sigma_h_j) <= 0
 ```
 
 where `k` is `search.conservative_sigma` from config.
@@ -860,7 +898,10 @@ Write:
 
 ```text
 candidate_policies.csv
+scored_candidates_top.csv
+search_summary.json
 verified_candidates.parquet or verified_candidates.csv
+verification_summary.json
 ```
 
 ### CLI commands
@@ -868,18 +909,22 @@ verified_candidates.parquet or verified_candidates.csv
 ```bash
 python -m src.viability.cli search \
   --config configs/viability.example.yaml \
-  --surrogate outputs/viability/runs/<run_name>/surrogate_phi_gpr.joblib
+  --surrogate outputs/viability/runs/rap_signed/gpr/surrogate_constraints_gpr.joblib \
+  --output-dir outputs/viability/runs/search
 
 python -m src.viability.cli verify-candidates \
   --config configs/viability.example.yaml \
-  --candidates outputs/viability/runs/<run_name>/candidate_policies.csv \
-  --workers 4
+  --candidates outputs/viability/runs/search/candidate_policies.csv \
+  --output-dir outputs/viability/runs/search \
+  --workers 1
 ```
 
 ### Acceptance criteria
 
 - Search returns candidate policies even when no feasible policy is predicted.
+- The search report includes predicted `phi`, conservative `phi`, predicted active constraint, and selection source.
 - Verification marks each candidate as direct-model feasible or infeasible.
+- Verification reports feasible count, false-feasible count, active-constraint counts, and best verified `phi`.
 - Report identifies best verified policy by `phi`.
 - Report identifies binding constraints for best candidates.
 
@@ -913,28 +958,54 @@ One active-learning iteration:
 
 ### Acquisition rules
 
-Implement a simple rule first:
+Implemented active-learning slice:
 
 ```text
-score = -abs(mu_phi) + lambda_uncertainty * sigma_phi
+score = max_j(sigma_h_j)
 ```
 
-If uncertainty is unavailable:
+Candidate ties are broken by smaller `abs(predicted_phi)`, so boundary-adjacent
+points are preferred only when predictive uncertainty is otherwise tied. This
+keeps the first slice simple: no full IMSPE, no nonuniform weighting function,
+and no optimizer.
 
 ```text
-select points with smallest abs(predicted_phi)
-plus best predicted feasible points
-plus random exploration points
+active_learning:
+  candidate_method: sobol
+  candidate_start_index: 2048
+  candidate_pool_size: 8192
+  iterations: 3
+  batch_size: 64
+  acquisition: uncertainty
+  min_normalized_distance: 0.05
+  candidate_report_rows: 500
 ```
 
-Candidate batch should include:
+Each iteration uses the next explicit Sobol block:
 
 ```text
-boundary points
-predicted feasible points
-minimum-violation points
-random/exploration points
+iteration 1: candidate_start_index
+iteration 2: candidate_start_index + candidate_pool_size
+iteration k: candidate_start_index + (k - 1) * candidate_pool_size
 ```
+
+The fixed holdout remains read-only. Training rows are initial evaluated rows
+with fixed-holdout policy tuples excluded, plus newly selected solver
+evaluations from completed active-learning iterations.
+
+After the pure-uncertainty pass, the selected cases were mostly high-`phi`
+cases and the fixed-holdout low-`phi` error worsened. The current default is
+therefore an explicit boundary-stratified mode:
+
+```text
+acquisition: boundary_stratified_uncertainty
+boundary_batch_fraction: 0.75
+```
+
+For each batch, the configured boundary fraction is selected by smallest
+`abs(predicted_phi)` with `max_j(sigma_h_j)` as the tie-breaker. The remaining
+rows are selected by highest `max_j(sigma_h_j)`. Both groups use the same
+normalized-distance diversity filter.
 
 ### CLI command
 
@@ -942,9 +1013,8 @@ random/exploration points
 python -m src.viability.cli active-learn \
   --config configs/viability.example.yaml \
   --evaluations outputs/viability/runs/<run_name>/evaluations.parquet \
-  --iterations 3 \
-  --batch-size 32 \
-  --workers 4
+  --holdout-evaluations outputs/viability/runs/fixed_holdout_2048/fixed_holdout.parquet \
+  --output-dir outputs/viability/runs/al_boundary
 ```
 
 ### Acceptance criteria
@@ -953,6 +1023,8 @@ python -m src.viability.cli active-learn \
 - Surrogate metrics are updated after each iteration.
 - The loop does not select duplicate designs unless replications are explicitly requested.
 - Boundary error and false-feasible rate are reported over time.
+- `state.json` records completed iteration, next Sobol index, config hash, latest training artifact, and latest model artifact.
+- Re-running without `--resume` fails when `state.json` exists; re-running with `--resume` validates state and continues from the stored Sobol index.
 
 ---
 
@@ -973,7 +1045,11 @@ src/viability/report.py
 
 ### Required plots
 
-Implement 2-D slice plots first.
+Implemented reporting slice:
+
+1. Fixed 2-D slice plots anchored at the near-boundary verified feasible policy.
+2. Projected 2-D envelope plots that minimize hidden policy levers on the surrogate.
+3. Differential-evolution comparison rows for selected projected-grid points.
 
 Examples:
 
@@ -997,19 +1073,16 @@ approximate boundary phi = 0
 
 Use simple matplotlib. Do not require seaborn.
 
-### Optional projected envelope
-
-For later:
-
-For each point in a 2-D slice, optimize remaining variables on the surrogate:
+For projected envelopes, each point in a 2-D slice uses:
 
 ```text
 psi(a, b) = min_z phi(a, b, z)
 ```
 
-Then mark `(a, b)` feasible if `psi(a, b) <= 0`.
-
-This is more powerful but more complex. Do not block the initial prototype on projected envelopes.
+Then `(a, b)` is predicted feasible if `psi(a, b) <= 0`. Sobol
+hidden-variable scans are the primary full-grid projection method. Differential
+evolution is used only as a focused comparison audit on selected grid points,
+not as the main plotting engine.
 
 ### Markdown report
 
@@ -1141,12 +1214,34 @@ Search and verify:
 ```bash
 python -m src.viability.cli search \
   --config configs/viability.example.yaml \
-  --run-dir outputs/viability/runs/viability_smoke
+  --surrogate outputs/viability/runs/rap_signed/gpr/surrogate_constraints_gpr.joblib \
+  --output-dir outputs/viability/runs/search
 
 python -m src.viability.cli verify-candidates \
   --config configs/viability.example.yaml \
-  --run-dir outputs/viability/runs/viability_smoke \
-  --workers 4
+  --candidates outputs/viability/runs/search/candidate_policies.csv \
+  --output-dir outputs/viability/runs/search \
+  --workers 1
+```
+
+Plot envelopes and write report:
+
+```bash
+python -m src.viability.cli plot-envelope \
+  --config configs/viability.example.yaml \
+  --surrogate outputs/viability/runs/rap_signed/gpr/surrogate_constraints_gpr.joblib \
+  --evaluations outputs/viability/runs/rap_signed/evaluations.parquet \
+  --verified-candidates outputs/viability/runs/search/verified_candidates.parquet \
+  --output-dir outputs/viability/runs/search/envelope
+
+python -m src.viability.cli make-report \
+  --config configs/viability.example.yaml \
+  --evaluations outputs/viability/runs/rap_signed/evaluations.parquet \
+  --verified-candidates outputs/viability/runs/search/verified_candidates.parquet \
+  --search-summary outputs/viability/runs/search/search_summary.json \
+  --verification-summary outputs/viability/runs/search/verification_summary.json \
+  --envelope-summary outputs/viability/runs/search/envelope/envelope_summary.json \
+  --output outputs/viability/runs/search/report.md
 ```
 
 Full pipeline:
@@ -1311,7 +1406,10 @@ Surrogate search may produce fractional values. Store both raw and rounded value
 
 ### 10.7 GPR scaling
 
-Normalize design variables to `[0, 1]`. Standardize outputs before fitting GPR. GPR can become slow for large datasets due to cubic scaling. If direct evaluations grow beyond roughly 1,000–2,000 points, consider:
+Normalize design variables to `[0, 1]`. The default GPR target is normalized
+constraints `h_j = g_j / scale_j`, with `phi` reconstructed as `max_j(h_j)`.
+GPR can become slow for large datasets due to cubic scaling. If direct
+evaluations grow beyond roughly 1,000–2,000 points, consider:
 
 ```text
 subsampled GP
@@ -1443,7 +1541,10 @@ def compute_constraints(metrics, cfg):
 def aggregate_violation(constraints, scales):
     normalized = {}
     for name, value in constraints.items():
-        scale = scales.get(name.replace("g_", ""), 1.0)
+        scale_name = name.replace("g_", "")
+        if scale_name not in scales:
+            raise KeyError(f"Missing constraint scale for {scale_name}")
+        scale = scales[scale_name]
         normalized[name] = value / scale
     phi = max(normalized.values()) if normalized else float("nan")
     binding = max(normalized, key=normalized.get) if normalized else None

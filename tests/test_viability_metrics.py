@@ -28,13 +28,41 @@ class ViabilityMetricsTest(unittest.TestCase):
         self.assertEqual(metrics["final_line_pilots"], 200.0)
         self.assertEqual(metrics["min_total_pilots_after_assessment_start"], 220.0)
         self.assertEqual(metrics["max_wg_rap_shortfall_after_assessment_start"], 2.0)
-        self.assertEqual(metrics["mean_wg_rap_shortfall_after_assessment_start"], 1.0)
+        self.assertEqual(metrics["mean_wg_rap_shortfall_after_assessment_start"], 0.5)
         self.assertTrue(
             math.isclose(
                 metrics["min_experience_ratio_after_assessment_start"],
                 100.0 / 190.0,
             )
         )
+
+    def test_rap_metrics_preserve_negative_slack_above_target(self):
+        history = pd.DataFrame(
+            [
+                _row(2040, 1, 1, total=100, line=90, ip=20, fl=30, wg_short=-1.0),
+                _row(2040, 1, 2, total=120, line=100, ip=20, fl=30, wg_short=-3.0),
+                _row(2040, 2, 1, total=110, line=95, ip=25, fl=30, wg_short=-2.0),
+                _row(2040, 2, 2, total=130, line=105, ip=25, fl=30, wg_short=-4.0),
+            ]
+        )
+
+        metrics = compute_raw_metrics(history, assessment_start_year=2040)
+        requirements = RequirementsConfig(
+            target_total_pilots=None,
+            target_line_pilots=None,
+            min_experience_ratio=None,
+            allowed_wg_rap_shortfall=0.0,
+            allowed_fl_rap_shortfall=None,
+            allowed_ip_rap_shortfall=None,
+            target_staff_ips=None,
+            target_staff_fls=None,
+        )
+
+        constraints = compute_constraints(metrics, requirements)
+
+        self.assertEqual(metrics["max_wg_rap_shortfall_after_assessment_start"], -2.0)
+        self.assertEqual(metrics["mean_wg_rap_shortfall_after_assessment_start"], -2.5)
+        self.assertEqual(constraints["wg_rap"], -2.0)
 
     def test_staff_constraints_use_window_minimums(self):
         history = pd.DataFrame(
