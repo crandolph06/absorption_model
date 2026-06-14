@@ -1,10 +1,24 @@
-# Internal Phase Surrogate Audit And Retraining Plan
+# Internal Phase Backend Audit And Surrogate Plan
 
 ## Summary
 
-Before relying on the viability surrogate and search workflow, verify that the
-existing internal phase surrogate is accurate enough. The viability workflow now
-uses the configured 16-output MLP at:
+Before relying on the viability surrogate and search workflow, choose and verify
+the phase backend used inside the long-horizon manning model. There are now two
+different "direct" concepts in the repo:
+
+1. **Direct long-horizon viability evaluation:** bypasses the outer signed-RAP
+   viability surrogate and runs `CAFSimulation` for the selected policy.
+2. **Direct single-phase physics:** bypasses the internal sortie brain and calls
+   `run_phase_simulation()` inside each simulated phase through
+   `CAFSimulation(use_physics_allocator=True, brain=None)`.
+
+The Phase 7 dashboard's "Run direct verification" button currently means the
+first concept only. It still uses the configured internal phase backend. The
+next development slice should wire the second concept into the viability
+evaluator/config so near-boundary policies can be checked without relying on the
+pretrained MLP.
+
+The current viability workflow still uses the configured 16-output MLP at:
 
 ```text
 outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl
@@ -27,13 +41,54 @@ long-horizon engine, which indexes sim outputs at columns 6-9 and deferral
 outputs at columns 10-15. The audit should make this distinction explicit and
 prevent accidental use of the stale 12-output artifact.
 
-The goal of this phase is to answer:
+The repository also now contains a direct-physics policy-search path:
 
-> Is the configured 16-output internal phase surrogate good enough to support
-> long-horizon feasibility analysis?
+```text
+optimize_constant_policy.py
+src/manning_objective.py
+src/manning_engine.py::CAFSimulation(use_physics_allocator=True)
+src/simulation_config.py::SimulationConfig
+```
 
-If not, train a replacement single-phase surrogate ourselves and use that in the
-viability workflow.
+The revised goal of this plan is to answer:
+
+> Can direct single-phase physics be used as the authoritative viability backend,
+> and, if so, how different are the MLP-backed feasibility conclusions?
+
+If the direct-physics path is too slow for broad search, keep the MLP for fast
+screening, but require physics-backed checks for final candidate verification and
+near-boundary claims. Retrain the MLP only if we still need a fast brain-backed
+backend after measuring the physics-backed response.
+
+## Current Repo Status After Phase 7 And Main Merge
+
+Implemented:
+
+- `viability_dashboard.py` provides live slider exploration using the outer
+  signed-RAP surrogate and a button for long-horizon verification.
+- `src/viability/dashboard.py` has reusable slider interval, candidate loading,
+  surrogate scoring, and trajectory aggregation helpers.
+- `src/viability/evaluator.py` still loads `config.model.brain_path` for every
+  viability evaluation and validates `expected_brain_outputs`.
+- `src/viability/config.py` currently requires
+  `model.expected_brain_outputs >= 16`; there is no phase-backend switch yet.
+- `configs/viability.example.yaml` points at the 16-output artifact under
+  `outputs/single_phase/brains/`.
+- `CAFSimulation` can run either the brain path or the direct physics allocator.
+- `optimize_constant_policy.py` already demonstrates the direct-physics path for
+  constant-policy optimization outside the viability workflow.
+- `SimulationConfig` carries phase length, allocation noise, and
+  `upgrade_sortie_fraction`, which should be exposed deliberately when the
+  viability evaluator uses the physics backend.
+
+Not implemented yet:
+
+- A viability config field such as `model.phase_backend: brain | physics`.
+- A physics-backed branch in `src/viability/evaluator.py`.
+- Dashboard copy/state that distinguishes brain-backed direct verification from
+  physics-backed direct verification.
+- Side-by-side comparison outputs for brain-backed and physics-backed
+  long-horizon runs.
 
 ## What The Internal Phase Surrogate Does
 
@@ -120,9 +175,72 @@ Acceptance criteria:
 - Any 12-output artifact is clearly reported as incompatible.
 - The audit never silently falls back to `brains/`.
 
-## Phase 2: Held-Out Accuracy Audit
+## Phase 2: Wire Direct Single-Phase Physics Into Viability
 
-Purpose: score the configured 16-output MLP against direct single-phase truth.
+Purpose: make the viability evaluator able to run the long-horizon model without
+the internal MLP, using the already-merged direct physics allocator.
+
+Target contract:
+
+```yaml
+model:
+  phase_backend: brain   # current default, uses brain_path
+  # or
+  phase_backend: physics # uses run_phase_simulation inside each phase
+  simulation:
+    phase_length_days: 120
+    allocation_noise: 0.0
+    upgrade_sortie_fraction: null
+```
+
+Tasks:
+
+1. Add an explicit `model.phase_backend` config field with accepted values
+   `brain` and `physics`.
+2. Preserve the current `brain` behavior as the default for existing configs.
+3. Add a `physics` branch in `src/viability/evaluator.py`:
+   - do not load `brain_path`
+   - instantiate `CAFSimulation(..., brain=None, use_physics_allocator=True)`
+   - pass an explicit `SimulationConfig`
+   - keep the same policy levers, requirements, constraint scales, and output
+     row schema used by the current evaluator
+4. Record the backend in every evaluation row and dashboard direct result.
+5. Update validation so `expected_brain_outputs >= 16` is required only for
+   `phase_backend: brain`.
+6. Add focused tests:
+   - physics backend does not require a brain artifact
+   - brain backend still rejects stale 12-output or missing artifacts
+   - both backends produce the required trajectory and constraint columns
+   - `SimulationConfig` values are propagated to `CAFSimulation`
+7. Update dashboard labels:
+   - "Direct long-horizon verification (brain backend)" when using the MLP
+   - "Direct long-horizon verification (physics backend)" when using direct
+     single-phase physics
+   - never imply that a brain-backed direct run is direct single-phase truth
+
+Deliverable:
+
+```text
+src/viability/evaluator.py
+src/viability/config.py
+configs/viability.example.yaml
+tests/test_viability_evaluator_smoke.py
+tests/test_viability_config.py
+viability_dashboard.py
+```
+
+Acceptance criteria:
+
+- A small physics-backed viability evaluation runs without any MLP artifact.
+- Existing brain-backed viability configs keep working.
+- Evaluation artifacts identify the phase backend used.
+- The dashboard cannot confuse outer-surrogate bypass with internal-MLP bypass.
+
+## Phase 3: Brain-vs-Physics Held-Out Accuracy Audit
+
+Purpose: score the configured 16-output MLP against direct single-phase truth so
+we know whether it is suitable for fast screening or only for historical
+comparison.
 
 Preferred data source:
 
@@ -201,9 +319,9 @@ Acceptance criteria:
 - The audit explicitly identifies whether the current MLP is acceptable,
   questionable, or unacceptable for viability work.
 
-## Phase 3: Long-Horizon Sensitivity Check
+## Phase 4: Long-Horizon Backend Sensitivity Check
 
-Purpose: determine whether plausible internal-surrogate errors matter for the
+Purpose: determine whether MLP-vs-physics backend differences matter for the
 outer feasibility conclusions.
 
 Tasks:
@@ -213,36 +331,42 @@ Tasks:
    - near-boundary policies
    - best surrogate-screened candidate policies
    - any verified feasible candidates, if available
-2. For each policy, inspect the phase-level feature rows generated during the
-   long-horizon rollout.
-3. Compare those feature rows to the single-phase training/holdout feature
+2. Run each policy with the brain backend and the physics backend.
+3. Compare raw metrics, normalized constraints, `phi`, active constraint, and
+   feasible/infeasible status.
+4. For brain-backed runs, inspect the phase-level feature rows generated during
+   the long-horizon rollout.
+5. Compare those feature rows to the single-phase training/holdout feature
    distribution.
-4. Flag extrapolation or low-density regions.
-5. Summarize which internal outputs dominate downstream feasibility outcomes.
+6. Flag extrapolation or low-density regions.
+7. Summarize which internal outputs dominate downstream feasibility outcomes.
 
 Deliverable:
 
 ```text
 outputs/single_phase/audit/long_horizon_feature_coverage.csv
 outputs/single_phase/audit/long_horizon_sensitivity_summary.md
+outputs/viability/internal_backend_comparison/comparison_metrics.csv
+outputs/viability/internal_backend_comparison/summary.md
 ```
 
 Acceptance criteria:
 
 - We know whether long-horizon feasibility search is operating inside the
-  single-phase surrogate's training domain.
-- Near-boundary viability conclusions are labeled with the relevant internal
-  surrogate risk.
+  single-phase surrogate's training domain when the brain backend is used.
+- We know whether near-boundary feasibility conclusions are stable when rerun
+  with the physics backend.
+- Dashboard and report caveats label the relevant backend risk.
 
-## Phase 4: Retrain If Needed
+## Phase 5: Retrain If Needed
 
-Trigger this phase if the MLP audit shows unacceptable errors, unstable boundary
-behavior, or poor coverage in the regions used by long-horizon feasibility
-search.
+Trigger this phase only if the MLP remains necessary for fast screening and the
+audit shows unacceptable errors, unstable boundary behavior, or poor coverage in
+the regions used by long-horizon feasibility search.
 
 Training data plan:
 
-1. Preserve the fixed holdout from Phase 2.
+1. Preserve the fixed holdout from Phase 3.
 2. Build a new Sobol training set from direct single-phase evaluations.
 3. Oversample or actively sample regimes that matter downstream:
    - low `exp_ratio`
@@ -256,16 +380,21 @@ Training data plan:
 
 Candidate model families:
 
-Start simple:
+Primary replacement path:
+
+```text
+Gaussian process regression with ARD length scales
+matched Sobol train/holdout splits
+kernel sweep over Matern nu = 0.5, 1.5, 2.5 and RBF
+shared, grouped, and optional per-target output groupings
+active-learning batches selected from a larger Sobol candidate pool
+```
+
+Fallback comparators if exact GPR becomes too slow or unstable:
 
 ```text
 per-output gradient boosted trees or random forests
-```
-
-Keep MLP as a baseline:
-
-```text
-current multi-output MLP architecture
+current multi-output MLP architecture as a baseline only
 ```
 
 Do not assume the MLP is the best production choice. The replacement should be
@@ -288,65 +417,120 @@ Acceptance criteria:
 - The viability config can point to the replacement artifact without changing
   long-horizon model code.
 
-## Phase 5: Viability Recheck With The Selected Internal Surrogate
+Current execution status on 2026-06-14:
 
-Purpose: quantify whether changing the internal phase surrogate changes the
-outer feasibility story.
+- `scripts/audit_single_phase_surrogate.py` showed the configured 16-output MLP
+  is not acceptable for policy claims: all-target R2 was about 0.595 and the
+  sortie-rate group was about 0.244 on the Sobol audit.
+- A 1024 train / 1024 holdout kernel sweep in
+  `outputs/single_phase/kernel_sweep/n1024_20260614/` compared shared and
+  grouped ARD GPRs with Matern `nu = 0.5, 1.5, 2.5` and RBF kernels.
+- The best sweep result by threshold-gap ranking was
+  `shared_ard + matern_nu2p5_ard`; it did not pass quality gates at 1024
+  training rows, but it was the best candidate for larger active learning.
+- `scripts/active_learn_single_phase_surrogate.py` then ran a 2048-point fixed
+  holdout, 2048 initial Sobol training points, and four 512-point active
+  batches using the selected kernel with fixed optimized hyperparameters.
+- The final 4096-row candidate passes the current group gates:
+
+```text
+artifact:
+  outputs/single_phase/active_learning/shared_matern_nu2p5_fixed_n4096_20260614/final/single_phase_gpr_bundle.joblib
+holdout:
+  outputs/single_phase/active_learning/shared_matern_nu2p5_fixed_n4096_20260614/holdout_truth.csv
+metrics:
+  all_targets_r2       = 0.9327
+  sortie_rates_r2      = 0.8809
+  blue_sortie_rates_r2 = 0.9067
+  sim_rates_r2         = 0.9491
+  deferrals_r2         = 0.8440
+```
+
+Recommendation:
+
+- Treat the 4096-row shared ARD Matern `nu=2.5` GPR as the current fast
+  single-phase surrogate candidate.
+- Keep direct single-phase physics as the source of truth for final
+  long-horizon policy claims.
+- Do not claim every individual sparse output is solved. Some near-zero MQT
+  sim/deferral targets still have weak individual R2, so downstream validation
+  should focus on whether those sparse-output errors change policy feasibility.
+
+## Phase 6: Viability Recheck With The Selected Phase Backend
+
+Purpose: quantify whether changing the phase backend changes the outer
+feasibility story.
 
 Tasks:
 
 1. Run a small fixed set of long-horizon policy evaluations with:
-   - current configured MLP
-   - replacement internal surrogate, if trained
+   - brain backend with the current configured MLP
+   - direct physics backend
+   - replacement internal surrogate, if trained and still needed
 2. Compare raw metrics, constraint margins, `phi`, feasibility labels, and active
    constraints.
 3. Refit or reload the outer signed-RAP viability surrogate only after selecting
-   the internal surrogate.
+   the backend used for broad search.
 4. Re-run candidate search and direct verification with the selected internal
-   surrogate.
+   backend.
 
 Deliverable:
 
 ```text
-outputs/viability/internal_surrogate_comparison/comparison_metrics.csv
-outputs/viability/internal_surrogate_comparison/summary.md
+outputs/viability/internal_backend_comparison/comparison_metrics.csv
+outputs/viability/internal_backend_comparison/summary.md
 ```
 
 Acceptance criteria:
 
-- We can state whether the feasibility envelope is robust to the internal
-  surrogate choice.
-- If the old and new internal surrogates disagree near the feasibility boundary,
-  direct single-phase validation becomes a required caveat for any claimed
-  feasible region.
+- We can state whether the feasibility envelope is robust to the phase backend
+  choice.
+- If the brain and physics backends disagree near the feasibility boundary,
+  physics-backed validation becomes a required caveat for any claimed feasible
+  region.
 
 ## Guardrails
 
 - Do not use the 12-output legacy artifact for viability evaluation.
+- Do not call a brain-backed long-horizon run "direct single-phase" or "physics
+  verified"; it is only direct with respect to the outer viability surrogate.
+- Do not make the dashboard's live signed-RAP surrogate status look equivalent
+  to direct long-horizon verification.
 - Do not overwrite existing surrogate artifacts. Write replacements to a new
   short, explicit directory.
 - Keep the fixed holdout read-only once created.
 - Keep generated audit outputs out of git unless explicitly requested.
 - Avoid hidden defaults in any new audit/retraining commands.
+- Keep `phase_backend`, `brain_path`, and `SimulationConfig` values explicit in
+  resolved configs and evaluation metadata.
 - Prefer short artifact directories:
 
 ```text
 outputs/single_phase/audit
 outputs/single_phase/retrain
-outputs/viability/internal_surrogate_comparison
+outputs/viability/internal_backend_comparison
 ```
 
 ## Suggested Implementation Order
 
-1. Add a read-only audit command or script for artifact interface/provenance.
-2. Add a holdout scoring command for the configured 16-output MLP.
-3. Generate or locate a fixed single-phase holdout.
-4. Produce metrics and plots for the current MLP.
-5. Decide whether retraining is needed.
-6. If needed, train replacement candidates and compare on the fixed holdout.
-7. Point viability config at the selected internal surrogate.
-8. Re-run the outer viability surrogate/search verification path.
-9. Perform a cleanup pass:
+1. Add `model.phase_backend` and `model.simulation` config support.
+2. Wire `phase_backend: physics` into `src/viability/evaluator.py`.
+3. Update dashboard labels and direct-result metadata so backend state is
+   visible.
+4. Add tests proving physics-backed viability evaluation runs without a brain
+   artifact and brain-backed evaluation still validates the 16-output contract.
+5. Run a tiny fixed policy set through both backends and compare outputs.
+6. Add a read-only audit command or script for MLP artifact
+   interface/provenance.
+7. Add a holdout scoring command for the configured 16-output MLP.
+8. Generate or locate a fixed single-phase holdout.
+9. Produce metrics and plots for the current MLP.
+10. Decide whether the MLP is useful for fast screening or should be retired from
+    policy claims.
+11. If needed, train replacement candidates and compare on the fixed holdout.
+12. Point viability config at the selected backend/artifact.
+13. Re-run the outer viability surrogate/search verification path.
+14. Perform a cleanup pass:
    - simplify names
    - delete duplicate helper paths
    - remove unused knobs
@@ -358,11 +542,25 @@ outputs/viability/internal_surrogate_comparison
 At the end of Phase 2, make a deliberate call:
 
 ```text
-Current 16-output MLP is good enough:
-    Continue viability search with the configured artifact.
+Physics backend is usable:
+    Treat physics-backed long-horizon evaluation as the authoritative direct
+    verification path. Keep the MLP only for fast screening if later audits
+    justify it.
 
-Current 16-output MLP is not good enough:
-    Train and select a replacement single-phase surrogate before trusting
-    outer feasibility results.
+Physics backend is not yet usable:
+    Keep the 16-output MLP-backed path temporarily, but do not claim direct
+    single-phase validation until the physics blocker is resolved.
 ```
 
+At the end of Phase 3, make a second deliberate call:
+
+```text
+Current 16-output MLP is good enough for screening:
+    Use it only as a fast guide, with physics-backed direct checks for final
+    candidates and near-boundary claims.
+
+Current 16-output MLP is not good enough:
+    Do not retrain by default. First decide whether the physics backend can
+    simply replace the brain for policy claims. Retrain only if runtime makes a
+    fast surrogate necessary.
+```
