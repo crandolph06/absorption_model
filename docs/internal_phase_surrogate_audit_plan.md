@@ -547,6 +547,96 @@ Remaining PR-prep recommendations:
    near the best miss or a requirement-relaxation study for WG RAP, FL RAP, and
    total-pilot-window constraints.
 
+## Comprehensive Analysis Closeout Plan
+
+Current execution status on 2026-06-15:
+
+- The branch engineering slice is complete, but the analysis campaign is not.
+- Do not run the old brain-vs-physics long-horizon comparison in this closeout.
+  The configured MLP was already shown to be inadequate for policy claims, and
+  physics-backed direct evaluation is now the authority.
+- The technical note must explain why the MLP was retired from policy claims:
+  `scripts/audit_single_phase_surrogate.py` found all-target R2 about `0.595`
+  and sortie-rate-group R2 about `0.244` for the configured 16-output MLP.
+- The later 4096-row shared ARD Matern `nu=2.5` GPR is a better fast
+  single-phase surrogate candidate, but direct physics remains the source of
+  truth for final long-horizon feasibility claims.
+
+Execution checklist:
+
+1. [x] Update this audit plan with the comprehensive closeout plan.
+2. [x] Add a dynamic refinement workflow that reuses previous direct
+   evaluations, seeds around nearest misses, uses diagnostic-informed
+   perturbations, scores a local Sobol pool with a GPR LCB, and direct-verifies
+   top candidates.
+3. [x] Generalize named heuristic seeds so 5-epoch and 10-epoch open-loop
+   searches have readable, bounded seed schedules.
+4. [x] Add a requirement-relaxation study command/helper over direct dynamic
+   evaluation tables.
+5. [x] Update `docs/viability_dynamic_policy_technical_note.tex` and PDF with
+   the MLP retirement rationale and final analysis results.
+6. [x] Polish `viability_dashboard.py` so dynamic results are the default
+   workflow, artifact paths are collapsed, relaxation artifacts are first-class,
+   and legacy static sliders are visibly secondary.
+7. [x] Run 3-epoch targeted refinement:
+
+```bash
+venv/bin/python -m src.viability.cli dynamic-refine \
+  --config outputs/viability/dynamic_policy_search/config_physics.yaml \
+  --previous-evaluations outputs/viability/dynamic_policy_search/run_3epoch_512_32768_096/all_evaluations.parquet \
+  --diagnostic-sensitivity outputs/viability/dynamic_policy_search/run_3epoch_512_32768_096/diagnostic/local_sensitivity.csv \
+  --output-dir outputs/viability/dynamic_policy_search/run_3epoch_refine_2048_131072_256 \
+  --epochs 3 \
+  --local-samples 2048 \
+  --optimizer-pool-size 131072 \
+  --verify-top 256 \
+  --workers 8 \
+  --checkpoint-every 25
+```
+
+   Result: 256 new direct physics evaluations; no feasible policy; best
+   $\phi=5.83075$ at `refine_0008`.
+
+8. [x] Run 5-epoch open-loop search:
+
+```bash
+venv/bin/python -m src.viability.cli dynamic-search \
+  --config outputs/viability/dynamic_policy_search/config_physics.yaml \
+  --output-dir outputs/viability/dynamic_policy_search/run_5epoch_1024_131072_256 \
+  --epochs 5 \
+  --initial-samples 1024 \
+  --optimizer-pool-size 131072 \
+  --verify-top 256 \
+  --workers 8 \
+  --checkpoint-every 25
+```
+
+   Result: 1287 direct physics evaluations; no feasible policy; best
+   $\phi=6.00173$, matching the original static near miss and not improving
+   on the 3-epoch refinement.
+
+9. [x] Evaluate the conditional 10-epoch search decision. It was skipped
+   because the 5-epoch search did not improve best phi and did not change the
+   binding tradeoff story: WG RAP, FL RAP, and the total-pilot window remain
+   the observed conflict.
+10. [x] Generate the requirement-relaxation study under
+    `outputs/viability/dynamic_policy_search/relaxation_study_v1/`.
+    Result: 2158 direct physics evaluations combined; no feasible policy;
+    minimum observed L-infinity normalized relaxation is 5.83075 at
+    `refine_0008`.
+11. [x] Run unit tests, compile checks, TeX compile, dashboard smoke test, and
+    `git diff --check`.
+12. [x] Commit locally. Do not push.
+
+Closeout acceptance criteria:
+
+- Either a direct-feasible policy is found, or the report gives a defensible
+  nearest-miss/relaxation analysis over the expanded structured open-loop
+  search.
+- The report distinguishes observed-search evidence from proof of mathematical
+  infeasibility.
+- Generated outputs remain ignored under `outputs/viability/...`.
+
 Closeout validation on 2026-06-15:
 
 ```bash
@@ -566,15 +656,21 @@ venv/bin/python -m compileall src/viability viability_dashboard.py
 git diff --check
 ```
 
-Result:
+Current closeout result:
 
-- 69 viability tests passed.
-- Compile check passed.
-- Whitespace check passed.
+- 66 viability tests passed with the command above.
+- `venv/bin/python -m compileall src/viability viability_dashboard.py` passed.
+- TeX compiled with
+  `python3 /Users/tylerkb/.codex/plugins/cache/openai-bundled/latex/0.2.2/scripts/compile_latex.py`
+  and the resulting PDF was copied next to the `.tex`.
+- `git diff --check` passed.
 - Streamlit smoke test loaded the dynamic dashboard on
-  `http://localhost:8502` against the current direct-physics artifact bundle
-  and reported no browser console errors. The local server was stopped after the
-  check.
+  `http://localhost:8502` against the refined direct-physics bundle and
+  relaxation artifacts. The page rendered `Viability Results Dashboard`, best
+  phi metrics, and relaxation metrics with no app traceback. The browser console
+  captured transient Streamlit health-check messages, while the server health
+  endpoint returned HTTP 200 from outside the sandbox. The local server was
+  stopped after the check.
 
 ## Near-Term Execution Checklist
 
@@ -584,13 +680,15 @@ Result:
    2026-06-14.
 2. Find feasible policies under the selected authoritative backend so the next
    comparison uses policy points that matter operationally, not just inherited
-   static-policy candidates. A 615-evaluation direct-physics 3-epoch dynamic
-   search has found no feasible point so far; continue with targeted dynamic
-   refinement or requirement-relaxation analysis rather than returning to stale
-   MLP-backed outputs.
-3. Add a small brain-vs-physics long-horizon comparison on known feasible,
-   infeasible, and near-boundary policies. Use this to determine whether the
-   MLP or GPR backend changes feasibility labels.
+   static-policy candidates. The current closeout campaign covers 2158 unique
+   direct-physics dynamic evaluations across three- and five-epoch structured
+   open-loop schedules, with no feasible point found so far. Use the
+   requirement-relaxation analysis rather than returning to stale MLP-backed
+   outputs.
+3. Omit the earlier brain-vs-physics long-horizon comparison for this branch
+   closeout. The MLP audit already showed the configured model is not accurate
+   enough for policy claims, and physics-backed direct evaluation is now the
+   source of truth.
 4. Add a loader/adapter for the new GPR bundle if it should replace the current
    `.predict()` MLP brain for fast screening.
 5. Relax the long-term policy representation so the single-phase backend remains

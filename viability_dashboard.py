@@ -65,6 +65,7 @@ def _load_dynamic_artifacts(
     summary: str,
     sensitivity: str,
     report: str,
+    relaxation_dir: str,
 ):
     return load_dynamic_dashboard_artifacts(
         DynamicDashboardArtifactPaths(
@@ -73,12 +74,14 @@ def _load_dynamic_artifacts(
             summary=Path(summary),
             sensitivity=Path(sensitivity) if sensitivity else None,
             report=Path(report) if report else None,
+            relaxation_dir=Path(relaxation_dir) if relaxation_dir else None,
         )
     )
 
 
-def _path_input(label: str, path: Path) -> str:
-    return st.sidebar.text_input(label, value=str(path))
+def _path_input(label: str, path: Path | None, *, container=None) -> str:
+    target = st.sidebar if container is None else container
+    return target.text_input(label, value="" if path is None else str(path))
 
 
 def _current_policy_key(row: pd.Series) -> str:
@@ -319,12 +322,28 @@ def _display_columns(frame: pd.DataFrame, columns: list[str]) -> list[str]:
 
 def _render_dynamic_dashboard():
     defaults = default_dynamic_artifact_paths()
-    st.sidebar.header("Dynamic Search Artifacts")
-    config_path = _path_input("Config", defaults.config)
-    evaluations_path = _path_input("Dynamic evaluations", defaults.evaluations)
-    summary_path = _path_input("Dynamic search summary", defaults.summary)
-    sensitivity_path = _path_input("Local sensitivity", defaults.sensitivity or Path(""))
-    report_path = _path_input("Dynamic report", defaults.report or Path(""))
+    with st.sidebar.expander("Dynamic artifacts", expanded=False) as artifact_box:
+        config_path = _path_input("Config", defaults.config, container=artifact_box)
+        evaluations_path = _path_input("Dynamic evaluations", defaults.evaluations, container=artifact_box)
+        summary_path = _path_input("Dynamic search summary", defaults.summary, container=artifact_box)
+        sensitivity_default = (
+            defaults.sensitivity
+            if defaults.sensitivity is not None and defaults.sensitivity.exists()
+            else None
+        )
+        report_default = (
+            defaults.report
+            if defaults.report is not None and defaults.report.exists()
+            else None
+        )
+        relaxation_default = (
+            defaults.relaxation_dir
+            if defaults.relaxation_dir is not None and defaults.relaxation_dir.exists()
+            else None
+        )
+        sensitivity_path = _path_input("Local sensitivity", sensitivity_default, container=artifact_box)
+        report_path = _path_input("Dynamic report", report_default, container=artifact_box)
+        relaxation_dir = _path_input("Relaxation study directory", relaxation_default, container=artifact_box)
 
     try:
         artifacts = _load_dynamic_artifacts(
@@ -333,6 +352,7 @@ def _render_dynamic_dashboard():
             summary_path,
             sensitivity_path,
             report_path,
+            relaxation_dir,
         )
     except Exception as exc:
         st.error(str(exc))
@@ -351,12 +371,18 @@ def _render_dynamic_dashboard():
         f"{direct_verification_label(config)}."
     )
 
-    metric_cols = st.columns(5)
+    metric_cols = st.columns(6)
     metric_cols[0].metric("Backend", str(summary.get("phase_backend") or config.model.phase_backend))
     metric_cols[1].metric("Evaluations", _format_optional_metric(summary.get("evaluated_count", len(evaluations))))
     metric_cols[2].metric("Feasible", str(feasible_count))
     metric_cols[3].metric("Best phi", _format_optional_metric(summary.get("best_phi")))
     metric_cols[4].metric("Active constraint", str(summary.get("best_active_constraint", "n/a")))
+    best_linf = (
+        None
+        if artifacts.relaxation_summary is None
+        else artifacts.relaxation_summary.get("best_linf_relaxation")
+    )
+    metric_cols[5].metric("Min relaxation", _format_optional_metric(best_linf))
 
     if feasible_count > 0:
         st.success("At least one direct-verified dynamic policy was found.")
@@ -428,6 +454,18 @@ def _render_dynamic_dashboard():
             st.write("Smallest direct requirement relaxations needed at the selected point:")
             st.dataframe(relaxations, width="stretch", hide_index=True)
 
+        active_counts = summary.get("active_constraint_counts")
+        if not active_counts:
+            active_counts = ok["active_constraint"].value_counts(dropna=False).to_dict()
+        active_frame = pd.DataFrame(
+            [
+                {"active_constraint": str(name), "count": int(count)}
+                for name, count in active_counts.items()
+            ]
+        ).sort_values("count", ascending=False)
+        st.write("Active constraint distribution")
+        st.dataframe(active_frame, width="stretch", hide_index=True)
+
         display = nearest_dynamic_misses(evaluations, top_n=15)
         display_columns = _display_columns(
             display,
@@ -447,8 +485,14 @@ def _render_dynamic_dashboard():
         )
         st.dataframe(display[display_columns], width="stretch", hide_index=True)
 
-    trajectory_tab, authority_tab, report_tab, artifact_tab = st.tabs(
-        ["Direct Trajectory", "Control Authority", "Report", "Artifacts"]
+    trajectory_tab, relaxation_tab, authority_tab, candidate_tab, artifact_tab = st.tabs(
+        [
+            "Trajectories",
+            "Pareto / Relaxation",
+            "Control Authority",
+            "Candidates",
+            "Raw Artifacts",
+        ]
     )
 
     direct_result = st.session_state.get("viability_dynamic_direct_result")
@@ -486,6 +530,24 @@ def _render_dynamic_dashboard():
                 width="stretch",
             )
 
+    with relaxation_tab:
+        if artifacts.relaxation_summary is None:
+            st.write("No requirement-relaxation study artifact was supplied.")
+        else:
+            st.json(artifacts.relaxation_summary)
+            if artifacts.relaxation_nearest is not None:
+                st.subheader("Nearest Under Relaxation")
+                st.dataframe(artifacts.relaxation_nearest, width="stretch", hide_index=True)
+            if artifacts.relaxation_sets is not None:
+                st.subheader("Constraint Set Minima")
+                st.dataframe(artifacts.relaxation_sets, width="stretch", hide_index=True)
+            if artifacts.relaxation_pareto is not None:
+                st.subheader("Pareto Frontier")
+                st.dataframe(artifacts.relaxation_pareto, width="stretch", hide_index=True)
+            if artifacts.relaxation_report:
+                st.subheader("Study Report")
+                st.markdown(artifacts.relaxation_report)
+
     with authority_tab:
         if artifacts.sensitivity is None:
             st.write("No local finite-difference diagnostic artifact was supplied.")
@@ -499,13 +561,14 @@ def _render_dynamic_dashboard():
             ].sort_values("abs_sensitivity", ascending=False)
             st.dataframe(subset.head(20), width="stretch", hide_index=True)
 
-    with report_tab:
-        if artifacts.paths.report and artifacts.paths.report.exists():
-            st.markdown(artifacts.paths.report.read_text(encoding="utf-8"))
-        else:
-            st.write("No dynamic report artifact was supplied.")
+    with candidate_tab:
+        candidate_display = nearest_dynamic_misses(evaluations, top_n=min(250, len(evaluations)))
+        st.dataframe(candidate_display, width="stretch", hide_index=True)
 
     with artifact_tab:
+        if artifacts.paths.report and artifacts.paths.report.exists():
+            st.subheader("Dynamic Control Report")
+            st.markdown(artifacts.paths.report.read_text(encoding="utf-8"))
         st.write("Dynamic search summary")
         st.json(summary)
         st.write("Artifact paths")
@@ -515,10 +578,10 @@ def _render_dynamic_dashboard():
 st.sidebar.header("Dashboard Mode")
 dashboard_mode = st.sidebar.radio(
     "Mode",
-    ["dynamic", "static"],
+    ["dynamic", "static_legacy"],
     format_func=lambda value: {
         "dynamic": "Dynamic search results",
-        "static": "Static policy sliders",
+        "static_legacy": "Legacy static sliders",
     }[value],
 )
 
@@ -527,19 +590,28 @@ if dashboard_mode == "dynamic":
     st.stop()
 
 defaults = default_artifact_paths()
-st.sidebar.header("Static Slider Artifacts")
-config_path = _path_input("Config", defaults.config)
-surrogate_path = _path_input("Signed surrogate", defaults.surrogate)
-evaluations_path = _path_input("Direct evaluations", defaults.evaluations)
-verified_path = _path_input("Verified candidates", defaults.verified_candidates)
-search_summary_path = _path_input("Search summary", defaults.search_summary)
-verification_summary_path = _path_input(
-    "Verification summary",
-    defaults.verification_summary,
+st.warning(
+    "Legacy static sliders use the old constant-policy signed surrogate. "
+    "They are screening guidance only and are not the default workflow for this branch."
 )
-envelope_summary_path = _path_input("Envelope summary", defaults.envelope_summary)
-report_path = _path_input("Report", defaults.report or Path(""))
-sweep_points = st.sidebar.slider("Slider sweep points", 25, 201, 121, 8)
+with st.sidebar.expander("Legacy static artifacts", expanded=False) as static_artifact_box:
+    config_path = _path_input("Config", defaults.config, container=static_artifact_box)
+    surrogate_path = _path_input("Signed surrogate", defaults.surrogate, container=static_artifact_box)
+    evaluations_path = _path_input("Direct evaluations", defaults.evaluations, container=static_artifact_box)
+    verified_path = _path_input("Verified candidates", defaults.verified_candidates, container=static_artifact_box)
+    search_summary_path = _path_input("Search summary", defaults.search_summary, container=static_artifact_box)
+    verification_summary_path = _path_input(
+        "Verification summary",
+        defaults.verification_summary,
+        container=static_artifact_box,
+    )
+    envelope_summary_path = _path_input(
+        "Envelope summary",
+        defaults.envelope_summary,
+        container=static_artifact_box,
+    )
+    report_path = _path_input("Report", defaults.report, container=static_artifact_box)
+sweep_points = st.sidebar.slider("Legacy slider sweep points", 25, 201, 121, 8)
 
 try:
     artifacts = _load_artifacts(

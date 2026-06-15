@@ -38,14 +38,14 @@ casts dynamic policy design as a finite-horizon nonlinear optimal control
 problem. The implemented policy class uses three open-loop epochs. Each epoch
 sets seven controls: annual intake, retention, UTE, PAA, maximum manning, FLUG
 quota, and IPUG quota. A Gaussian-process model is used only to propose
-candidates; every reported result is checked with direct physics. The primary
-run evaluated 615 three-epoch policies over a 60-phase horizon. No feasible
-policy was found. The best policy had $\phi=6.00173$ and required simultaneous
-relaxation of the total-pilot window, WG RAP, and FL RAP constraints. A local
-finite-difference diagnostic shows that the binding constraints respond to
-different controls, and in some cases move in opposing directions. The result
-does not prove global infeasibility, but it gives a concrete nearest miss and a
-defensible basis for the next search or requirements trade.
+candidates; every reported result is checked with direct physics. The closeout
+campaign evaluated 2158 unique three- and five-epoch direct-physics schedules
+over a 60-phase horizon. No feasible policy was found. The best policy had
+$\phi=5.83075$ and required simultaneous relaxation of the total-pilot window,
+WG RAP, and FL RAP constraints. A local finite-difference diagnostic shows that
+the binding constraints respond to different controls, and in some cases move in
+opposing directions. The result does not prove global infeasibility, but it gives
+a concrete nearest miss and a defensible basis for requirements trade studies.
 \end{abstract}
 
 \section*{Nomenclature}
@@ -86,6 +86,22 @@ long-horizon viability run bypasses the outer feasibility surrogate and runs
 also bypasses the internal MLP phase surrogate and calls the single-phase
 physics allocator inside each simulated phase. The runs reported here use
 \texttt{model.phase\_backend: physics}.
+
+\subsection{Why the Internal MLP Is Not Authoritative}
+
+The pretrained internal phase MLP was audited before this dynamic-policy work
+was started. On the configured 16-output target set, a Sobol holdout audit gave
+an all-target $R^2$ of about 0.595. The sortie-rate group, which is central to
+the RAP constraints, was worse: its $R^2$ was about 0.244. That level of error
+is acceptable for historical context and debugging, but it is not acceptable
+for final policy claims.
+
+The follow-on surrogate work improved the screening model substantially. A
+4096-row shared ARD Matern $\nu=2.5$ GPR reached holdout $R^2$ values of about
+0.933 over all targets, 0.881 over sortie rates, and 0.949 over simulator-rate
+targets. Those results made the GPR useful for candidate generation. They did
+not change the decision rule: final feasibility claims in this branch require
+direct physics.
 
 The performance work changed the search strategy. Early direct
 physics runs were slow enough to make broad search prohibitively expensive. After
@@ -150,10 +166,17 @@ boundary. The main changes are:
   \texttt{EpochPolicySchedule} objects by applying the active epoch policy
   before each simulator phase.
   \item \texttt{src/viability/dynamic\_search.py}: adds Sobol initialization,
-  structured heuristic seeds, GPR fitting, surrogate-guided candidate proposal,
-  direct physics verification, and local finite-difference diagnostics.
+  interpolated structured heuristic seeds, GPR fitting, surrogate-guided
+  candidate proposal, direct physics verification, targeted refinement, and
+  local finite-difference diagnostics.
+  \item \texttt{src/viability/relaxation.py}: adds observed-search relaxation
+  summaries, Pareto-front extraction, and constraint-set relaxation tables.
   \item \texttt{src/viability/cli.py}: adds \texttt{dynamic-search} and
-  \texttt{dynamic-diagnose} commands.
+  \texttt{dynamic-diagnose} commands, plus \texttt{dynamic-refine} and
+  \texttt{dynamic-relaxation-study} for closeout analysis.
+  \item \texttt{viability\_dashboard.py}: defaults to dynamic search results,
+  exposes relaxation artifacts, and keeps legacy constant-policy sliders as a
+  secondary mode.
   \item \texttt{tests/test\_viability\_dynamic\_policy.py} and
   \texttt{tests/test\_viability\_dynamic\_search.py}: cover epoch mapping,
   integer rounding, dynamic simulation policy application, artifact contracts,
@@ -165,9 +188,9 @@ generated result files are tracked.
 
 \section{Search Procedure}
 
-The primary search used the physics-backed configuration in
+The search used the physics-backed configuration in
 \path{outputs/viability/dynamic_policy_search/config_physics.yaml}. The
-procedure was:
+initial three-epoch procedure was:
 \begin{enumerate}
   \item Generate three-epoch schedules from structured heuristic seeds and a
   Sobol initial design.
@@ -182,47 +205,60 @@ procedure was:
   schedule.
 \end{enumerate}
 
-The primary run evaluated 519 initial schedules and 96 optimizer-proposed
-schedules, for 615 direct physics evaluations total.
+That run evaluated 519 initial schedules and 96 optimizer-proposed schedules,
+for 615 direct physics evaluations. Closeout then added two analysis passes:
+\begin{itemize}
+  \item a three-epoch targeted refinement around the nearest misses, with 2048
+  local Sobol perturbations, a 131072-point GPR-screened pool, and 256 new
+  direct checks;
+  \item a five-epoch open-loop search with interpolated named heuristic seeds,
+  1024 Sobol initial samples, a 131072-point GPR-screened pool, and 256
+  optimizer checks.
+\end{itemize}
+
+The five-epoch search did not improve the best $\phi$ or change the binding
+tradeoff story, so the conditional 10-epoch search was not run in this branch.
 
 \section{Results}
 
-No feasible policy was found in the tested three-epoch policy class. Table
+No feasible policy was found in the tested structured open-loop policy classes.
+Table
 \ref{tab:search-summary} gives the run summary.
 
 \begin{table}[htbp]
 \centering
-\caption{Primary dynamic-policy search summary.}
+\caption{Dynamic-policy closeout search summary.}
 \label{tab:search-summary}
 \begin{tabular}{lr}
 \toprule
 Quantity & Value \\
 \midrule
-Epoch count & 3 \\
+Epoch counts tested & 3 and 5 \\
 Total simulation phases & 60 \\
-Initial direct evaluations & 519 \\
-Optimizer direct evaluations & 96 \\
-Total direct evaluations & 615 \\
+Original three-epoch direct evaluations & 615 \\
+Three-epoch refinement direct evaluations & 256 \\
+Five-epoch direct evaluations & 1287 \\
+Unique closeout direct evaluations & 2158 \\
 Feasible policies found & 0 \\
-Best $\phi$ & 6.00173 \\
+Best $\phi$ & 5.83075 \\
 Best active constraint & WG RAP \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The best observed schedule was constant across all three epochs:
+The best observed schedule was a three-epoch refined policy:
 \begin{center}
-\begin{tabular}{lr}
+\begin{tabular}{lrrr}
 \toprule
-Control & Value \\
+Control & Epoch 1 & Epoch 2 & Epoch 3 \\
 \midrule
-Annual intake & 150 \\
-Retention rate & 0.55 \\
-UTE & 20.0 \\
-PAA & 30 \\
-Maximum manning percentage & 180.0 \\
-FLUG quota per phase & 2 \\
-IPUG quota per phase & 0 \\
+Annual intake & 147 & 144 & 122 \\
+Retention rate & 0.5774 & 0.5696 & 0.5468 \\
+UTE & 20.0 & 20.0 & 19.4119 \\
+PAA & 30 & 30 & 30 \\
+Maximum manning percentage & 170.324 & 176.677 & 182.110 \\
+FLUG quota per phase & 2 & 2 & 3 \\
+IPUG quota per phase & 0 & 0 & 0 \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -240,20 +276,26 @@ violations at this nearest miss.
 \toprule
 Constraint & Positive violation \\
 \midrule
-Total-pilot window & 456 pilots \\
-WG RAP shortfall & 6.00173 \\
-FL RAP shortfall & 2.86928 \\
+Total-pilot window & 533 pilots \\
+WG RAP shortfall & 5.83075 \\
+FL RAP shortfall & 2.94844 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The active constraint distribution over all direct evaluations was 325 FL RAP,
-173 WG RAP, and 117 total-pilot window. The minimum observed value of each core
+The active constraint distribution over unique closeout direct evaluations was
+1128 FL RAP, 731 WG RAP, and 299 total-pilot window. The minimum observed value
+of each core
 constraint was negative somewhere in the run: $-2331$ for the total-pilot
 window, $-0.9335$ for WG RAP, $-0.8856$ for FL RAP, and $-9.8083$ for IP RAP.
 Thus, the search did find policies that satisfied each core constraint in
 isolation. It did not find a policy that satisfied the inventory window, WG RAP,
 and FL RAP constraints at the same time.
+
+The observed relaxation study reached the same nearest miss. The minimum
+L-infinity normalized relaxation over total-pilot window, WG RAP, FL RAP, and
+IP RAP was 5.83075 at schedule \texttt{refine\_0008}. This is evidence from the
+executed search, not a proof that no feasible policy exists.
 
 \section{Local Control Authority Diagnostic}
 
@@ -275,28 +317,31 @@ the corresponding violation locally.
 \toprule
 Response & Highest-authority control & Sensitivity \\
 \midrule
-$\phi$ & Epoch 3 retention rate & -1.778 \\
-Total-pilot window & Epoch 2 retention rate & 90.91 \\
-WG RAP & Epoch 3 retention rate & -1.778 \\
-FL RAP & Epoch 2 retention rate & 7.701 \\
-IP RAP & Epoch 2 retention rate & -2.318 \\
+$\phi$ & Epoch 3 IPUG quota & 1.920 \\
+Total-pilot window & Epoch 1 retention rate & 90.91 \\
+WG RAP & Epoch 2 retention rate & 1.587 \\
+FL RAP & Epoch 2 retention rate & 6.005 \\
+IP RAP & Epoch 2 retention rate & -3.679 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Retention has the clearest local authority over the binding WG RAP miss. The
-same neighborhood shows competing effects on FL RAP and the total-pilot window.
-IPUG perturbations improve IP RAP locally but worsen the current objective and
-FL RAP near this schedule. The diagnostic therefore points to a joint-feasibility
-problem, not to a single constraint that is impossible to satisfy on its own.
+The refined diagnostic is more cautionary than a simple ``turn one knob''
+story. Increasing IPUG from zero worsens the current objective and FL RAP near
+the best point. Retention has strong authority, but the sign depends on epoch
+and response: it helps IP RAP in epoch 2 while worsening WG RAP, FL RAP, and the
+total-pilot window locally. The diagnostic therefore points to a
+joint-feasibility problem, not to a single constraint that is impossible to
+satisfy on its own.
 
 \section{Limitations}
 
-A 615-evaluation structured search does not prove global infeasibility. It
-tests one policy class: three open-loop epochs with bounded controls and
-surrogate-guided candidate proposal. A fully free per-phase schedule would have
-many more degrees of freedom. That option was deliberately deferred to keep the
-implementation interpretable and the evidence tractable.
+A 2158-evaluation structured search does not prove global infeasibility. It
+tests two policy classes: three-epoch and five-epoch open-loop schedules with
+bounded controls and surrogate-guided candidate proposal. A fully free
+per-phase schedule would have many more degrees of freedom. That option was
+deliberately deferred to keep the implementation interpretable and the evidence
+tractable.
 
 The GPR surrogate is only a candidate generator. Its fitted length scales
 suggest weak sensitivity in several sampled directions, but those diagnostics
@@ -310,11 +355,12 @@ The recommended next steps are:
   baseline for final claims.
   \item Continue with structured open-loop searches before adding an MPC or a
   broader controls architecture.
-  \item For additional search, refine around the best policy with asymmetric
-  epoch patterns in the controls that showed local authority.
+  \item For additional search, move only with a justified new policy class or
+  targeted requirement change; the tested five-epoch class did not improve the
+  nearest miss.
   \item For decision support, start the requirements trade study from the best
-  observed miss: 456 pilots in the total-pilot window, 6.00173 WG RAP, and
-  2.86928 FL RAP.
+  observed miss: 533 pilots in the total-pilot window, 5.83075 WG RAP, and
+  2.94844 FL RAP.
 \end{enumerate}
 
 \section{Conclusion}
@@ -322,12 +368,12 @@ The recommended next steps are:
 The viability workflow now has a physics-backed search and diagnostic loop for
 structured dynamic policies. The implemented dynamic-policy model treats policy
 design as finite-horizon control while staying close to the existing simulator
-interfaces. The primary result is negative: 615 direct physics evaluations
-found no feasible policy in the three-epoch class. The run still produced a
-clear nearest miss, quantified the required relaxations, and identified local
-control authority around the binding constraints. The next step is either a
-focused structured refinement near the best trajectory or a requirements trade
-study anchored on that miss.
+interfaces. The primary result is negative: 2158 unique direct physics
+evaluations found no feasible policy in the tested three- and five-epoch
+structured open-loop classes. The run still produced a clear nearest miss,
+quantified the required relaxations, and identified local control authority
+around the binding constraints. The next step is a requirements trade study or a
+new policy class justified by these near-miss diagnostics.
 
 \appendix
 \section{Commands and Validation}
@@ -346,22 +392,60 @@ venv/bin/python -m src.viability.cli dynamic-search \
   --checkpoint-every 25
 \end{verbatim}
 
-The local diagnostic was run with:
+The targeted three-epoch refinement was run with:
 \begin{verbatim}
-RUN=outputs/viability/dynamic_policy_search/run_3epoch_512_32768_096
+venv/bin/python -m src.viability.cli dynamic-refine \
+  --config outputs/viability/dynamic_policy_search/config_physics.yaml \
+  --previous-evaluations outputs/viability/dynamic_policy_search/run_3epoch_512_32768_096/all_evaluations.parquet \
+  --diagnostic-sensitivity outputs/viability/dynamic_policy_search/run_3epoch_512_32768_096/diagnostic/local_sensitivity.csv \
+  --output-dir outputs/viability/dynamic_policy_search/run_3epoch_refine_2048_131072_256 \
+  --epochs 3 \
+  --local-samples 2048 \
+  --optimizer-pool-size 131072 \
+  --verify-top 256 \
+  --workers 8 \
+  --checkpoint-every 25
+\end{verbatim}
+
+The five-epoch open-loop search was run with:
+\begin{verbatim}
+venv/bin/python -m src.viability.cli dynamic-search \
+  --config outputs/viability/dynamic_policy_search/config_physics.yaml \
+  --output-dir outputs/viability/dynamic_policy_search/run_5epoch_1024_131072_256 \
+  --epochs 5 \
+  --initial-samples 1024 \
+  --optimizer-pool-size 131072 \
+  --verify-top 256 \
+  --workers 8 \
+  --checkpoint-every 25
+\end{verbatim}
+
+The refined-best local diagnostic was run with:
+\begin{verbatim}
 venv/bin/python -m src.viability.cli dynamic-diagnose \
   --config outputs/viability/dynamic_policy_search/config_physics.yaml \
-  --evaluations ${RUN}/all_evaluations.parquet \
-  --output-dir ${RUN}/diagnostic \
+  --evaluations outputs/viability/dynamic_policy_search/run_3epoch_refine_2048_131072_256/all_evaluations.parquet \
+  --output-dir outputs/viability/dynamic_policy_search/run_3epoch_refine_2048_131072_256/diagnostic \
   --epochs 3 \
   --perturbation-fraction 0.05 \
   --workers 8 \
   --checkpoint-every 10
 \end{verbatim}
 
+The relaxation study was run with:
+\begin{verbatim}
+venv/bin/python -m src.viability.cli dynamic-relaxation-study \
+  --config outputs/viability/dynamic_policy_search/config_physics.yaml \
+  --evaluations outputs/viability/dynamic_policy_search/run_3epoch_512_32768_096/all_evaluations.parquet \
+  --evaluations outputs/viability/dynamic_policy_search/run_3epoch_refine_2048_131072_256/refinement_evaluations.parquet \
+  --evaluations outputs/viability/dynamic_policy_search/run_5epoch_1024_131072_256/all_evaluations.parquet \
+  --output-dir outputs/viability/dynamic_policy_search/relaxation_study_v1 \
+  --top-n 50
+\end{verbatim}
+
 The branch validation reported:
 \begin{itemize}
-  \item 43 viability tests passed with \texttt{venv/bin/python -m unittest}.
+  \item 66 viability tests passed with \texttt{venv/bin/python -m unittest}.
   \item \texttt{venv/bin/python -m compileall src/viability viability\_dashboard.py} passed.
   \item \texttt{git diff --check} passed.
   \item Generated outputs under \path{outputs/viability} remained ignored and
@@ -389,7 +473,7 @@ Ignored run artifact:
 \bibitem{dynamic-report}
 \textit{Dynamic Policy / Finite-Horizon Control Search}.
 Ignored diagnostic artifact:
-\path{outputs/viability/dynamic_policy_search/run_3epoch_512_32768_096/diagnostic/dynamic_control_report.md}.
+\path{outputs/viability/dynamic_policy_search/run_3epoch_refine_2048_131072_256/diagnostic/dynamic_control_report.md}.
 
 \end{thebibliography}
 

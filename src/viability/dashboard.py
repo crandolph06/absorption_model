@@ -68,6 +68,7 @@ class DynamicDashboardArtifactPaths:
     summary: Path
     sensitivity: Path | None = None
     report: Path | None = None
+    relaxation_dir: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,11 @@ class DynamicDashboardArtifacts:
     summary: dict[str, Any]
     epoch_count: int
     sensitivity: pd.DataFrame | None = None
+    relaxation_summary: dict[str, Any] | None = None
+    relaxation_nearest: pd.DataFrame | None = None
+    relaxation_pareto: pd.DataFrame | None = None
+    relaxation_sets: pd.DataFrame | None = None
+    relaxation_report: str | None = None
 
 
 @dataclass(frozen=True)
@@ -157,23 +163,35 @@ def default_artifact_paths(root: str | Path = ".") -> DashboardArtifactPaths:
 def default_dynamic_artifact_paths(root: str | Path = ".") -> DynamicDashboardArtifactPaths:
     base = Path(root)
     dynamic_root = base / "outputs" / "viability" / "dynamic_policy_search"
-    summary_candidates = sorted(
-        dynamic_root.glob("*/dynamic_search_summary.json"),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
-    run_dir = (
-        summary_candidates[0].parent
-        if summary_candidates
-        else dynamic_root / "run_3epoch_512_32768_096"
-    )
+    summary_candidates = [
+        *dynamic_root.glob("*/dynamic_search_summary.json"),
+        *dynamic_root.glob("*/dynamic_refinement_summary.json"),
+    ]
+    summary_path = _best_dynamic_summary_path(summary_candidates)
+    run_dir = summary_path.parent if summary_path is not None else dynamic_root / "run_3epoch_512_32768_096"
     return DynamicDashboardArtifactPaths(
         config=run_dir / "config_resolved.yaml",
         evaluations=run_dir / "all_evaluations.parquet",
-        summary=run_dir / "dynamic_search_summary.json",
+        summary=summary_path if summary_path is not None else run_dir / "dynamic_search_summary.json",
         sensitivity=run_dir / "diagnostic" / "local_sensitivity.csv",
         report=run_dir / "diagnostic" / "dynamic_control_report.md",
+        relaxation_dir=dynamic_root / "relaxation_study_v1",
     )
+
+
+def _best_dynamic_summary_path(summary_candidates: list[Path]) -> Path | None:
+    if not summary_candidates:
+        return None
+
+    def score(path: Path) -> tuple[float, float]:
+        try:
+            summary = json.loads(path.read_text(encoding="utf-8"))
+            best_phi = float(summary.get("best_phi"))
+        except Exception:
+            best_phi = float("inf")
+        return best_phi, -float(path.stat().st_mtime)
+
+    return min(summary_candidates, key=score)
 
 
 def load_dashboard_artifacts(paths: DashboardArtifactPaths) -> DashboardArtifacts:
@@ -248,6 +266,38 @@ def load_dynamic_dashboard_artifacts(
         )
     if paths.report is not None and not paths.report.exists():
         raise FileNotFoundError(f"Dynamic report artifact does not exist: {paths.report}")
+    relaxation_summary = None
+    relaxation_nearest = None
+    relaxation_pareto = None
+    relaxation_sets = None
+    relaxation_report = None
+    if paths.relaxation_dir is not None:
+        relaxation_dir = paths.relaxation_dir
+        if relaxation_dir.exists():
+            relaxation_summary = _read_json_object(relaxation_dir / "relaxation_summary.json")
+            relaxation_nearest = read_evaluations_table(relaxation_dir / "nearest_under_relaxation.csv")
+            relaxation_pareto = read_evaluations_table(relaxation_dir / "pareto_frontier.csv")
+            relaxation_sets = read_evaluations_table(relaxation_dir / "relaxation_sets.csv")
+            _require_columns(
+                relaxation_nearest,
+                ["schedule_id", "max_normalized_relaxation", "positive_normalized_sum"],
+                "dynamic relaxation nearest policies",
+            )
+            _require_columns(
+                relaxation_pareto,
+                ["schedule_id", "max_normalized_relaxation", "positive_normalized_sum"],
+                "dynamic relaxation Pareto frontier",
+            )
+            _require_columns(
+                relaxation_sets,
+                ["constraint_set", "schedule_id", "max_normalized_relaxation"],
+                "dynamic relaxation constraint sets",
+            )
+            report_path = relaxation_dir / "relaxation_report.md"
+            if report_path.exists():
+                relaxation_report = report_path.read_text(encoding="utf-8")
+        elif str(relaxation_dir).strip():
+            raise FileNotFoundError(f"Dynamic relaxation artifact directory does not exist: {relaxation_dir}")
     return DynamicDashboardArtifacts(
         paths=paths,
         config=config,
@@ -255,6 +305,11 @@ def load_dynamic_dashboard_artifacts(
         summary=summary,
         epoch_count=epoch_count,
         sensitivity=sensitivity,
+        relaxation_summary=relaxation_summary,
+        relaxation_nearest=relaxation_nearest,
+        relaxation_pareto=relaxation_pareto,
+        relaxation_sets=relaxation_sets,
+        relaxation_report=relaxation_report,
     )
 
 

@@ -223,7 +223,7 @@ class ViabilityDashboardTest(unittest.TestCase):
     def test_dynamic_artifact_loading_and_nearest_miss_helpers(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            paths = _write_dynamic_artifacts(self.config, root)
+            paths = _write_dynamic_artifacts(self.config, root, include_relaxation=True)
 
             artifacts = load_dynamic_dashboard_artifacts(paths)
             selected = select_dynamic_schedule(
@@ -239,10 +239,33 @@ class ViabilityDashboardTest(unittest.TestCase):
             misses = nearest_dynamic_misses(artifacts.evaluations, top_n=1)
 
             self.assertEqual(artifacts.epoch_count, 3)
+            self.assertIsNotNone(artifacts.relaxation_summary)
+            self.assertIsNotNone(artifacts.relaxation_nearest)
+            self.assertIsNotNone(artifacts.relaxation_pareto)
+            self.assertIsNotNone(artifacts.relaxation_sets)
             self.assertEqual(selected["schedule_id"], "schedule_best")
             self.assertEqual(epoch_table.shape, (3, 8))
             self.assertEqual(relaxations.iloc[0]["constraint"], "wg_rap")
             self.assertEqual(misses.iloc[0]["schedule_id"], "schedule_best")
+
+    def test_dynamic_loading_fails_clearly_when_relaxation_artifacts_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base_paths = _write_dynamic_artifacts(self.config, root)
+            paths = DynamicDashboardArtifactPaths(
+                config=base_paths.config,
+                evaluations=base_paths.evaluations,
+                summary=base_paths.summary,
+                sensitivity=base_paths.sensitivity,
+                report=base_paths.report,
+                relaxation_dir=root / "missing_relaxation",
+            )
+
+            with self.assertRaisesRegex(
+                FileNotFoundError,
+                "Dynamic relaxation artifact directory does not exist",
+            ):
+                load_dynamic_dashboard_artifacts(paths)
 
     def test_dynamic_loading_fails_clearly_when_schedule_columns_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -517,7 +540,7 @@ def _dynamic_evaluations(config):
     return pd.DataFrame(rows)
 
 
-def _write_dynamic_artifacts(config, root, *, evaluations=None):
+def _write_dynamic_artifacts(config, root, *, evaluations=None, include_relaxation=False):
     evaluations_path = root / "all_evaluations.csv"
     if evaluations is None:
         evaluations = _dynamic_evaluations(config)
@@ -552,6 +575,41 @@ def _write_dynamic_artifacts(config, root, *, evaluations=None):
     ).to_csv(sensitivity_path, index=False)
     report_path = root / "dynamic_control_report.md"
     report_path.write_text("# Dynamic Control Report\n", encoding="utf-8")
+    relaxation_dir = None
+    if include_relaxation:
+        relaxation_dir = root / "relaxation_study_v1"
+        relaxation_dir.mkdir()
+        (relaxation_dir / "relaxation_summary.json").write_text(
+            json.dumps(
+                {
+                    "evaluated_count": int(len(evaluations)),
+                    "ok_count": int(len(evaluations)),
+                    "feasible_count": 0,
+                    "best_phi": float(evaluations["phi"].min()),
+                    "best_phi_schedule_id": "schedule_best",
+                    "best_linf_relaxation": 0.2,
+                    "best_linf_schedule_id": "schedule_best",
+                }
+            ),
+            encoding="utf-8",
+        )
+        relaxation_table = evaluations.assign(
+            max_normalized_relaxation=0.2,
+            positive_normalized_sum=0.3,
+        )
+        relaxation_table.to_csv(relaxation_dir / "nearest_under_relaxation.csv", index=False)
+        relaxation_table.to_csv(relaxation_dir / "pareto_frontier.csv", index=False)
+        pd.DataFrame(
+            [
+                {
+                    "constraint_set": "wg_rap",
+                    "schedule_id": "schedule_best",
+                    "max_normalized_relaxation": 0.2,
+                    "sum_normalized_relaxation": 0.2,
+                }
+            ]
+        ).to_csv(relaxation_dir / "relaxation_sets.csv", index=False)
+        (relaxation_dir / "relaxation_report.md").write_text("# Relaxation\n", encoding="utf-8")
 
     return DynamicDashboardArtifactPaths(
         config=Path("configs/viability.example.yaml"),
@@ -559,6 +617,7 @@ def _write_dynamic_artifacts(config, root, *, evaluations=None):
         summary=summary_path,
         sensitivity=sensitivity_path,
         report=report_path,
+        relaxation_dir=relaxation_dir,
     )
 
 

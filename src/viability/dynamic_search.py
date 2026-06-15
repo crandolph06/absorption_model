@@ -23,6 +23,7 @@ from src.viability.dynamic_policy import (
 )
 from src.viability.evaluator import evaluate_schedules_parallel
 from src.viability.io import write_config_resolved, write_table
+from src.viability.surrogate import read_evaluations_table
 
 EvaluateSchedules = Callable[..., pd.DataFrame]
 
@@ -49,6 +50,19 @@ class DynamicDiagnosticResult:
     sensitivity_path: Path
     report_path: Path
     evaluated_count: int
+
+
+@dataclass(frozen=True)
+class DynamicRefinementResult:
+    output_dir: Path
+    refinement_candidates_path: Path
+    refinement_evaluations_path: Path
+    all_evaluations_path: Path
+    summary_path: Path
+    candidate_count: int
+    evaluated_count: int
+    feasible_count: int
+    best_phi: float
 
 
 @dataclass(frozen=True)
@@ -172,6 +186,107 @@ def run_dynamic_policy_search(
         all_evaluations_path=all_evaluations_path.resolve(),
         summary_path=summary_path.resolve(),
         evaluated_count=int(len(all_evaluations)),
+        feasible_count=feasible_count,
+        best_phi=best_phi,
+    )
+
+
+def run_dynamic_policy_refinement(
+    *,
+    config: ViabilityConfig,
+    previous_evaluations_path: str | Path,
+    output_dir: str | Path,
+    diagnostic_sensitivity_path: str | Path | None = None,
+    epoch_count: int = 3,
+    local_samples: int = 512,
+    optimizer_pool_size: int = 4096,
+    verify_top: int = 32,
+    workers: int | None = None,
+    checkpoint_every: int = 10,
+    evaluator: EvaluateSchedules = evaluate_schedules_parallel,
+) -> DynamicRefinementResult:
+    """Refine around direct-physics nearest misses with surrogate-ranked candidates."""
+    if epoch_count <= 0:
+        raise ValueError("epoch_count must be positive")
+    if local_samples <= 0:
+        raise ValueError("local_samples must be positive")
+    if optimizer_pool_size <= 0:
+        raise ValueError("optimizer_pool_size must be positive")
+    if verify_top <= 0:
+        raise ValueError("verify_top must be positive")
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    write_config_resolved(config, output_path)
+
+    previous_evaluations = read_evaluations_table(previous_evaluations_path)
+    sensitivity = (
+        read_evaluations_table(diagnostic_sensitivity_path)
+        if diagnostic_sensitivity_path
+        else None
+    )
+    candidates = generate_refinement_candidates(
+        config,
+        previous_evaluations,
+        epoch_count=epoch_count,
+        local_samples=local_samples,
+        optimizer_pool_size=optimizer_pool_size,
+        verify_top=verify_top,
+        sensitivity=sensitivity,
+    )
+    candidates_path = write_table(
+        candidates,
+        output_path / "refinement_candidates.csv",
+        prefer_parquet=False,
+    )
+    refinement_evaluations = evaluator(
+        candidates,
+        config,
+        epoch_count=epoch_count,
+        workers=workers,
+        checkpoint_dir=output_path / "refinement_checkpoints",
+        checkpoint_every=checkpoint_every,
+    )
+    refinement_evaluations_path = write_table(
+        refinement_evaluations,
+        output_path / "refinement_evaluations.parquet",
+    )
+    all_evaluations = pd.concat(
+        [previous_evaluations, refinement_evaluations],
+        ignore_index=True,
+        sort=False,
+    )
+    all_evaluations_path = write_table(
+        all_evaluations,
+        output_path / "all_evaluations.parquet",
+    )
+
+    surrogate = fit_phi_gpr(previous_evaluations, config, epoch_count=epoch_count)
+    summary = dynamic_refinement_summary(
+        previous_evaluations=previous_evaluations,
+        refinement_evaluations=refinement_evaluations,
+        all_evaluations=all_evaluations,
+        output_dir=output_path,
+        total_phases=config.model.years_to_run * 3,
+        epoch_count=epoch_count,
+        workers=config.run.workers if workers is None else workers,
+        candidate_count=len(candidates),
+        surrogate=surrogate,
+    )
+    summary_path = output_path / "dynamic_refinement_summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+
+    ok = all_evaluations[all_evaluations["status"] == "ok"]
+    best_phi = float(ok["phi"].min()) if not ok.empty else float("inf")
+    feasible_count = int(ok["feasible"].sum()) if not ok.empty else 0
+    return DynamicRefinementResult(
+        output_dir=output_path.resolve(),
+        refinement_candidates_path=candidates_path.resolve(),
+        refinement_evaluations_path=refinement_evaluations_path.resolve(),
+        all_evaluations_path=all_evaluations_path.resolve(),
+        summary_path=summary_path.resolve(),
+        candidate_count=int(len(candidates)),
+        evaluated_count=int(len(refinement_evaluations)),
         feasible_count=feasible_count,
         best_phi=best_phi,
     )
@@ -402,6 +517,158 @@ def propose_optimizer_candidates(
     for name in feature_names:
         columns.extend([f"raw_{name}", f"applied_{name}", name])
     return pd.DataFrame(rows, columns=columns)
+
+
+def generate_refinement_candidates(
+    config: ViabilityConfig,
+    previous_evaluations: pd.DataFrame,
+    *,
+    epoch_count: int,
+    local_samples: int,
+    optimizer_pool_size: int,
+    verify_top: int,
+    sensitivity: pd.DataFrame | None = None,
+    anchor_count: int = 8,
+) -> pd.DataFrame:
+    """Generate local refinement schedules around direct nearest misses."""
+    if local_samples <= 0:
+        raise ValueError("local_samples must be positive")
+    if optimizer_pool_size <= 0:
+        raise ValueError("optimizer_pool_size must be positive")
+    if verify_top <= 0:
+        raise ValueError("verify_top must be positive")
+
+    total_phases = config.model.years_to_run * 3
+    feature_names = dynamic_feature_names(config.policy, epoch_count)
+    dimension = len(feature_names)
+    anchors = _select_refinement_anchors(
+        previous_evaluations,
+        config,
+        epoch_count=epoch_count,
+        anchor_count=anchor_count,
+    )
+    anchor_units = _unit_matrix_from_frame(anchors, config, epoch_count=epoch_count)
+
+    candidate_units: list[np.ndarray] = []
+    candidate_sources: list[str] = []
+    for unit_values in anchor_units:
+        candidate_units.append(unit_values)
+        candidate_sources.append("previous_best")
+
+    local_units = _local_refinement_unit_vectors(
+        config,
+        anchor_units,
+        epoch_count=epoch_count,
+        n=local_samples,
+        start_index=200_000,
+        radius=0.10,
+    )
+    candidate_units.extend(local_units)
+    candidate_sources.extend(["local_sobol"] * len(local_units))
+
+    if sensitivity is not None and not sensitivity.empty:
+        diagnostic_units = _diagnostic_refinement_unit_vectors(
+            config,
+            anchors.iloc[0],
+            sensitivity,
+            epoch_count=epoch_count,
+        )
+        candidate_units.extend(diagnostic_units)
+        candidate_sources.extend(["diagnostic_move"] * len(diagnostic_units))
+
+    global_pool = _sample_unit_cube(
+        n=optimizer_pool_size,
+        dimension=dimension,
+        method="sobol",
+        random_seed=config.run.random_seed + 31,
+        start_index=300_000,
+        scramble=config.doe.scramble,
+    )
+    surrogate = fit_phi_gpr(previous_evaluations, config, epoch_count=epoch_count)
+    pool_mean, pool_sigma = surrogate.predict(global_pool, return_std=True)
+    pool_order = np.argsort(pool_mean - pool_sigma)
+    global_units = [global_pool[int(index)] for index in pool_order[: max(verify_top * 2, verify_top)]]
+    candidate_units.extend(global_units)
+    candidate_sources.extend(["global_lcb"] * len(global_units))
+
+    ranked_units, ranked_sources = _rank_refinement_units(
+        candidate_units,
+        candidate_sources,
+        surrogate=surrogate,
+        verify_top=verify_top,
+    )
+
+    rows = []
+    for index, (unit_values, source) in enumerate(zip(ranked_units, ranked_sources)):
+        rows.append(
+            _schedule_row_from_unit_vector(
+                config,
+                unit_values,
+                epoch_count=epoch_count,
+                total_phases=total_phases,
+                schedule_id=f"refine_{index:04d}",
+                source=source,
+                sample_index=index,
+            )
+        )
+    columns = ["schedule_id", "schedule_source", "sample_index"]
+    for name in feature_names:
+        columns.extend([f"raw_{name}", f"applied_{name}", name])
+    return pd.DataFrame(rows, columns=columns)
+
+
+def dynamic_refinement_summary(
+    *,
+    previous_evaluations: pd.DataFrame,
+    refinement_evaluations: pd.DataFrame,
+    all_evaluations: pd.DataFrame,
+    output_dir: Path,
+    total_phases: int,
+    epoch_count: int,
+    workers: int,
+    candidate_count: int,
+    surrogate,
+) -> dict[str, object]:
+    base_ok = previous_evaluations[previous_evaluations["status"] == "ok"].copy()
+    refined_ok = refinement_evaluations[refinement_evaluations["status"] == "ok"].copy()
+    all_ok = all_evaluations[all_evaluations["status"] == "ok"].copy()
+    base_best = float(base_ok["phi"].min()) if not base_ok.empty else None
+    refined_best = float(refined_ok["phi"].min()) if not refined_ok.empty else None
+    all_best = all_ok.sort_values("phi").head(1)
+    feasible = all_ok[all_ok["feasible"]] if not all_ok.empty else all_ok
+    positive_constraints: dict[str, float] = {}
+    if not all_best.empty:
+        best_row = all_best.iloc[0]
+        for column in [c for c in all_ok.columns if c.startswith("constraint_")]:
+            value = float(best_row[column])
+            if value > 0:
+                positive_constraints[column.removeprefix("constraint_")] = value
+    improvement = (
+        None
+        if base_best is None or refined_best is None
+        else float(base_best - min(base_best, refined_best))
+    )
+    return {
+        "output_dir": str(output_dir.resolve()),
+        "phase_backend": _single_value(all_ok, "phase_backend"),
+        "epoch_count": epoch_count,
+        "total_phases": total_phases,
+        "workers": workers,
+        "candidate_count": int(candidate_count),
+        "previous_evaluated_count": int(len(previous_evaluations)),
+        "refinement_evaluated_count": int(len(refinement_evaluations)),
+        "evaluated_count": int(len(all_evaluations)),
+        "ok_count": int((all_evaluations["status"] == "ok").sum()),
+        "feasible_count": int(len(feasible)),
+        "previous_best_phi": base_best,
+        "refinement_best_phi": refined_best,
+        "best_phi": float(all_ok["phi"].min()) if not all_ok.empty else None,
+        "best_phi_improvement": improvement,
+        "best_schedule_id": None if all_best.empty else str(all_best.iloc[0]["schedule_id"]),
+        "best_active_constraint": None if all_best.empty else str(all_best.iloc[0]["active_constraint"]),
+        "best_positive_constraints": positive_constraints,
+        "surrogate_kernel": str(getattr(surrogate, "kernel_", "")),
+    }
 
 
 def dynamic_search_summary(
@@ -684,6 +951,134 @@ def _best_row_for_diagnostics(evaluations: pd.DataFrame) -> pd.Series:
     return ok.sort_values("phi").iloc[0]
 
 
+def _select_refinement_anchors(
+    evaluations: pd.DataFrame,
+    config: ViabilityConfig,
+    *,
+    epoch_count: int,
+    anchor_count: int,
+) -> pd.DataFrame:
+    ok = evaluations[evaluations["status"] == "ok"].copy()
+    if ok.empty:
+        raise ValueError("No ok evaluations available for dynamic refinement")
+    feature_names = dynamic_feature_names(config.policy, epoch_count)
+    missing = [f"raw_{name}" for name in feature_names if f"raw_{name}" not in ok.columns]
+    if missing:
+        raise ValueError(f"Previous evaluations are missing dynamic raw columns: {missing}")
+    constraint_columns = [c for c in ok.columns if c.startswith("constraint_")]
+    if constraint_columns:
+        ok.loc[:, "_positive_constraint_sum"] = ok[constraint_columns].clip(lower=0.0).sum(axis=1)
+        return ok.sort_values(["phi", "_positive_constraint_sum", "schedule_id"]).head(anchor_count)
+    return ok.sort_values(["phi", "schedule_id"]).head(anchor_count)
+
+
+def _local_refinement_unit_vectors(
+    config: ViabilityConfig,
+    anchor_units: np.ndarray,
+    *,
+    epoch_count: int,
+    n: int,
+    start_index: int,
+    radius: float,
+) -> list[np.ndarray]:
+    if len(anchor_units) == 0:
+        return []
+    dimension = len(dynamic_feature_names(config.policy, epoch_count))
+    samples = _sample_unit_cube(
+        n=n,
+        dimension=dimension,
+        method="sobol",
+        random_seed=config.run.random_seed + 23,
+        start_index=start_index,
+        scramble=config.doe.scramble,
+    )
+    vectors = []
+    for index, sample in enumerate(samples):
+        anchor = anchor_units[index % len(anchor_units)]
+        delta = (sample - 0.5) * 2.0 * radius
+        vectors.append(np.clip(anchor + delta, 0.0, 1.0))
+    return vectors
+
+
+def _diagnostic_refinement_unit_vectors(
+    config: ViabilityConfig,
+    anchor_row: pd.Series,
+    sensitivity: pd.DataFrame,
+    *,
+    epoch_count: int,
+) -> list[np.ndarray]:
+    required = {"epoch", "control", "response", "sensitivity", "abs_sensitivity"}
+    missing = sorted(required - set(sensitivity.columns))
+    if missing:
+        raise ValueError(f"Diagnostic sensitivity is missing required columns: {missing}")
+    variable_names = list(config.policy.variables)
+    unit = _unit_matrix_from_frame(
+        pd.DataFrame([anchor_row]),
+        config,
+        epoch_count=epoch_count,
+    )[0]
+    responses = {"phi", "total_pilots_window", "wg_rap", "fl_rap", "ip_rap"}
+    ranked = (
+        sensitivity[sensitivity["response"].astype(str).isin(responses)]
+        .sort_values("abs_sensitivity", ascending=False)
+        .head(12)
+    )
+    vectors: list[np.ndarray] = []
+    for _, row in ranked.iterrows():
+        epoch = int(row["epoch"])
+        control = str(row["control"])
+        if epoch < 1 or epoch > epoch_count or control not in config.policy.variables:
+            continue
+        control_index = variable_names.index(control)
+        feature_index = (epoch - 1) * len(variable_names) + control_index
+        sign = -1.0 if float(row["sensitivity"]) > 0 else 1.0
+        for step in (0.025, 0.05, 0.10, 0.20):
+            moved = unit.copy()
+            moved[feature_index] = np.clip(moved[feature_index] + sign * step, 0.0, 1.0)
+            if moved[feature_index] != unit[feature_index]:
+                vectors.append(moved)
+    return vectors
+
+
+def _rank_refinement_units(
+    candidate_units: list[np.ndarray],
+    candidate_sources: list[str],
+    *,
+    surrogate,
+    verify_top: int,
+) -> tuple[list[np.ndarray], list[str]]:
+    if len(candidate_units) != len(candidate_sources):
+        raise ValueError("candidate_units and candidate_sources must have the same length")
+    selected: list[np.ndarray] = []
+    sources: list[str] = []
+    seen: set[tuple[float, ...]] = set()
+
+    def add_candidate(unit_values: np.ndarray, source: str, *, min_distance: float) -> None:
+        key = tuple(np.round(unit_values, 8))
+        if key in seen:
+            return
+        if not _is_diverse(unit_values, selected, min_distance=min_distance):
+            return
+        seen.add(key)
+        selected.append(unit_values)
+        sources.append(source)
+
+    for unit_values, source in zip(candidate_units, candidate_sources):
+        if source == "previous_best":
+            add_candidate(unit_values, source, min_distance=0.0)
+            if len(selected) >= verify_top:
+                return selected[:verify_top], sources[:verify_top]
+
+    matrix = np.asarray(candidate_units, dtype=float)
+    mean, sigma = surrogate.predict(matrix, return_std=True)
+    order = np.argsort(mean - sigma)
+    for index in order:
+        add_candidate(candidate_units[int(index)], candidate_sources[int(index)], min_distance=0.03)
+        if len(selected) >= verify_top:
+            break
+    return selected[:verify_top], sources[:verify_top]
+
+
 def _schedule_row_from_unit_vector(
     config: ViabilityConfig,
     unit_values: np.ndarray,
@@ -747,8 +1142,18 @@ def _schedule_row_from_flat_values(
 
 
 def _heuristic_templates(epoch_count: int) -> list[DynamicSeedTemplate]:
-    if epoch_count != 3:
-        return []
+    if epoch_count <= 0:
+        raise ValueError("epoch_count must be positive")
+    return [
+        DynamicSeedTemplate(
+            name=template.name,
+            epochs=_interpolate_template_epochs(template.epochs, epoch_count),
+        )
+        for template in _base_heuristic_templates()
+    ]
+
+
+def _base_heuristic_templates() -> list[DynamicSeedTemplate]:
     return [
         DynamicSeedTemplate(
             name="static_near_miss_high_retention",
@@ -795,6 +1200,27 @@ def _heuristic_templates(epoch_count: int) -> list[DynamicSeedTemplate]:
             ),
         ),
     ]
+
+
+def _interpolate_template_epochs(
+    epochs: tuple[dict[str, float], ...],
+    epoch_count: int,
+) -> tuple[dict[str, float], ...]:
+    if epoch_count <= 0:
+        raise ValueError("epoch_count must be positive")
+    if len(epochs) == epoch_count:
+        return epochs
+    source_points = np.linspace(0.0, 1.0, len(epochs))
+    target_points = np.linspace(0.0, 1.0, epoch_count)
+    names = list(epochs[0])
+    interpolated = []
+    for target in target_points:
+        row = {}
+        for name in names:
+            values = [float(epoch[name]) for epoch in epochs]
+            row[name] = float(np.interp(target, source_points, values))
+        interpolated.append(row)
+    return tuple(interpolated)
 
 
 def _epoch_policy(

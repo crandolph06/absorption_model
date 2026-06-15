@@ -9,12 +9,17 @@ from src.viability.config import load_config
 from src.viability.doe import generate_doe
 from src.viability.dynamic_search import (
     run_dynamic_policy_diagnostic,
+    run_dynamic_policy_refinement,
     run_dynamic_policy_search,
 )
 from src.viability.evaluator import evaluate_design, evaluate_designs_parallel
 from src.viability.io import run_output_dir, write_config_resolved, write_table
 from src.viability.plots import run_envelope_plots_from_files
 from src.viability.policy import PolicyDesign
+from src.viability.relaxation import (
+    DEFAULT_RELAXATION_CONSTRAINTS,
+    run_dynamic_relaxation_study,
+)
 from src.viability.report import write_viability_report_from_files
 from src.viability.search import run_surrogate_search_from_files, verify_candidates_from_file
 from src.viability.surrogate import (
@@ -252,6 +257,53 @@ def main() -> int:
         default=10,
         help="Flush dynamic evaluation checkpoints every N completed schedules",
     )
+    refine_parser = subparsers.add_parser(
+        "dynamic-refine",
+        help="Refine a structured dynamic-policy search around direct nearest misses",
+    )
+    refine_parser.add_argument("--config", required=True, help="Path to viability YAML config")
+    refine_parser.add_argument(
+        "--previous-evaluations",
+        required=True,
+        help="Previous dynamic all_evaluations parquet or CSV path",
+    )
+    refine_parser.add_argument("--output-dir", required=True, help="Refinement output directory")
+    refine_parser.add_argument("--epochs", type=int, default=3, help="Number of policy epochs")
+    refine_parser.add_argument(
+        "--local-samples",
+        type=int,
+        default=512,
+        help="Sobol perturbations around nearest-miss anchor schedules",
+    )
+    refine_parser.add_argument(
+        "--optimizer-pool-size",
+        type=int,
+        default=4096,
+        help="Global Sobol pool scored by the refinement surrogate",
+    )
+    refine_parser.add_argument(
+        "--verify-top",
+        type=int,
+        default=32,
+        help="Number of refinement candidates to direct-verify",
+    )
+    refine_parser.add_argument(
+        "--diagnostic-sensitivity",
+        default=None,
+        help="Optional local_sensitivity.csv path used for diagnostic-informed moves",
+    )
+    refine_parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Override run.workers for direct refinement evaluations",
+    )
+    refine_parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=10,
+        help="Flush refinement checkpoints every N completed schedules",
+    )
     diagnose_parser = subparsers.add_parser(
         "dynamic-diagnose",
         help="Run local finite-difference control diagnostics around the best dynamic schedule",
@@ -310,6 +362,29 @@ def main() -> int:
     report_parser.add_argument("--verification-summary", required=True, help="verification_summary.json path")
     report_parser.add_argument("--envelope-summary", required=True, help="envelope_summary.json path")
     report_parser.add_argument("--output", required=True, help="Output report.md path")
+    relaxation_parser = subparsers.add_parser(
+        "dynamic-relaxation-study",
+        help="Summarize observed direct dynamic evaluations as requirement relaxations",
+    )
+    relaxation_parser.add_argument("--config", required=True, help="Path to viability YAML config")
+    relaxation_parser.add_argument(
+        "--evaluations",
+        action="append",
+        required=True,
+        help="Dynamic evaluations parquet/CSV path; repeat to combine result bundles",
+    )
+    relaxation_parser.add_argument("--output-dir", required=True, help="Relaxation study output directory")
+    relaxation_parser.add_argument(
+        "--constraints",
+        default=",".join(DEFAULT_RELAXATION_CONSTRAINTS),
+        help="Comma-separated constraint names to include in the relaxation study",
+    )
+    relaxation_parser.add_argument(
+        "--top-n",
+        type=int,
+        default=50,
+        help="Number of nearest-under-relaxation policies to write",
+    )
     args = parser.parse_args()
 
     if args.command == "plot-gpr-overlay":
@@ -551,6 +626,38 @@ def main() -> int:
         )
         return 0
 
+    if args.command == "dynamic-refine":
+        result = run_dynamic_policy_refinement(
+            config=config,
+            previous_evaluations_path=args.previous_evaluations,
+            output_dir=args.output_dir,
+            diagnostic_sensitivity_path=args.diagnostic_sensitivity,
+            epoch_count=args.epochs,
+            local_samples=args.local_samples,
+            optimizer_pool_size=args.optimizer_pool_size,
+            verify_top=args.verify_top,
+            workers=args.workers,
+            checkpoint_every=args.checkpoint_every,
+        )
+        print(
+            json.dumps(
+                {
+                    "output_dir": str(result.output_dir),
+                    "refinement_candidates_path": str(result.refinement_candidates_path),
+                    "refinement_evaluations_path": str(result.refinement_evaluations_path),
+                    "all_evaluations_path": str(result.all_evaluations_path),
+                    "summary_path": str(result.summary_path),
+                    "candidate_count": result.candidate_count,
+                    "evaluated_count": result.evaluated_count,
+                    "feasible_count": result.feasible_count,
+                    "best_phi": result.best_phi,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
     if args.command == "dynamic-diagnose":
         result = run_dynamic_policy_diagnostic(
             config=config,
@@ -570,6 +677,34 @@ def main() -> int:
                     "sensitivity_path": str(result.sensitivity_path),
                     "report_path": str(result.report_path),
                     "evaluated_count": result.evaluated_count,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    if args.command == "dynamic-relaxation-study":
+        result = run_dynamic_relaxation_study(
+            config=config,
+            evaluation_paths=args.evaluations,
+            output_dir=args.output_dir,
+            constraints=_parse_constraints(args.constraints),
+            top_n=args.top_n,
+        )
+        print(
+            json.dumps(
+                {
+                    "output_dir": str(result.output_dir),
+                    "nearest_path": str(result.nearest_path),
+                    "pareto_path": str(result.pareto_path),
+                    "relaxation_sets_path": str(result.relaxation_sets_path),
+                    "summary_path": str(result.summary_path),
+                    "report_path": str(result.report_path),
+                    "evaluated_count": result.evaluated_count,
+                    "feasible_count": result.feasible_count,
+                    "best_phi": result.best_phi,
+                    "best_linf_relaxation": result.best_linf_relaxation,
                 },
                 indent=2,
                 sort_keys=True,
@@ -612,6 +747,12 @@ def _parse_train_sizes(value: str | None) -> list[int] | None:
     if value is None or value.strip() == "":
         return None
     return [int(part.strip()) for part in value.split(",") if part.strip()]
+
+
+def _parse_constraints(value: str | None) -> list[str]:
+    if value is None or value.strip() == "":
+        return list(DEFAULT_RELAXATION_CONSTRAINTS)
+    return [part.strip() for part in value.split(",") if part.strip()]
 
 
 if __name__ == "__main__":

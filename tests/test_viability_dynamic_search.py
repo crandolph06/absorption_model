@@ -8,8 +8,10 @@ import pandas as pd
 from src.viability.config import load_config
 from src.viability.dynamic_search import (
     generate_dynamic_schedules,
+    generate_refinement_candidates,
     generate_local_perturbation_schedules,
     run_dynamic_policy_diagnostic,
+    run_dynamic_policy_refinement,
     run_dynamic_policy_search,
 )
 
@@ -37,6 +39,26 @@ class ViabilityDynamicSearchTest(unittest.TestCase):
             ].iloc[0],
             "heuristic_0002",
         )
+
+    def test_dynamic_schedule_heuristics_interpolate_to_arbitrary_epoch_counts(self):
+        schedules = generate_dynamic_schedules(
+            self.config,
+            epoch_count=5,
+            n=0,
+            start_index=0,
+            source="unused",
+            include_heuristics=True,
+        )
+
+        self.assertIn("epoch5_annual_intake", schedules.columns)
+        self.assertIn("static_best_current_miss", set(schedules["template_name"]))
+        self.assertFalse(schedules.filter(regex=r"^epoch").isna().any().any())
+        for epoch in range(1, 6):
+            for name, variable in self.config.policy.variables.items():
+                column = f"epoch{epoch}_{name}"
+                self.assertTrue(schedules[column].between(variable.low, variable.high).all())
+                if variable.type == "int":
+                    self.assertTrue(pd.api.types.is_integer_dtype(schedules[column]))
 
     def test_dynamic_search_writes_expected_artifacts_with_fake_evaluator(self):
         calls = []
@@ -100,6 +122,87 @@ class ViabilityDynamicSearchTest(unittest.TestCase):
             self.assertEqual(calls[0]["workers"], 2)
             self.assertEqual(calls[0]["checkpoint_every"], 2)
             self.assertEqual(pd.read_parquet(result.all_evaluations_path).shape[0], result.evaluated_count)
+
+    def test_refinement_candidates_include_prior_best_and_diagnostic_moves(self):
+        previous = _previous_dynamic_evaluations(self.config)
+        sensitivity = pd.DataFrame(
+            [
+                {
+                    "epoch": 1,
+                    "control": "annual_intake",
+                    "response": "wg_rap",
+                    "sensitivity": -1.0,
+                    "abs_sensitivity": 1.0,
+                }
+            ]
+        )
+
+        with patch("src.viability.dynamic_search._differential_evolution_candidate", return_value=None):
+            candidates = generate_refinement_candidates(
+                self.config,
+                previous,
+                epoch_count=3,
+                local_samples=1,
+                optimizer_pool_size=1,
+                verify_top=20,
+                sensitivity=sensitivity,
+                anchor_count=2,
+            )
+
+        self.assertIn("previous_best", set(candidates["schedule_source"]))
+        self.assertIn("diagnostic_move", set(candidates["schedule_source"]))
+        self.assertTrue(candidates["schedule_id"].astype(str).str.startswith("refine_").all())
+
+    def test_dynamic_refinement_writes_expected_artifacts_with_fake_evaluator(self):
+        def fake_evaluator(
+            schedules,
+            config,
+            *,
+            epoch_count,
+            workers,
+            checkpoint_dir,
+            checkpoint_every,
+        ):
+            rows = schedules.copy(deep=True)
+            phi = 5.0 - rows["raw_epoch1_annual_intake"].to_numpy(dtype=float) / 100.0
+            rows = rows.assign(
+                phase_backend=config.model.phase_backend,
+                status="ok",
+                error=None,
+                active_constraint="wg_rap",
+                active_constraint_value=phi,
+                constraint_total_pilots_window=-1.0,
+                constraint_wg_rap=phi,
+                constraint_fl_rap=1.0,
+                constraint_ip_rap=-1.0,
+                phi=phi,
+                feasible=phi <= 0.0,
+            )
+            return rows
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            previous_path = root / "previous.parquet"
+            _previous_dynamic_evaluations(self.config).to_parquet(previous_path, index=False)
+            with patch("src.viability.dynamic_search._differential_evolution_candidate", return_value=None):
+                result = run_dynamic_policy_refinement(
+                    config=self.config,
+                    previous_evaluations_path=previous_path,
+                    output_dir=root / "refinement",
+                    epoch_count=3,
+                    local_samples=2,
+                    optimizer_pool_size=4,
+                    verify_top=3,
+                    workers=2,
+                    checkpoint_every=2,
+                    evaluator=fake_evaluator,
+                )
+
+            self.assertTrue(result.refinement_candidates_path.exists())
+            self.assertTrue(result.refinement_evaluations_path.exists())
+            self.assertTrue(result.all_evaluations_path.exists())
+            self.assertTrue(result.summary_path.exists())
+            self.assertEqual(result.evaluated_count, 3)
 
     def test_dynamic_diagnostic_writes_sensitivity_and_report(self):
         def fake_evaluator(
@@ -192,6 +295,33 @@ def _seed_best_row(config):
         row[f"epoch{epoch}_flug_quota_per_phase"] = 2
         row[f"epoch{epoch}_ipug_quota_per_phase"] = 0
     return pd.Series(row)
+
+
+def _previous_dynamic_evaluations(config):
+    schedules = generate_dynamic_schedules(
+        config,
+        epoch_count=3,
+        n=3,
+        start_index=0,
+        source="initial_sobol",
+        include_heuristics=True,
+    )
+    rows = schedules.copy(deep=True).head(6)
+    phi = pd.Series([0.9, 0.6, 0.3, 1.4, 1.1, 0.8], dtype=float)
+    rows = rows.assign(
+        phase_backend=config.model.phase_backend,
+        status="ok",
+        error=None,
+        active_constraint="wg_rap",
+        active_constraint_value=phi,
+        constraint_total_pilots_window=-1.0,
+        constraint_wg_rap=phi,
+        constraint_fl_rap=1.0,
+        constraint_ip_rap=-1.0,
+        phi=phi,
+        feasible=False,
+    )
+    return rows
 
 
 if __name__ == "__main__":
