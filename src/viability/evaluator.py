@@ -19,6 +19,7 @@ from src.viability.metrics import (
     compute_constraints,
     compute_raw_metrics,
 )
+from src.viability.dynamic_policy import EpochPolicySchedule, dynamic_feature_names
 from src.viability.policy import PolicyDesign
 
 
@@ -102,33 +103,8 @@ def simulate_design_history(
     design: PolicyDesign, config: ViabilityConfig, seed: int | None = None
 ) -> pd.DataFrame:
     """Run the long-horizon simulator and return per-squadron phase history."""
-    run_seed = config.run.random_seed if seed is None else seed
-    random.seed(run_seed)
-    np.random.seed(run_seed)
-
-    use_physics_allocator = config.model.phase_backend == "physics"
-    brain = None
-    if config.model.phase_backend == "brain":
-        if config.model.brain_path is None:
-            raise ValueError("model.brain_path is required for brain-backed evaluation")
-        if config.model.expected_brain_outputs is None:
-            raise ValueError(
-                "model.expected_brain_outputs is required for brain-backed evaluation"
-            )
-        brain = _load_brain(config.model.brain_path)
-        _validate_brain_output(brain, config.model.expected_brain_outputs)
-
-    sim = CAFSimulation(
-        annual_intake=design.annual_intake,
-        retention_rate=design.retention_rate,
-        round_robin=config.model.round_robin,
-        brain=brain,
-        max_manning_pct=design.max_manning_pct,
-        staff_priority_mode=_parse_priority_mode(config.model.staff_priority_mode),
-        use_upgrade_quotas=config.model.use_upgrade_quotas,
-        sim_config=config.model.simulation,
-        use_physics_allocator=use_physics_allocator,
-    )
+    _seed_simulation(config, seed=seed)
+    sim = _make_simulation(config, design)
     sim.current_year = config.model.start_year
     sim.current_phase = 1
     sim.sq_phase_flug_intake = design.flug_quota_per_phase
@@ -144,6 +120,81 @@ def simulate_design_history(
         squadron_configs=squadrons,
         ute=design.ute,
     )
+
+
+def evaluate_policy_schedule(
+    schedule: EpochPolicySchedule, config: ViabilityConfig, seed: int | None = None
+) -> EvaluationResult:
+    """Evaluate a piecewise-constant dynamic policy schedule."""
+    try:
+        history = simulate_policy_schedule_history(schedule, config, seed=seed)
+        raw_metrics = compute_raw_metrics(history, config.model.assessment_start_year)
+        constraints = compute_constraints(raw_metrics, config.requirements)
+        phi, active_constraint, active_constraint_value = aggregate_violation(
+            constraints, config.constraint_scales
+        )
+        return EvaluationResult(
+            phase_backend=config.model.phase_backend,
+            design=schedule.to_flat_dict(raw=False),
+            raw_design=schedule.to_flat_dict(raw=True),
+            applied_design=schedule.to_flat_dict(raw=False),
+            raw_metrics=raw_metrics,
+            constraints=constraints,
+            phi=phi,
+            feasible=phi <= 0.0,
+            active_constraint=active_constraint,
+            active_constraint_value=active_constraint_value,
+            status="ok",
+        )
+    except Exception as exc:
+        return EvaluationResult(
+            phase_backend=config.model.phase_backend,
+            design=schedule.to_flat_dict(raw=False),
+            raw_design=schedule.to_flat_dict(raw=True),
+            applied_design=schedule.to_flat_dict(raw=False),
+            raw_metrics={},
+            constraints={},
+            phi=float("inf"),
+            feasible=False,
+            active_constraint=None,
+            active_constraint_value=None,
+            status="failed",
+            error=str(exc),
+        )
+
+
+def simulate_policy_schedule_history(
+    schedule: EpochPolicySchedule, config: ViabilityConfig, seed: int | None = None
+) -> pd.DataFrame:
+    """Run the long-horizon simulator while applying a schedule before each phase."""
+    expected_phases = config.model.years_to_run * 3
+    if schedule.total_phases != expected_phases:
+        raise ValueError(
+            f"Schedule total_phases={schedule.total_phases} does not match "
+            f"configured horizon {expected_phases}"
+        )
+    _seed_simulation(config, seed=seed)
+    initial_policy = schedule.policy_for_phase_index(0)
+    sim = _make_simulation(config, initial_policy)
+    sim.current_year = config.model.start_year
+    sim.current_phase = 1
+    squadrons = get_initial_squadrons(config.model.start_year, SQUADRON_DATA)
+    sim.history = []
+    sim.squadrons = squadrons
+
+    phase_index = 0
+    for year in range(config.model.start_year, config.model.start_year + config.model.years_to_run):
+        for phase_num in range(1, 4):
+            policy = schedule.policy_for_phase_index(phase_index)
+            _apply_policy_to_simulation(sim, policy)
+            for sq in sim.squadrons:
+                sq.paa = policy.paa
+                sq.ute = policy.ute
+                sq.update_stats()
+            sim.run_phase(phase_num, year)
+            phase_index += 1
+
+    return pd.DataFrame(sim.history)
 
 
 def evaluate_designs_parallel(
@@ -223,6 +274,88 @@ def evaluate_designs_parallel(
     return pd.DataFrame(flattened_rows)
 
 
+def evaluate_schedules_parallel(
+    schedules: pd.DataFrame,
+    config: ViabilityConfig,
+    *,
+    epoch_count: int,
+    workers: int | None = None,
+    checkpoint_dir: str | Path | None = None,
+    checkpoint_every: int = 50,
+) -> pd.DataFrame:
+    """Evaluate a batch of epoch-policy schedules."""
+    worker_count = config.run.workers if workers is None else workers
+    if worker_count <= 0:
+        raise ValueError("workers must be positive")
+    total_phases = config.model.years_to_run * 3
+    feature_names = dynamic_feature_names(config.policy, epoch_count)
+    missing = sorted(set(feature_names) - set(schedules.columns))
+    if missing:
+        raise ValueError(f"Schedule table is missing required columns: {missing}")
+
+    jobs = []
+    for index, row in schedules.reset_index(drop=True).iterrows():
+        schedule_id = row["schedule_id"] if "schedule_id" in row else index
+        metadata = _schedule_metadata(row)
+        values = {name: row[name] for name in feature_names}
+        raw_values = None
+        if all(f"raw_{name}" in row for name in feature_names):
+            raw_values = {name: float(row[f"raw_{name}"]) for name in feature_names}
+        jobs.append(
+            (
+                schedule_id,
+                values,
+                raw_values,
+                metadata,
+                config,
+                epoch_count,
+                total_phases,
+                config.run.random_seed + _seed_offset(row, int(index)),
+            )
+        )
+
+    flattened_rows: list[dict[str, Any]] = []
+    checkpoint_buffer: list[dict[str, Any]] = []
+    batch_index = 0
+
+    def flush_checkpoint(force: bool = False) -> None:
+        nonlocal batch_index, checkpoint_buffer
+        if checkpoint_dir is None or not checkpoint_buffer:
+            return
+        if not force and len(checkpoint_buffer) < checkpoint_every:
+            return
+        batch_index += 1
+        write_evaluation_batch(
+            pd.DataFrame(checkpoint_buffer),
+            checkpoint_dir,
+            batch_index,
+        )
+        checkpoint_buffer = []
+
+    def consume_result(
+        schedule_id: Any,
+        metadata: dict[str, Any],
+        result: EvaluationResult,
+    ) -> None:
+        row = _flatten_result(schedule_id, result, feature_names, metadata=metadata)
+        row["schedule_id"] = row.pop("design_id")
+        flattened_rows.append(row)
+        checkpoint_buffer.append(row)
+        flush_checkpoint()
+
+    if worker_count <= 1:
+        for job in jobs:
+            schedule_id, metadata, result = _evaluate_schedule_job(job)
+            consume_result(schedule_id, metadata, result)
+    else:
+        with ProcessPoolExecutor(max_workers=worker_count) as executor:
+            for schedule_id, metadata, result in executor.map(_evaluate_schedule_job, jobs):
+                consume_result(schedule_id, metadata, result)
+
+    flush_checkpoint(force=True)
+    return pd.DataFrame(flattened_rows)
+
+
 def _evaluate_design_job(
     job: tuple[
         Any,
@@ -236,6 +369,29 @@ def _evaluate_design_job(
     design_id, values, raw_values, metadata, config, seed = job
     design = PolicyDesign.from_mapping(values, config.policy, raw_values=raw_values)
     return design_id, metadata, evaluate_design(design, config, seed=seed)
+
+
+def _evaluate_schedule_job(
+    job: tuple[
+        Any,
+        dict[str, Any],
+        dict[str, float] | None,
+        dict[str, Any],
+        ViabilityConfig,
+        int,
+        int,
+        int,
+    ]
+) -> tuple[Any, dict[str, Any], EvaluationResult]:
+    schedule_id, values, raw_values, metadata, config, epoch_count, total_phases, seed = job
+    schedule = EpochPolicySchedule.from_flat_mapping(
+        values,
+        config.policy,
+        epoch_count=epoch_count,
+        total_phases=total_phases,
+        raw_values=raw_values,
+    )
+    return schedule_id, metadata, evaluate_policy_schedule(schedule, config, seed=seed)
 
 
 def _flatten_result(
@@ -280,6 +436,17 @@ def _design_metadata(row: pd.Series) -> dict[str, Any]:
     return metadata
 
 
+def _schedule_metadata(row: pd.Series) -> dict[str, Any]:
+    metadata = {}
+    for column in ["schedule_source", "sample_index", "template_name"]:
+        if column in row and pd.notna(row[column]):
+            value = row[column]
+            if hasattr(value, "item"):
+                value = value.item()
+            metadata[column] = value
+    return metadata
+
+
 def _seed_offset(row: pd.Series, index: int) -> int:
     source = str(row["doe_source"]) if "doe_source" in row and pd.notna(row["doe_source"]) else ""
     if (
@@ -304,6 +471,47 @@ def _load_brain(path: str) -> Any:
 
         _BRAIN_CACHE[cache_key] = joblib.load(brain_path)
     return _BRAIN_CACHE[cache_key]
+
+
+def _seed_simulation(config: ViabilityConfig, seed: int | None = None) -> None:
+    run_seed = config.run.random_seed if seed is None else seed
+    random.seed(run_seed)
+    np.random.seed(run_seed)
+
+
+def _make_simulation(config: ViabilityConfig, design: PolicyDesign) -> CAFSimulation:
+    use_physics_allocator = config.model.phase_backend == "physics"
+    brain = None
+    if config.model.phase_backend == "brain":
+        if config.model.brain_path is None:
+            raise ValueError("model.brain_path is required for brain-backed evaluation")
+        if config.model.expected_brain_outputs is None:
+            raise ValueError(
+                "model.expected_brain_outputs is required for brain-backed evaluation"
+            )
+        brain = _load_brain(config.model.brain_path)
+        _validate_brain_output(brain, config.model.expected_brain_outputs)
+
+    return CAFSimulation(
+        annual_intake=design.annual_intake,
+        retention_rate=design.retention_rate,
+        round_robin=config.model.round_robin,
+        brain=brain,
+        max_manning_pct=design.max_manning_pct,
+        staff_priority_mode=_parse_priority_mode(config.model.staff_priority_mode),
+        use_upgrade_quotas=config.model.use_upgrade_quotas,
+        sim_config=config.model.simulation,
+        use_physics_allocator=use_physics_allocator,
+    )
+
+
+def _apply_policy_to_simulation(sim: CAFSimulation, policy: PolicyDesign) -> None:
+    sim.annual_intake = policy.annual_intake
+    sim.phase_intake = policy.annual_intake // 3
+    sim.retention_rate = policy.retention_rate
+    sim.max_manning = policy.max_manning_pct / 100.0
+    sim.sq_phase_flug_intake = policy.flug_quota_per_phase
+    sim.sq_phase_ipug_intake = policy.ipug_quota_per_phase
 
 
 def _validate_brain_output(brain: Any, expected_outputs: int) -> None:

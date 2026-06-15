@@ -10,15 +10,21 @@ import pandas as pd
 from src.viability.config import load_config
 from src.viability.dashboard import (
     DashboardArtifactPaths,
+    DynamicDashboardArtifactPaths,
     aggregate_history_trajectory,
+    constraint_relaxation_table,
     direct_verification_caveat,
     direct_verification_label,
+    dynamic_epoch_table,
     feasible_intervals,
+    load_dynamic_dashboard_artifacts,
     load_dashboard_artifacts,
     local_feasible_sweep,
+    nearest_dynamic_misses,
     one_lever_sweep,
     policy_values_from_row,
     select_dashboard_candidate,
+    select_dynamic_schedule,
 )
 
 
@@ -213,6 +219,47 @@ class ViabilityDashboardTest(unittest.TestCase):
     def test_direct_verification_labels_include_backend(self):
         self.assertIn("brain backend", direct_verification_label(self.config))
         self.assertIn("internal sortie brain", direct_verification_caveat(self.config))
+
+    def test_dynamic_artifact_loading_and_nearest_miss_helpers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = _write_dynamic_artifacts(self.config, root)
+
+            artifacts = load_dynamic_dashboard_artifacts(paths)
+            selected = select_dynamic_schedule(
+                artifacts.evaluations,
+                mode="best_phi",
+            )
+            epoch_table = dynamic_epoch_table(
+                selected,
+                artifacts.config,
+                epoch_count=artifacts.epoch_count,
+            )
+            relaxations = constraint_relaxation_table(selected)
+            misses = nearest_dynamic_misses(artifacts.evaluations, top_n=1)
+
+            self.assertEqual(artifacts.epoch_count, 3)
+            self.assertEqual(selected["schedule_id"], "schedule_best")
+            self.assertEqual(epoch_table.shape, (3, 8))
+            self.assertEqual(relaxations.iloc[0]["constraint"], "wg_rap")
+            self.assertEqual(misses.iloc[0]["schedule_id"], "schedule_best")
+
+    def test_dynamic_loading_fails_clearly_when_schedule_columns_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = _write_dynamic_artifacts(
+                self.config,
+                root,
+                evaluations=_dynamic_evaluations(self.config).drop(
+                    columns=["epoch3_ipug_quota_per_phase"]
+                ),
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "dynamic evaluations is missing required columns",
+            ):
+                load_dynamic_dashboard_artifacts(paths)
 
 
 def _policy_values(**overrides):
@@ -433,6 +480,84 @@ def _write_artifacts(
         search_summary=search_summary_path,
         verification_summary=verification_summary_path,
         envelope_summary=envelope_summary_path,
+        report=report_path,
+    )
+
+
+def _dynamic_evaluations(config):
+    rows = []
+    for schedule_id, phi, wg_rap in [
+        ("schedule_best", 0.2, 0.2),
+        ("schedule_other", 1.0, 1.0),
+    ]:
+        row = {
+            "schedule_id": schedule_id,
+            "schedule_source": "heuristic",
+            "template_name": "static_best_current_miss",
+            "sample_index": 0,
+            "phase_backend": config.model.phase_backend,
+            "phi": phi,
+            "feasible": False,
+            "active_constraint": "wg_rap",
+            "active_constraint_value": wg_rap,
+            "status": "ok",
+            "error": None,
+            "constraint_total_pilots_window": -10.0,
+            "constraint_wg_rap": wg_rap,
+            "constraint_fl_rap": 0.1,
+            "constraint_ip_rap": -1.0,
+        }
+        for epoch in range(1, 4):
+            for name, value in _policy_values().items():
+                column = f"epoch{epoch}_{name}"
+                row[column] = value
+                row[f"raw_{column}"] = float(value)
+                row[f"applied_{column}"] = value
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _write_dynamic_artifacts(config, root, *, evaluations=None):
+    evaluations_path = root / "all_evaluations.csv"
+    if evaluations is None:
+        evaluations = _dynamic_evaluations(config)
+    evaluations.to_csv(evaluations_path, index=False)
+
+    summary_path = root / "dynamic_search_summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "epoch_count": 3,
+                "evaluated_count": int(len(evaluations)),
+                "feasible_count": 0,
+                "best_phi": float(evaluations["phi"].min()),
+                "best_schedule_id": "schedule_best",
+                "best_active_constraint": "wg_rap",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    sensitivity_path = root / "local_sensitivity.csv"
+    pd.DataFrame(
+        [
+            {
+                "epoch": 1,
+                "control": "retention_rate",
+                "response": "wg_rap",
+                "sensitivity": -1.0,
+                "abs_sensitivity": 1.0,
+            }
+        ]
+    ).to_csv(sensitivity_path, index=False)
+    report_path = root / "dynamic_control_report.md"
+    report_path.write_text("# Dynamic Control Report\n", encoding="utf-8")
+
+    return DynamicDashboardArtifactPaths(
+        config=Path("configs/viability.example.yaml"),
+        evaluations=evaluations_path,
+        summary=summary_path,
+        sensitivity=sensitivity_path,
         report=report_path,
     )
 

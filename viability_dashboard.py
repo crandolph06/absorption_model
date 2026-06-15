@@ -7,18 +7,26 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.viability.dashboard import (
+    DynamicDashboardArtifactPaths,
     POLICY_LABELS,
     DashboardArtifactPaths,
+    constraint_relaxation_table,
     default_artifact_paths,
+    default_dynamic_artifact_paths,
     direct_verification_caveat,
     direct_verification_label,
+    dynamic_epoch_table,
     envelope_plot_paths,
+    load_dynamic_dashboard_artifacts,
     load_dashboard_artifacts,
     local_feasible_sweep,
+    nearest_dynamic_misses,
     policy_values_from_row,
+    run_direct_dynamic_schedule,
     run_direct_policy,
     score_policy_values,
     select_dashboard_candidate,
+    select_dynamic_schedule,
 )
 
 
@@ -45,6 +53,25 @@ def _load_artifacts(
             search_summary=Path(search_summary),
             verification_summary=Path(verification_summary),
             envelope_summary=Path(envelope_summary),
+            report=Path(report) if report else None,
+        )
+    )
+
+
+@st.cache_resource(show_spinner=False)
+def _load_dynamic_artifacts(
+    config: str,
+    evaluations: str,
+    summary: str,
+    sensitivity: str,
+    report: str,
+):
+    return load_dynamic_dashboard_artifacts(
+        DynamicDashboardArtifactPaths(
+            config=Path(config),
+            evaluations=Path(evaluations),
+            summary=Path(summary),
+            sensitivity=Path(sensitivity) if sensitivity else None,
             report=Path(report) if report else None,
         )
     )
@@ -278,8 +305,229 @@ def _plot_experience_trajectory(trajectory: pd.DataFrame, minimum: float | None)
     return fig
 
 
+def _format_optional_metric(value) -> str:
+    if value is None:
+        return "n/a"
+    if isinstance(value, (float, int)):
+        return f"{float(value):.3g}"
+    return str(value)
+
+
+def _display_columns(frame: pd.DataFrame, columns: list[str]) -> list[str]:
+    return [column for column in columns if column in frame.columns]
+
+
+def _render_dynamic_dashboard():
+    defaults = default_dynamic_artifact_paths()
+    st.sidebar.header("Dynamic Search Artifacts")
+    config_path = _path_input("Config", defaults.config)
+    evaluations_path = _path_input("Dynamic evaluations", defaults.evaluations)
+    summary_path = _path_input("Dynamic search summary", defaults.summary)
+    sensitivity_path = _path_input("Local sensitivity", defaults.sensitivity or Path(""))
+    report_path = _path_input("Dynamic report", defaults.report or Path(""))
+
+    try:
+        artifacts = _load_dynamic_artifacts(
+            config_path,
+            evaluations_path,
+            summary_path,
+            sensitivity_path,
+            report_path,
+        )
+    except Exception as exc:
+        st.error(str(exc))
+        st.stop()
+
+    config = artifacts.config
+    summary = artifacts.summary
+    evaluations = artifacts.evaluations
+    ok = evaluations[evaluations["status"] == "ok"].copy()
+    feasible_count = int(summary.get("feasible_count", ok["feasible"].astype(bool).sum()))
+
+    st.title("Viability Results Dashboard")
+    st.caption(
+        "Dynamic policy / finite-horizon control search. "
+        "Rows shown here are direct long-horizon evaluations; reruns below are "
+        f"{direct_verification_label(config)}."
+    )
+
+    metric_cols = st.columns(5)
+    metric_cols[0].metric("Backend", str(summary.get("phase_backend") or config.model.phase_backend))
+    metric_cols[1].metric("Evaluations", _format_optional_metric(summary.get("evaluated_count", len(evaluations))))
+    metric_cols[2].metric("Feasible", str(feasible_count))
+    metric_cols[3].metric("Best phi", _format_optional_metric(summary.get("best_phi")))
+    metric_cols[4].metric("Active constraint", str(summary.get("best_active_constraint", "n/a")))
+
+    if feasible_count > 0:
+        st.success("At least one direct-verified dynamic policy was found.")
+    else:
+        st.warning(
+            "No direct-feasible dynamic policy has been found in this result bundle. "
+            "Use the nearest miss and relaxation table to decide what to search or relax next."
+        )
+
+    control_col, main_col = st.columns([1, 2], gap="large")
+
+    with control_col:
+        st.subheader("Selected Schedule")
+        selection_options = ["best_phi", "schedule_id"]
+        if feasible_count > 0:
+            selection_options.insert(1, "best_feasible")
+        selection_mode = st.radio(
+            "Start from",
+            selection_options,
+            format_func=lambda value: {
+                "best_phi": "Nearest miss / best phi",
+                "best_feasible": "Best feasible",
+                "schedule_id": "Specific schedule",
+            }[value],
+        )
+        schedule_id = None
+        if selection_mode == "schedule_id":
+            ranked = nearest_dynamic_misses(evaluations, top_n=min(100, len(evaluations)))
+            schedule_id = st.selectbox("Schedule", ranked["schedule_id"].astype(str).tolist())
+
+        selected_row = select_dynamic_schedule(
+            evaluations,
+            mode=selection_mode,
+            schedule_id=schedule_id,
+        )
+        st.metric("Selected phi", f"{float(selected_row['phi']):.3g}")
+        st.metric("Selected status", "Feasible" if bool(selected_row["feasible"]) else "Infeasible")
+        st.caption(
+            "Schedule source: "
+            f"{selected_row.get('schedule_source', 'unknown')}"
+            + (
+                f" / {selected_row.get('template_name')}"
+                if "template_name" in selected_row and pd.notna(selected_row.get("template_name"))
+                else ""
+            )
+        )
+        st.dataframe(
+            dynamic_epoch_table(selected_row, config, epoch_count=artifacts.epoch_count),
+            width="stretch",
+            hide_index=True,
+        )
+        selected_key = str(selected_row["schedule_id"])
+        if st.button("Re-run direct trajectory", type="primary", width="stretch"):
+            with st.spinner(f"Running {direct_verification_label(config)}..."):
+                st.session_state.viability_dynamic_direct_key = selected_key
+                st.session_state.viability_dynamic_direct_result = run_direct_dynamic_schedule(
+                    selected_row,
+                    config,
+                    epoch_count=artifacts.epoch_count,
+                )
+        st.caption(direct_verification_caveat(config))
+
+    with main_col:
+        st.subheader("Nearest Miss")
+        relaxations = constraint_relaxation_table(selected_row)
+        if relaxations.empty:
+            st.success("The selected schedule has no positive constraint violations.")
+        else:
+            st.write("Smallest direct requirement relaxations needed at the selected point:")
+            st.dataframe(relaxations, width="stretch", hide_index=True)
+
+        display = nearest_dynamic_misses(evaluations, top_n=15)
+        display_columns = _display_columns(
+            display,
+            [
+                "schedule_id",
+                "template_name",
+                "schedule_source",
+                "phi",
+                "feasible",
+                "active_constraint",
+                "positive_constraint_sum",
+                "constraint_total_pilots_window",
+                "constraint_wg_rap",
+                "constraint_fl_rap",
+                "constraint_ip_rap",
+            ],
+        )
+        st.dataframe(display[display_columns], width="stretch", hide_index=True)
+
+    trajectory_tab, authority_tab, report_tab, artifact_tab = st.tabs(
+        ["Direct Trajectory", "Control Authority", "Report", "Artifacts"]
+    )
+
+    direct_result = st.session_state.get("viability_dynamic_direct_result")
+    direct_key = st.session_state.get("viability_dynamic_direct_key")
+    with trajectory_tab:
+        if direct_result is None or direct_key != selected_key:
+            st.write("Re-run the selected schedule to populate trajectory plots.")
+        elif direct_result.evaluation.status != "ok":
+            st.error(f"Direct rerun failed: {direct_result.evaluation.error}")
+        else:
+            direct_cols = st.columns(4)
+            direct_cols[0].metric("Direct phi", f"{direct_result.evaluation.phi:.3g}")
+            direct_cols[1].metric(
+                "Direct feasible",
+                "Yes" if direct_result.evaluation.feasible else "No",
+            )
+            direct_cols[2].metric("Backend", str(direct_result.evaluation.phase_backend))
+            direct_cols[3].metric(
+                "Active constraint",
+                str(direct_result.evaluation.active_constraint),
+            )
+            st.plotly_chart(
+                _plot_inventory_trajectory(
+                    direct_result.trajectory,
+                    config.requirements.target_total_pilots,
+                ),
+                width="stretch",
+            )
+            st.plotly_chart(_plot_rap_trajectory(direct_result.trajectory), width="stretch")
+            st.plotly_chart(
+                _plot_experience_trajectory(
+                    direct_result.trajectory,
+                    config.requirements.min_experience_ratio,
+                ),
+                width="stretch",
+            )
+
+    with authority_tab:
+        if artifacts.sensitivity is None:
+            st.write("No local finite-difference diagnostic artifact was supplied.")
+        else:
+            response = st.selectbox(
+                "Response",
+                sorted(artifacts.sensitivity["response"].astype(str).unique().tolist()),
+            )
+            subset = artifacts.sensitivity[
+                artifacts.sensitivity["response"].astype(str) == response
+            ].sort_values("abs_sensitivity", ascending=False)
+            st.dataframe(subset.head(20), width="stretch", hide_index=True)
+
+    with report_tab:
+        if artifacts.paths.report and artifacts.paths.report.exists():
+            st.markdown(artifacts.paths.report.read_text(encoding="utf-8"))
+        else:
+            st.write("No dynamic report artifact was supplied.")
+
+    with artifact_tab:
+        st.write("Dynamic search summary")
+        st.json(summary)
+        st.write("Artifact paths")
+        st.json({key: str(value) for key, value in artifacts.paths.__dict__.items()})
+
+
+st.sidebar.header("Dashboard Mode")
+dashboard_mode = st.sidebar.radio(
+    "Mode",
+    ["dynamic", "static"],
+    format_func=lambda value: {
+        "dynamic": "Dynamic search results",
+        "static": "Static policy sliders",
+    }[value],
+)
+
+if dashboard_mode == "dynamic":
+    _render_dynamic_dashboard()
+    st.stop()
+
 defaults = default_artifact_paths()
-st.sidebar.header("Artifact Paths")
+st.sidebar.header("Static Slider Artifacts")
 config_path = _path_input("Config", defaults.config)
 surrogate_path = _path_input("Signed surrogate", defaults.surrogate)
 evaluations_path = _path_input("Direct evaluations", defaults.evaluations)

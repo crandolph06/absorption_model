@@ -7,6 +7,10 @@ from pathlib import Path
 from src.viability.active_learning import run_active_learning_from_files
 from src.viability.config import load_config
 from src.viability.doe import generate_doe
+from src.viability.dynamic_search import (
+    run_dynamic_policy_diagnostic,
+    run_dynamic_policy_search,
+)
 from src.viability.evaluator import evaluate_design, evaluate_designs_parallel
 from src.viability.io import run_output_dir, write_config_resolved, write_table
 from src.viability.plots import run_envelope_plots_from_files
@@ -210,6 +214,73 @@ def main() -> int:
         type=int,
         default=50,
         help="Flush verification checkpoint batches every N completed designs",
+    )
+    dynamic_parser = subparsers.add_parser(
+        "dynamic-search",
+        help="Run structured finite-horizon dynamic-policy search with direct physics verification",
+    )
+    dynamic_parser.add_argument("--config", required=True, help="Path to viability YAML config")
+    dynamic_parser.add_argument("--output-dir", required=True, help="Dynamic search output directory")
+    dynamic_parser.add_argument("--epochs", type=int, default=3, help="Number of policy epochs")
+    dynamic_parser.add_argument(
+        "--initial-samples",
+        type=int,
+        default=64,
+        help="Initial Sobol schedules to direct-evaluate before surrogate search",
+    )
+    dynamic_parser.add_argument(
+        "--optimizer-pool-size",
+        type=int,
+        default=4096,
+        help="Sobol pool scored by the dynamic policy surrogate",
+    )
+    dynamic_parser.add_argument(
+        "--verify-top",
+        type=int,
+        default=32,
+        help="Number of optimizer-proposed schedules to direct-verify",
+    )
+    dynamic_parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Override run.workers for direct dynamic evaluations",
+    )
+    dynamic_parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=10,
+        help="Flush dynamic evaluation checkpoints every N completed schedules",
+    )
+    diagnose_parser = subparsers.add_parser(
+        "dynamic-diagnose",
+        help="Run local finite-difference control diagnostics around the best dynamic schedule",
+    )
+    diagnose_parser.add_argument("--config", required=True, help="Path to viability YAML config")
+    diagnose_parser.add_argument(
+        "--evaluations",
+        required=True,
+        help="Dynamic all_evaluations.parquet path",
+    )
+    diagnose_parser.add_argument("--output-dir", required=True, help="Diagnostic output directory")
+    diagnose_parser.add_argument("--epochs", type=int, default=3, help="Number of policy epochs")
+    diagnose_parser.add_argument(
+        "--perturbation-fraction",
+        type=float,
+        default=0.05,
+        help="Fraction of each control range used for finite differences",
+    )
+    diagnose_parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Override run.workers for direct diagnostic evaluations",
+    )
+    diagnose_parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=10,
+        help="Flush diagnostic checkpoints every N completed schedules",
     )
     envelope_parser = subparsers.add_parser(
         "plot-envelope",
@@ -442,6 +513,63 @@ def main() -> int:
                     "verified_count": result.verified_count,
                     "feasible_count": result.feasible_count,
                     "plot_paths": {name: str(path) for name, path in result.plot_paths.items()},
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    if args.command == "dynamic-search":
+        result = run_dynamic_policy_search(
+            config=config,
+            output_dir=args.output_dir,
+            epoch_count=args.epochs,
+            initial_samples=args.initial_samples,
+            optimizer_pool_size=args.optimizer_pool_size,
+            verify_top=args.verify_top,
+            workers=args.workers,
+            checkpoint_every=args.checkpoint_every,
+        )
+        print(
+            json.dumps(
+                {
+                    "output_dir": str(result.output_dir),
+                    "initial_schedules_path": str(result.initial_schedules_path),
+                    "initial_evaluations_path": str(result.initial_evaluations_path),
+                    "optimizer_candidates_path": str(result.optimizer_candidates_path),
+                    "optimizer_evaluations_path": str(result.optimizer_evaluations_path),
+                    "all_evaluations_path": str(result.all_evaluations_path),
+                    "summary_path": str(result.summary_path),
+                    "evaluated_count": result.evaluated_count,
+                    "feasible_count": result.feasible_count,
+                    "best_phi": result.best_phi,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    if args.command == "dynamic-diagnose":
+        result = run_dynamic_policy_diagnostic(
+            config=config,
+            evaluations_path=args.evaluations,
+            output_dir=args.output_dir,
+            epoch_count=args.epochs,
+            perturbation_fraction=args.perturbation_fraction,
+            workers=args.workers,
+            checkpoint_every=args.checkpoint_every,
+        )
+        print(
+            json.dumps(
+                {
+                    "output_dir": str(result.output_dir),
+                    "diagnostic_schedules_path": str(result.diagnostic_schedules_path),
+                    "diagnostic_evaluations_path": str(result.diagnostic_evaluations_path),
+                    "sensitivity_path": str(result.sensitivity_path),
+                    "report_path": str(result.report_path),
+                    "evaluated_count": result.evaluated_count,
                 },
                 indent=2,
                 sort_keys=True,

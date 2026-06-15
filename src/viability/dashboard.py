@@ -9,7 +9,12 @@ import numpy as np
 import pandas as pd
 
 from src.viability.config import ViabilityConfig, load_config
-from src.viability.evaluator import EvaluationResult, simulate_design_history
+from src.viability.dynamic_policy import EpochPolicySchedule, dynamic_feature_names
+from src.viability.evaluator import (
+    EvaluationResult,
+    simulate_design_history,
+    simulate_policy_schedule_history,
+)
 from src.viability.metrics import (
     aggregate_violation,
     compute_constraints,
@@ -54,6 +59,25 @@ class DashboardArtifacts:
     search_summary: dict[str, Any]
     verification_summary: dict[str, Any]
     envelope_summary: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class DynamicDashboardArtifactPaths:
+    config: Path
+    evaluations: Path
+    summary: Path
+    sensitivity: Path | None = None
+    report: Path | None = None
+
+
+@dataclass(frozen=True)
+class DynamicDashboardArtifacts:
+    paths: DynamicDashboardArtifactPaths
+    config: ViabilityConfig
+    evaluations: pd.DataFrame
+    summary: dict[str, Any]
+    epoch_count: int
+    sensitivity: pd.DataFrame | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +154,28 @@ def default_artifact_paths(root: str | Path = ".") -> DashboardArtifactPaths:
     )
 
 
+def default_dynamic_artifact_paths(root: str | Path = ".") -> DynamicDashboardArtifactPaths:
+    base = Path(root)
+    dynamic_root = base / "outputs" / "viability" / "dynamic_policy_search"
+    summary_candidates = sorted(
+        dynamic_root.glob("*/dynamic_search_summary.json"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    run_dir = (
+        summary_candidates[0].parent
+        if summary_candidates
+        else dynamic_root / "run_3epoch_512_32768_096"
+    )
+    return DynamicDashboardArtifactPaths(
+        config=run_dir / "config_resolved.yaml",
+        evaluations=run_dir / "all_evaluations.parquet",
+        summary=run_dir / "dynamic_search_summary.json",
+        sensitivity=run_dir / "diagnostic" / "local_sensitivity.csv",
+        report=run_dir / "diagnostic" / "dynamic_control_report.md",
+    )
+
+
 def load_dashboard_artifacts(paths: DashboardArtifactPaths) -> DashboardArtifacts:
     config = load_config(paths.config)
     surrogate = load_signed_constraint_surrogate(paths.surrogate)
@@ -167,6 +213,165 @@ def load_dashboard_artifacts(paths: DashboardArtifactPaths) -> DashboardArtifact
         search_summary=search_summary,
         verification_summary=verification_summary,
         envelope_summary=envelope_summary,
+    )
+
+
+def load_dynamic_dashboard_artifacts(
+    paths: DynamicDashboardArtifactPaths,
+) -> DynamicDashboardArtifacts:
+    config = load_config(paths.config)
+    evaluations = read_evaluations_table(paths.evaluations)
+    summary = _read_json_object(paths.summary)
+    epoch_count = int(summary.get("epoch_count") or infer_dynamic_epoch_count(evaluations, config))
+    if epoch_count <= 0:
+        raise ValueError("Dynamic search summary must identify a positive epoch_count")
+    _require_columns(
+        evaluations,
+        [
+            "schedule_id",
+            "phi",
+            "feasible",
+            "active_constraint",
+            "status",
+            "phase_backend",
+            *dynamic_feature_names(config.policy, epoch_count),
+        ],
+        "dynamic evaluations",
+    )
+    sensitivity = None
+    if paths.sensitivity is not None and paths.sensitivity.exists():
+        sensitivity = read_evaluations_table(paths.sensitivity)
+        _require_columns(
+            sensitivity,
+            ["epoch", "control", "response", "sensitivity", "abs_sensitivity"],
+            "dynamic sensitivity",
+        )
+    if paths.report is not None and not paths.report.exists():
+        raise FileNotFoundError(f"Dynamic report artifact does not exist: {paths.report}")
+    return DynamicDashboardArtifacts(
+        paths=paths,
+        config=config,
+        evaluations=evaluations,
+        summary=summary,
+        epoch_count=epoch_count,
+        sensitivity=sensitivity,
+    )
+
+
+def infer_dynamic_epoch_count(evaluations: pd.DataFrame, config: ViabilityConfig) -> int:
+    control = next(iter(config.policy.variables))
+    prefix = "epoch"
+    suffix = f"_{control}"
+    epochs = []
+    for column in evaluations.columns:
+        if not column.startswith(prefix) or not column.endswith(suffix):
+            continue
+        epoch_text = column[len(prefix): -len(suffix)]
+        if epoch_text.isdigit():
+            epochs.append(int(epoch_text))
+    return max(epochs) if epochs else 0
+
+
+def select_dynamic_schedule(
+    evaluations: pd.DataFrame,
+    *,
+    mode: str,
+    schedule_id: str | None = None,
+) -> pd.Series:
+    _require_columns(evaluations, ["schedule_id", "phi", "feasible", "status"], "dynamic evaluations")
+    ok = evaluations[evaluations["status"] == "ok"].copy()
+    if ok.empty:
+        raise ValueError("No successful dynamic evaluations are available")
+    if mode == "best_phi":
+        return ok.sort_values(["phi", "schedule_id"]).iloc[0]
+    if mode == "best_feasible":
+        feasible = ok[ok["feasible"].astype(bool)].copy()
+        if feasible.empty:
+            raise ValueError("No direct-feasible dynamic schedules are available")
+        return feasible.sort_values(["phi", "schedule_id"]).iloc[0]
+    if mode == "schedule_id":
+        if schedule_id is None:
+            raise ValueError("schedule_id must be supplied when mode='schedule_id'")
+        matches = ok[ok["schedule_id"].astype(str) == str(schedule_id)]
+        if matches.empty:
+            raise ValueError(f"No dynamic evaluation has schedule_id={schedule_id!r}")
+        return matches.iloc[0]
+    raise ValueError("mode must be one of 'best_phi', 'best_feasible', or 'schedule_id'")
+
+
+def dynamic_schedule_from_row(
+    row: pd.Series | Mapping[str, Any],
+    config: ViabilityConfig,
+    *,
+    epoch_count: int,
+) -> EpochPolicySchedule:
+    total_phases = config.model.years_to_run * 3
+    values = {}
+    raw_values = {}
+    for name in dynamic_feature_names(config.policy, epoch_count):
+        if name not in row:
+            raise ValueError(f"Dynamic row is missing schedule value {name!r}")
+        values[name] = row[name]
+        raw_column = f"raw_{name}"
+        if raw_column in row:
+            raw_values[name] = float(row[raw_column])
+    return EpochPolicySchedule.from_flat_mapping(
+        values,
+        config.policy,
+        epoch_count=epoch_count,
+        total_phases=total_phases,
+        raw_values=raw_values if raw_values else None,
+    )
+
+
+def dynamic_epoch_table(
+    row: pd.Series | Mapping[str, Any],
+    config: ViabilityConfig,
+    *,
+    epoch_count: int,
+) -> pd.DataFrame:
+    rows = []
+    for epoch_index in range(epoch_count):
+        prefix = f"epoch{epoch_index + 1}"
+        table_row: dict[str, Any] = {"epoch": epoch_index + 1}
+        for name in config.policy.variables:
+            column = f"{prefix}_{name}"
+            if column not in row:
+                raise ValueError(f"Dynamic row is missing schedule value {column!r}")
+            table_row[name] = row[column]
+        rows.append(table_row)
+    return pd.DataFrame(rows)
+
+
+def nearest_dynamic_misses(evaluations: pd.DataFrame, *, top_n: int = 10) -> pd.DataFrame:
+    _require_columns(evaluations, ["schedule_id", "phi", "feasible", "status"], "dynamic evaluations")
+    ok = evaluations[evaluations["status"] == "ok"].copy()
+    if ok.empty:
+        return ok
+    constraint_columns = [column for column in ok.columns if column.startswith("constraint_")]
+    if constraint_columns:
+        ok.loc[:, "positive_constraint_sum"] = ok[constraint_columns].clip(lower=0.0).sum(axis=1)
+    else:
+        ok.loc[:, "positive_constraint_sum"] = np.nan
+    return ok.sort_values(["phi", "positive_constraint_sum", "schedule_id"]).head(top_n)
+
+
+def constraint_relaxation_table(row: pd.Series | Mapping[str, Any]) -> pd.DataFrame:
+    rows = []
+    for column, value in row.items():
+        if not str(column).startswith("constraint_"):
+            continue
+        numeric = float(value)
+        if numeric > 0.0:
+            rows.append(
+                {
+                    "constraint": str(column).removeprefix("constraint_"),
+                    "required_relaxation": numeric,
+                }
+            )
+    return pd.DataFrame(rows, columns=["constraint", "required_relaxation"]).sort_values(
+        "required_relaxation",
+        ascending=False,
     )
 
 
@@ -486,6 +691,63 @@ def run_direct_policy(
             design=design.to_dict(),
             raw_design=design.to_raw_dict(),
             applied_design=design.to_applied_dict(),
+            raw_metrics={},
+            constraints={},
+            phi=float("inf"),
+            feasible=False,
+            active_constraint=None,
+            active_constraint_value=None,
+            status="failed",
+            error=str(exc),
+        )
+        return DirectPolicyResult(
+            evaluation=evaluation,
+            history=pd.DataFrame(),
+            trajectory=pd.DataFrame(),
+        )
+
+
+def run_direct_dynamic_schedule(
+    row: pd.Series | Mapping[str, Any],
+    config: ViabilityConfig,
+    *,
+    epoch_count: int,
+    seed: int | None = None,
+) -> DirectPolicyResult:
+    schedule = dynamic_schedule_from_row(row, config, epoch_count=epoch_count)
+    try:
+        history = simulate_policy_schedule_history(schedule, config, seed=seed)
+        raw_metrics = compute_raw_metrics(history, config.model.assessment_start_year)
+        constraints = compute_constraints(raw_metrics, config.requirements)
+        phi, active_constraint, active_constraint_value = aggregate_violation(
+            constraints,
+            config.constraint_scales,
+        )
+        evaluation = EvaluationResult(
+            phase_backend=config.model.phase_backend,
+            design=schedule.to_flat_dict(raw=False),
+            raw_design=schedule.to_flat_dict(raw=True),
+            applied_design=schedule.to_flat_dict(raw=False),
+            raw_metrics=raw_metrics,
+            constraints=constraints,
+            phi=phi,
+            feasible=phi <= 0.0,
+            active_constraint=active_constraint,
+            active_constraint_value=active_constraint_value,
+            status="ok",
+        )
+        trajectory = aggregate_history_trajectory(history, config)
+        return DirectPolicyResult(
+            evaluation=evaluation,
+            history=history,
+            trajectory=trajectory,
+        )
+    except Exception as exc:
+        evaluation = EvaluationResult(
+            phase_backend=config.model.phase_backend,
+            design=schedule.to_flat_dict(raw=False),
+            raw_design=schedule.to_flat_dict(raw=True),
+            applied_design=schedule.to_flat_dict(raw=False),
             raw_metrics={},
             constraints={},
             phi=float("inf"),
