@@ -13,6 +13,7 @@ from src import rules
 from src.engine import (
     _allocate_ct_buckets_round_robin,
     _can_assign_distinct_from_pool,
+    allocate_sim_rap,
     assign_sim,
     assign_sortie,
     create_pilots,
@@ -359,6 +360,44 @@ class TestContinuationTraining(unittest.TestCase):
         _run_phase(cfg, pilots)
 
         self.assertEqual(_total_sorties(pilots), gross)
+
+
+class TestSimRapAllocation(unittest.TestCase):
+    def test_sim_rap_heap_prioritizes_largest_shortfall(self):
+        cfg = SquadronConfig(ute=10.0, paa=10, id=1, total_pilots=2, ip_qty=0, experience_ratio=0.0)
+        high_shortfall = Pilot(Qual.WG)
+        low_shortfall = Pilot(Qual.WG)
+        high_shortfall.target_sims = 2.0
+        low_shortfall.target_sims = 1.0
+
+        allocate_sim_rap(
+            [low_shortfall, high_shortfall],
+            cfg,
+            phase_length_days=30,
+            noise=0.0,
+        )
+
+        self.assertEqual(high_shortfall.sim_phase, 2.0)
+        self.assertEqual(low_shortfall.sim_phase, 1.0)
+
+    def test_sim_rap_heap_respects_sim_wing_capacity(self):
+        cfg = SquadronConfig(
+            ute=10.0,
+            paa=10,
+            id=1,
+            total_pilots=2,
+            ip_qty=0,
+            experience_ratio=0.0,
+            sim_sessions_monthly=1.0,
+            sim_bays_per_session=1,
+        )
+        pilots = [Pilot(Qual.WG), Pilot(Qual.WG)]
+        for pilot in pilots:
+            pilot.target_sims = 2.0
+
+        allocate_sim_rap(pilots, cfg, phase_length_days=30, noise=0.0)
+
+        self.assertEqual(sum(p.sim_phase for p in pilots), 1.0)
 
 
 class TestSyllabusBurdenMath(unittest.TestCase):

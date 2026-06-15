@@ -20,12 +20,18 @@ measured and optimized.
   - `workers=1`: 12.9 s wall time
   - `workers=4`: 5.0 s wall time
   - `workers=8`: 3.4 s wall time
+- After the second allocator optimization pass, the same 8-policy probe measured:
+  - `workers=1`: 4.1 s wall time
+  - `workers=4`: 2.2 s wall time
+  - `workers=8`: 1.8 s wall time
 - A one-squadron, one-year profile showed the single-policy physics path is
   dominated by Python allocation overhead, not heavy numerical kernels:
   repeated pilot scans, candidate-list construction, sorting, and calls to
   `rules.can_fill_seat`.
 - The first optimization pass reduced the profiled single-design time from
   about 8.6 s to about 4.8 s for the benchmarked one-year design.
+- The second optimization pass reduced the profiled single-design time further
+  to about 1.4 s for the benchmarked one-year design.
 
 ## Execution Slices
 
@@ -53,6 +59,10 @@ measured and optimized.
      full candidate lists, CT round-robin caches static eligibility pools by
      required qualification, and deterministic zero-noise allocation uses fast
      direct attribute keys.
+   - Status: second pass complete. CT round-robin now uses lazy priority queues
+     for deterministic zero-noise allocation, event-capacity checks avoid
+     repeated per-pilot month calculations, sim-RAP top-up uses a lazy priority
+     queue, and the hot `can_fill_seat` rule uses identity-based enum checks.
    - Note: `allocation_noise=0` no longer consumes random numbers while building
      assignment keys. This removes meaningless RNG burn, but exact seeded
      trajectories can shift slightly when later model steps use randomness.
@@ -62,7 +72,7 @@ measured and optimized.
    - Update this document with measured before/after timings.
    - Decide whether the GPR surrogate is still needed for search throughput, or
      only for dashboard guidance and uncertainty-aware screening.
-   - Status: complete for the first pass. Direct physics is now fast enough for
+   - Status: complete for the second pass. Direct physics is now fast enough for
      small DOE and candidate-verification batches when run with workers, but
      broader active-learning campaigns should still be sized from measured
      throughput rather than assumed surrogate necessity.
@@ -78,10 +88,9 @@ measured and optimized.
   screening, and local feasible-bound recommendations unless a full direct
   search proves cheap enough.
 - If more speed is needed, the next focused engineering slice should optimize
-  event-capacity checks and CT assignment with maintained per-pilot event loads
-  or heap/lazy-priority queues. The final profile still spends most time in
-  `allocate_continuation_training`, `assign_sortie`, `_eligible_for_event`, and
-  `Pilot.has_events_capacity`.
+  syllabus-event support-pool construction. The final profile now spends most
+  time in `process_syllabus_event`, `check_syllabus_resources`,
+  `allocate_continuation_training`, and `can_fill_seat`.
 
 ## Non-Goals For This Slice
 

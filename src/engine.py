@@ -242,6 +242,14 @@ def _ct_heap_entry(p: Pilot, side: str, order: int) -> tuple:
     return (*_deterministic_blue_sortie_key(p), order, p)
 
 
+def _sim_rap_shortfall(p: Pilot, phase_months: float) -> float:
+    return p.target_sims * phase_months - p.sim_phase
+
+
+def _sim_rap_heap_entry(p: Pilot, phase_months: float, order: int) -> tuple:
+    return (-_sim_rap_shortfall(p, phase_months), *_deterministic_sim_key(p), order, p)
+
+
 def _assign_ct_sortie_from_heap(
     heap: list[tuple],
     *,
@@ -269,6 +277,40 @@ def _assign_ct_sortie_from_heap(
         )
         if _has_event_capacity_under_limit(pilot, max_phase_events):
             heapq.heappush(heap, _ct_heap_entry(pilot, side, order_by_id[id(pilot)]))
+        return True
+    return False
+
+
+def _assign_sim_rap_from_heap(
+    heap: list[tuple],
+    *,
+    cfg: SquadronConfig,
+    phase_months: float,
+    order_by_id: dict[int, int],
+    max_phase_events: float,
+) -> bool:
+    while heap:
+        entry = heapq.heappop(heap)
+        pilot = entry[-1]
+        if _sim_rap_shortfall(pilot, phase_months) <= 1e-9:
+            continue
+        if not _has_event_capacity_under_limit(pilot, max_phase_events):
+            continue
+
+        current = _sim_rap_heap_entry(pilot, phase_months, order_by_id[id(pilot)])
+        if entry[:-1] != current[:-1]:
+            heapq.heappush(heap, current)
+            continue
+
+        pilot.add_sim(cfg.avg_sortie_dur)
+        if (
+            _sim_rap_shortfall(pilot, phase_months) > 1e-9
+            and _has_event_capacity_under_limit(pilot, max_phase_events)
+        ):
+            heapq.heappush(
+                heap,
+                _sim_rap_heap_entry(pilot, phase_months, order_by_id[id(pilot)]),
+            )
         return True
     return False
 
@@ -556,12 +598,12 @@ def _allocate_ct_buckets_round_robin(
             deterministic_heaps[bucket] = heap
 
     assigned = 0
-    while sum(remaining.get(b, 0) for b in buckets) > 0:
+    remaining_total = sum(remaining.get(b, 0) for b in buckets)
+    while remaining_total > 0:
         assigned_this_pass = False
         for bucket in buckets:
             if remaining.get(bucket, 0) <= 0:
                 continue
-            eligible = candidate_pools[bucket.min_qual]
             if bucket in deterministic_heaps:
                 assigned_sortie = _assign_ct_sortie_from_heap(
                     deterministic_heaps[bucket],
@@ -572,6 +614,7 @@ def _allocate_ct_buckets_round_robin(
                     single_ship=single_ship,
                 )
             else:
+                eligible = candidate_pools[bucket.min_qual]
                 assigned_sortie = assign_sortie(
                     cfg=cfg,
                     candidates=eligible,
@@ -582,9 +625,11 @@ def _allocate_ct_buckets_round_robin(
                 )
             if assigned_sortie:
                 remaining[bucket] -= 1
+                remaining_total -= 1
                 assigned += 1
                 assigned_this_pass = True
             else:
+                remaining_total -= remaining.get(bucket, 0)
                 remaining[bucket] = 0
 
         if not assigned_this_pass:
@@ -676,6 +721,28 @@ def allocate_sim_rap(
     else:
         sim_capacity = None  # no sim-bay limit (e.g. SIM_SESSIONS_MONTHLY = inf)
     used_sims = int(round(sum(p.sim_phase for p in pilots)))
+
+    max_phase_events = _phase_event_limit(phase_length_days)
+    if noise == 0.0 and max_phase_events is not None:
+        order_by_id = {id(p): index for index, p in enumerate(pilots)}
+        heap = [
+            _sim_rap_heap_entry(p, phase_months, order_by_id[id(p)])
+            for p in pilots
+            if _sim_rap_shortfall(p, phase_months) > 1e-9
+            and _has_event_capacity_under_limit(p, max_phase_events)
+        ]
+        heapq.heapify(heap)
+        while (sim_capacity is None or used_sims < sim_capacity) and heap:
+            if not _assign_sim_rap_from_heap(
+                heap,
+                cfg=cfg,
+                phase_months=phase_months,
+                order_by_id=order_by_id,
+                max_phase_events=max_phase_events,
+            ):
+                break
+            used_sims += 1
+        return
 
     while sim_capacity is None or used_sims < sim_capacity:
         pool = []
