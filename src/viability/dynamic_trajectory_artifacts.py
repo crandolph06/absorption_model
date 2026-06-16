@@ -240,133 +240,44 @@ def write_dynamic_figures(
         ax.grid(True, alpha=0.25)
         paths["trade_space"] = save_figure(fig, output_dir / "trade_space_total_wg_fl.png", plt)
 
-        fig = plt.figure(figsize=(8.8, 7.3), constrained_layout=False)
-        grid = fig.add_gridspec(
-            2,
-            5,
-            width_ratios=[1.0, 0.045, 0.18, 1.0, 0.045],
-            height_ratios=[1.0, 1.08],
-            wspace=0.55,
-            hspace=0.48,
+        x_col = "constraint_total_pilots_window"
+        y_col = "constraint_wg_rap"
+        color_col = "constraint_fl_rap"
+        fig, axis = plt.subplots(figsize=(6.4, 4.8))
+        scatter = axis.scatter(
+            ok[x_col],
+            ok[y_col],
+            c=ok[color_col],
+            cmap="viridis",
+            s=18,
+            alpha=0.62,
+            edgecolor="none",
         )
-        axes = [
-            fig.add_subplot(grid[0, 0]),
-            fig.add_subplot(grid[0, 3]),
-            fig.add_subplot(grid[1, 1:4]),
-        ]
-        color_axes = [
-            fig.add_subplot(grid[0, 1]),
-            fig.add_subplot(grid[0, 4]),
-            fig.add_subplot(grid[1, 4]),
-        ]
-        front_mask = _nondominated_mask(
-            ok,
-            [
-                "constraint_total_pilots_window",
-                "constraint_wg_rap",
-                "constraint_fl_rap",
-            ],
+        axis.scatter(
+            [best[x_col]],
+            [best[y_col]],
+            marker="*",
+            s=170,
+            color="#b91c1c",
+            label="best observed",
+            zorder=5,
         )
-        front = ok.loc[front_mask]
-        panels = [
-            (
-                axes[0],
-                "constraint_total_pilots_window",
-                "constraint_wg_rap",
-                "constraint_fl_rap",
-                "Inventory window vs WG RAP",
-                "Total-pilot-window violation",
-                "WG RAP violation",
-                "FL RAP violation",
-            ),
-            (
-                axes[1],
-                "constraint_total_pilots_window",
-                "constraint_fl_rap",
-                "constraint_wg_rap",
-                "Inventory window vs FL RAP",
-                "Total-pilot-window violation",
-                "FL RAP violation",
-                "WG RAP violation",
-            ),
-            (
-                axes[2],
-                "constraint_wg_rap",
-                "constraint_fl_rap",
-                "constraint_total_pilots_window",
-                "WG RAP vs FL RAP",
-                "WG RAP violation",
-                "FL RAP violation",
-                "Total-pilot-window violation",
-            ),
-        ]
-        for panel_index, (
-            axis,
-            x_col,
-            y_col,
-            color_col,
-            title,
-            xlabel,
-            ylabel,
-            color_label,
-        ) in enumerate(panels):
-            scatter = axis.scatter(
-                ok[x_col],
-                ok[y_col],
-                c=ok[color_col],
-                cmap="viridis",
-                s=15,
-                alpha=0.62,
-                edgecolor="none",
-            )
-            axis.scatter(
-                front[x_col],
-                front[y_col],
-                facecolors="none",
-                edgecolors="#111827",
-                s=34,
-                linewidth=0.7,
-                label="nondominated",
-                zorder=4,
-            )
-            axis.scatter(
-                [best[x_col]],
-                [best[y_col]],
-                marker="*",
-                s=150,
-                color="#b91c1c",
-                label="best observed",
-                zorder=5,
-            )
-            axis.axvline(0.0, color="#111827", linestyle="--", linewidth=0.9)
-            axis.axhline(0.0, color="#111827", linestyle="--", linewidth=0.9)
-            axis.set_title(title, fontsize=10)
-            axis.set_xlabel(xlabel, fontsize=9)
-            axis.set_ylabel(ylabel, fontsize=9)
-            axis.grid(True, alpha=0.25)
-            axis.tick_params(axis="both", labelsize=8)
-            cbar = fig.colorbar(scatter, cax=color_axes[panel_index])
-            cbar.set_label(color_label, fontsize=8)
-            cbar.ax.tick_params(labelsize=7)
-        axes[0].legend(loc="best", fontsize=7)
+        axis.axvline(0.0, color="#111827", linestyle="--", linewidth=0.95)
+        axis.axhline(0.0, color="#111827", linestyle="--", linewidth=0.95)
+        axis.set_title("Inventory window vs WG RAP")
+        axis.set_xlabel("Total-pilot-window violation")
+        axis.set_ylabel("WG RAP violation")
+        axis.grid(True, alpha=0.25)
+        axis.legend(loc="best", fontsize=8)
+        cbar = fig.colorbar(scatter, ax=axis)
+        cbar.set_label("FL RAP violation")
         paths["constraint_trade_space"] = save_figure(
             fig,
             output_dir / "trade_space_constraint_views.png",
             plt,
-            tight_layout=False,
         )
 
     return {name: path.resolve() for name, path in paths.items()}
-
-
-def _nondominated_mask(frame: pd.DataFrame, columns: Sequence[str]) -> pd.Series:
-    """Return rows that are not dominated when all listed columns are minimized."""
-    values = frame.loc[:, list(columns)].to_numpy()
-    mask = []
-    for row in values:
-        dominated = ((values <= row).all(axis=1) & (values < row).any(axis=1)).any()
-        mask.append(not dominated)
-    return pd.Series(mask, index=frame.index)
 
 
 def _default_history_runner(
