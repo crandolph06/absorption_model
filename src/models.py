@@ -318,6 +318,7 @@ class SquadronConfig:
     ipug_sim_carry: float = 0.0
     deferred_sortie_burden: int = 0
     deferred_sim_burden: int = 0
+    deferral_due_to_ip: bool = False
     self_terminating_phase: bool = False
     self_terminating_run: bool = False
     pipeline_deferred_due_to_ip: bool = False
