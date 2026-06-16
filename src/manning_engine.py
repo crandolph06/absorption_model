@@ -279,7 +279,7 @@ class CAFSimulation:
 
     def _run_squadron_physics_phase(self, sq: SquadronConfig, year: int, phase_num: int):
         """One CAF phase using ``run_phase_simulation`` instead of the sortie brain."""
-        from src.engine import run_phase_simulation
+        from src.engine import graduate_completed_upgrades, run_phase_simulation
         from src.rap_state import mqt_observed_sortie_metrics
 
         phase_days = self.sim_config.phase_length_days
@@ -289,6 +289,7 @@ class CAFSimulation:
             debug_verbose=False,
             pre_seed_upgrades=False,
             sim_config=self.sim_config,
+            auto_graduate=False,
         )
 
         mqt_metrics = mqt_observed_sortie_metrics(sq.pilots)
@@ -296,6 +297,7 @@ class CAFSimulation:
             sq.observed_mqt_monthly = mqt_metrics["sortie_mo"]
 
         current_stats = sq.store_stats_from_physics(year, phase_num, phase_days)
+        graduate_completed_upgrades(sq.pilots)
         self.process_end_of_phase(
             sq,
             year,
