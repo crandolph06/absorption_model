@@ -1,13 +1,44 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
+import contextlib
+import io
 import itertools
 import os
-import joblib
 
-from src.models import Qual, monthly_sortie_rap_target
+import joblib
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+
+from src.engine import create_pilots, phase_upgrade_metrics, run_phase_simulation
+from src.models import Qual, SquadronConfig, monthly_sortie_rap_target
+from src.rap_state import rap_assess, rap_state_code
+from src.simulation_config import DEFAULT_PHASE_LENGTH_DAYS, SimulationConfig
+
+SIM_CONFIG = SimulationConfig(phase_length_days=DEFAULT_PHASE_LENGTH_DAYS)
+_SYLLABI_NEGLIGIBLE = 0.10
+_REMAINING_TOTAL = [
+    "remaining_mqt_syllabi_mean",
+    "remaining_flug_syllabi_mean",
+    "remaining_ipug_syllabi_mean",
+]
+_REMAINING_SORTIES = [
+    "remaining_mqt_syllabi_sorties_only_mean",
+    "remaining_flug_syllabi_sorties_only_mean",
+    "remaining_ipug_syllabi_sorties_only_mean",
+]
+_PREDICT_FEATURES = [
+    "paa", "ute", "exp_ratio", "ip_ratio", "fl_congestion",
+    "wg_crowding", "sorties_avail", "pilot_to_sortie", "ip_to_stud_ratio",
+]
+_SELF_TERM_HEAT_CODE = 99
+_SELF_TERM_GREY = "#9ca3af"
+_RATE_COLS = [
+    "wg_monthly", "fl_monthly", "ip_monthly",
+    "wg_blue_monthly", "fl_blue_monthly", "ip_blue_monthly",
+    "wg_red_monthly", "fl_red_monthly", "ip_red_monthly",
+    "wg_red_pct", "fl_red_pct", "ip_red_pct",
+]
 
 # ==============================================================================
 # 1. PAGE CONFIG & STYLING
@@ -22,7 +53,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. ML ENGINE SETUP
+# 2. ALLOCATION ENGINE
 # ==============================================================================
 
 @st.cache_resource
@@ -33,82 +64,201 @@ def load_brain():
     st.error(f"⚠️ Brain file not found at {model_path}")
     st.stop()
 
-brain = load_brain()
 
-def predict_metrics(df_inputs):
+def is_valid_config(total, exp, ip_q, mqt, flug, ipug):
+    experienced = int(total * exp)
+    wg_count = total - experienced
+    fl_count = experienced - ip_q
+    if ip_q > experienced:
+        return False
+    if experienced > total:
+        return False
+    if (mqt + flug + ipug + ip_q) > total:
+        return False
+    if (mqt + flug) > wg_count:
+        return False
+    if ipug > fl_count:
+        return False
+    return True
+
+
+def _prepare_input_frame(df_inputs: pd.DataFrame) -> pd.DataFrame:
     df = df_inputs.copy()
-    
-    # Feature Engineering (Matching Training Data)
-    base_features = ['paa', 'ute', 'exp_ratio', 'total_pilots', 'mqt_qty', 'flug_qty', 'ipug_qty', 'wg_qty', 'fl_qty','ip_qty']
+    base_features = [
+        "paa", "ute", "exp_ratio", "total_pilots", "mqt_qty", "flug_qty",
+        "ipug_qty", "wg_qty", "fl_qty", "ip_qty",
+    ]
     for col in base_features:
-        if col not in df.columns: 
+        if col not in df.columns:
             df[col] = 0
+    experienced = (df["total_pilots"] * df["exp_ratio"]).astype(int)
+    df["wg_qty"] = df["total_pilots"] - experienced
+    df["fl_qty"] = experienced - df["ip_qty"]
+    ips = df["ip_qty"].replace(0, 1.0)
+    df["mqt_load"] = df["mqt_qty"] / ips
+    df["flug_load"] = df["flug_qty"] / ips
+    df["ipug_load"] = df["ipug_qty"] / ips
+    df["fl_congestion"] = (df["ipug_qty"] + df["flug_qty"]) / df["fl_qty"].replace(0, 1.0)
+    df["wg_crowding"] = (df["mqt_qty"] + df["flug_qty"] + df["ipug_qty"]) / df["wg_qty"].replace(0, 1.0)
+    df["sorties_avail"] = df["paa"] * df["ute"]
+    df["pilot_to_sortie"] = df["total_pilots"] / df["sorties_avail"].replace(0, 1.0)
+    df["total_students"] = df["mqt_qty"] + df["flug_qty"] + df["ipug_qty"]
+    df["ip_ratio"] = df["ip_qty"] / df["total_pilots"].replace(0, 1)
+    df["ip_to_stud_ratio"] = df["ip_qty"] / df["total_students"].replace(0, 0.1)
+    return df.replace([np.inf, -np.inf], 0).fillna(0)
 
-    experienced = (df['total_pilots'] * df['exp_ratio']).astype(int)
-    df['wg_qty'] = df['total_pilots'] - experienced
-    df['fl_qty'] = experienced - df['ip_qty']
 
-    ips = df['ip_qty'].replace(0, 1.0)
-    df['mqt_load'] = df['mqt_qty'] / ips
-    df['flug_load'] = df['flug_qty'] / ips
-    df['ipug_load'] = df['ipug_qty'] / ips
-    
-    df['fl_congestion'] = (df['ipug_qty'] + df['flug_qty']) / df['fl_qty']
-    df['wg_crowding'] = (df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']) / df['wg_qty']
+def _clean_syllabus_preds(raw: np.ndarray) -> np.ndarray:
+    vals = np.maximum(raw, 0.0)
+    return np.where(vals < _SYLLABI_NEGLIGIBLE, 0.0, vals)
 
-    df['sorties_avail'] = df['paa'] * df['ute']
-    df['pilot_to_sortie'] = df['total_pilots'] / df['sorties_avail']
 
-    df['total_students'] = df['mqt_qty'] + df['flug_qty'] + df['ipug_qty']
-    df['ip_ratio'] = df['ip_qty'] / df['total_pilots'].replace(0, 1)
-    df['ip_to_stud_ratio'] = df['ip_qty'] / df['total_students'].replace(0, 0.1)
-    
-    df = df.replace([np.inf, -np.inf], 0)
+def _attach_syllabus_from_upgrade_metrics(df: pd.DataFrame, metrics: dict) -> None:
+    df["remaining_mqt_syllabi_mean"] = metrics["remaining_mqt_syllabi"]
+    df["remaining_flug_syllabi_mean"] = metrics["remaining_flug_syllabi"]
+    df["remaining_ipug_syllabi_mean"] = metrics["remaining_ipug_syllabi"]
+    df["remaining_mqt_syllabi_sorties_only_mean"] = metrics["remaining_mqt_syllabi_sorties_only"]
+    df["remaining_flug_syllabi_sorties_only_mean"] = metrics["remaining_flug_syllabi_sorties_only"]
+    df["remaining_ipug_syllabi_sorties_only_mean"] = metrics["remaining_ipug_syllabi_sorties_only"]
 
-    # Column order must match training / ``CAFSimulation._PREDICT_FEATURE_COLS`` (multi-output MLP).
-    features = [
-        'paa', 'ute',
-        'exp_ratio', 'ip_ratio', 'fl_congestion',
-        'wg_crowding', 'sorties_avail', 'pilot_to_sortie', 'ip_to_stud_ratio',
-    ]
 
+def _empty_metrics_row() -> dict:
+    row = {col: np.nan for col in _RATE_COLS}
+    for col in _REMAINING_TOTAL + _REMAINING_SORTIES:
+        row[col] = np.nan
+    row["self_terminating_phase"] = False
+    row["deferral_due_to_ip"] = False
+    return row
+
+
+def _self_term_label(row) -> str | None:
+    if not row.get("self_terminating_phase"):
+        return None
+    if row.get("deferral_due_to_ip"):
+        return "Self-Terminated (Insufficient IPs Available)"
+    return "Self-Terminated (Insufficient FLs Available)"
+
+
+def _self_term_mask(df: pd.DataFrame) -> pd.Series:
+    if "self_terminating_phase" not in df.columns:
+        return pd.Series(False, index=df.index)
+    return df["self_terminating_phase"].fillna(False).astype(bool)
+
+
+@st.cache_data(show_spinner=False)
+def _run_physics_metrics(df_inputs: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for _, raw in df_inputs.iterrows():
+        row = raw.to_dict()
+        total = int(row["total_pilots"])
+        exp = float(row["exp_ratio"])
+        ip_q = int(row["ip_qty"])
+        mqt = int(row["mqt_qty"])
+        flug = int(row["flug_qty"])
+        ipug = int(row["ipug_qty"])
+        if not is_valid_config(total, exp, ip_q, mqt, flug, ipug):
+            rows.append({**row, **_empty_metrics_row()})
+            continue
+        cfg = SquadronConfig(
+            paa=int(row["paa"]),
+            ute=float(row["ute"]),
+            experience_ratio=exp,
+            ip_qty=ip_q,
+            mqt_students=mqt,
+            flug_students=flug,
+            ipug_students=ipug,
+            total_pilots=total,
+            id=99,
+        )
+        try:
+            pilots = create_pilots(cfg)
+            with contextlib.redirect_stdout(io.StringIO()):
+                final_pilots = run_phase_simulation(
+                    cfg, pilots, sim_config=SIM_CONFIG, auto_graduate=False,
+                )
+            rap, blue_rap, red = rap_assess(final_pilots)
+            upgrade = phase_upgrade_metrics(final_pilots)
+        except ValueError:
+            rows.append({**row, **_empty_metrics_row()})
+            continue
+
+        out = {**row}
+        out["wg_monthly"] = rap["WG"][1]
+        out["fl_monthly"] = rap["FL"][1]
+        out["ip_monthly"] = rap["IP"][1]
+        out["wg_blue_monthly"] = blue_rap["WG"][1]
+        out["fl_blue_monthly"] = blue_rap["FL"][1]
+        out["ip_blue_monthly"] = blue_rap["IP"][1]
+        out["wg_red_monthly"] = out["wg_monthly"] - out["wg_blue_monthly"]
+        out["fl_red_monthly"] = out["fl_monthly"] - out["fl_blue_monthly"]
+        out["ip_red_monthly"] = out["ip_monthly"] - out["ip_blue_monthly"]
+        out["wg_red_pct"] = red["WG"][0]
+        out["fl_red_pct"] = red["FL"][0]
+        out["ip_red_pct"] = red["IP"][0]
+        out["rap_state_code"] = rap_state_code(rap)
+        out["blue_rap_state_code"] = rap_state_code(blue_rap)
+        out["self_terminating_phase"] = bool(cfg.self_terminating_phase)
+        out["deferral_due_to_ip"] = bool(cfg.deferral_due_to_ip)
+        _attach_syllabus_from_upgrade_metrics(out, upgrade)
+        rows.append(out)
+    return pd.DataFrame(rows)
+
+
+def predict_metrics_ml(df_inputs, brain):
+    df = _prepare_input_frame(df_inputs)
     targets = [
-        'wg_monthly', 'fl_monthly', 'ip_monthly',
-        'wg_blue_monthly', 'fl_blue_monthly', 'ip_blue_monthly',
+        "wg_monthly", "fl_monthly", "ip_monthly",
+        "wg_blue_monthly", "fl_blue_monthly", "ip_blue_monthly",
     ]
-
-    X = df[features].fillna(0)
+    X = df[_PREDICT_FEATURES].fillna(0)
     preds = brain.predict(X)
-
-
     for i, t in enumerate(targets):
-        df[t] = preds[:,i]
-            
-    # Calculate Red Air - prevents negative values
-    df['wg_red_monthly'] = (df['wg_monthly'] - df['wg_blue_monthly'])
-    df['fl_red_monthly'] = (df['fl_monthly'] - df['fl_blue_monthly'])
-    df['ip_red_monthly'] = (df['ip_monthly'] - df['ip_blue_monthly'])
-    
-    # Red Air Percentages (Safe Division)
-    df['wg_red_pct'] = df['wg_red_monthly'] / df['wg_monthly'].replace(0, 1)
-    df['fl_red_pct'] = df['fl_red_monthly'] / df['fl_monthly'].replace(0, 1)
-    df['ip_red_pct'] = df['ip_red_monthly'] / df['ip_monthly'].replace(0, 1)
-    
+        df[t] = preds[:, i]
+    df["wg_red_monthly"] = df["wg_monthly"] - df["wg_blue_monthly"]
+    df["fl_red_monthly"] = df["fl_monthly"] - df["fl_blue_monthly"]
+    df["ip_red_monthly"] = df["ip_monthly"] - df["ip_blue_monthly"]
+    df["wg_red_pct"] = df["wg_red_monthly"] / df["wg_monthly"].replace(0, 1)
+    df["fl_red_pct"] = df["fl_red_monthly"] / df["fl_monthly"].replace(0, 1)
+    df["ip_red_pct"] = df["ip_red_monthly"] / df["ip_monthly"].replace(0, 1)
+    for i, col in enumerate(_REMAINING_TOTAL):
+        df[col] = _clean_syllabus_preds(preds[:, 6 + i])
+    for i, col in enumerate(_REMAINING_SORTIES):
+        df[col] = _clean_syllabus_preds(preds[:, 9 + i])
+    df["self_terminating_phase"] = False
+    df["deferral_due_to_ip"] = False
     return df
 
+
+def compute_metrics(df_inputs, mode: str, brain=None) -> pd.DataFrame:
+    if mode == "Physics":
+        return _run_physics_metrics(df_inputs)
+    if brain is None:
+        raise ValueError("ML mode requires a loaded brain model")
+    return predict_metrics_ml(df_inputs, brain)
+
 def calculate_rap_code(row, is_blue=False):
-    """Calculates RAP status mask. 1=WG, 2=FL, 4=IP"""
+    """RAP status mask (WG=1, FL=2, IP=4). Skips empty cohorts."""
+    code_col = "blue_rap_state_code" if is_blue else "rap_state_code"
+    if code_col in row.index and pd.notna(row.get(code_col)):
+        return int(row[code_col])
+
     suffix = "_blue_monthly" if is_blue else "_monthly"
-    wg = row.get(f'wg{suffix}', 0)
-    fl = row.get(f'fl{suffix}', 0)
-    ip = row.get(f'ip{suffix}', 0)
-    
+    wg = row.get(f"wg{suffix}", 0)
+    fl = row.get(f"fl{suffix}", 0)
+    ip = row.get(f"ip{suffix}", 0)
+    if pd.isna(wg) or pd.isna(fl) or pd.isna(ip):
+        return np.nan
+
+    wg_n = max(0, int(row.get("wg_qty", 0)) - int(row.get("mqt_qty", 0)))
+    fl_n = int(row.get("fl_qty", 0))
+    ip_n = int(row.get("ip_qty", 0))
+
     code = 0
-    if wg < monthly_sortie_rap_target(Qual.WG):
+    if wg_n > 0 and wg < monthly_sortie_rap_target(Qual.WG):
         code += 1
-    if fl < monthly_sortie_rap_target(Qual.FL):
+    if fl_n > 0 and fl < monthly_sortie_rap_target(Qual.FL):
         code += 2
-    if ip < monthly_sortie_rap_target(Qual.IP):
+    if ip_n > 0 and ip < monthly_sortie_rap_target(Qual.IP):
         code += 4
     return code
 
@@ -122,7 +272,19 @@ state_labels_dict = {
 # ==============================================================================
 with st.sidebar:
     st.header("⚙️ System Inputs")
-    
+
+    # allocation_mode = st.radio(
+    #     "Allocation engine",
+    #     options=["Physics", "ML"],
+    #     index=0,
+    #     help="Physics runs ``run_phase_simulation`` (default). ML uses the trained sortie brain.",
+    # )
+    # use_physics = allocation_mode == "Physics"
+
+    allocation_mode = "Physics"
+    use_physics = True
+    brain = None if use_physics else load_brain()
+
     inputs = {}
     inputs['paa'] = st.slider("PAA (Aircraft)", 18, 24, 21, 1)
     inputs['ute'] = st.slider("UTE Rate", 6.0, 21.0, 10.0, 0.5)
@@ -160,13 +322,26 @@ def generate_1d_sweep(x_var):
     x_vals = sweep_ranges.get(x_var, np.arange(0, 10))
     df_sweep = pd.DataFrame([inputs] * len(x_vals))
     df_sweep[x_var] = x_vals
-    return predict_metrics(df_sweep)
+    if use_physics:
+        with st.spinner(f"Running {x_var} sweep…"):
+            return compute_metrics(df_sweep, allocation_mode, brain)
+    return compute_metrics(df_sweep, allocation_mode, brain)
 
 # ==============================================================================
 # 5. MAIN UI & CHARTS
 # ==============================================================================
 st.title("✈️ Pilot Supply Chain Analytics")
-st.caption("Interactive Dashboard for RAP Equity and Sortie Composition — 120 Day Training Phase Snapshot")
+engine_label = "physics allocator" if use_physics else "ML brain"
+st.caption(
+    f"Interactive Dashboard for RAP Equity and Sortie Composition — "
+    f"120 Day Training Phase Snapshot ({engine_label})"
+)
+if use_physics:
+    st.info(
+        "Charts refresh from **run_phase_simulation** in real time. "
+        "Large sweeps are cached after the first run.",
+        icon="⚙️",
+    )
 
 col_main, col_summary = st.columns([3, 1])
 
@@ -211,16 +386,17 @@ with col_main:
         (df_equity[x_var_equity] >= x_display_min) &
         (df_equity[x_var_equity] <= x_display_max)
     ]
-    
+    df_equity = df_equity[~_self_term_mask(df_equity)]
+
     fig_equity = go.Figure()
     colors_total = {'wg_monthly': '#3b82f6', 'fl_monthly': '#8b5cf6', 'ip_monthly': '#10b981'}
     names = {'wg_monthly': 'Wingman', 'fl_monthly': 'Flight Lead', 'ip_monthly': 'Instructor'}
-    
+
     for col in ['wg_monthly', 'fl_monthly', 'ip_monthly']:
         fig_equity.add_trace(go.Scatter(
-            x=df_equity[x_var_equity], y=df_equity[col], name=names[col], 
+            x=df_equity[x_var_equity], y=df_equity[col], name=names[col],
             line=dict(color=colors_total[col], width=3), mode='lines',
-            hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'
+            hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>',
         ))
         
     fig_equity.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
@@ -276,6 +452,7 @@ with col_main:
         (df_comp[x_var_comp] >= x_comp_min) &
         (df_comp[x_var_comp] <= x_comp_max)
     ]
+    df_comp = df_comp[~_self_term_mask(df_comp)]
     
     fig_comp = go.Figure()
     colors = {'wg': ('#3b82f6', '#93c5fd'), 'fl': ('#8b5cf6', '#c4b5fd'), 'ip': ('#10b981', '#6ee7b7')}
@@ -309,20 +486,34 @@ with col_main:
             df_heat_base[k] = v
             
     # Predict Grid
-    df_heat_preds = predict_metrics(df_heat_base)
+    if use_physics:
+        with st.spinner("Running heatmap sweep…"):
+            df_heat_preds = compute_metrics(df_heat_base, allocation_mode, brain)
+    else:
+        df_heat_preds = compute_metrics(df_heat_base, allocation_mode, brain)
     
-    # Calculate Status
-    df_heat_preds['rap_code'] = df_heat_preds.apply(lambda r: calculate_rap_code(r, is_blue), axis=1)
-    df_heat_preds['rap_label'] = df_heat_preds['rap_code'].map(state_labels_dict)
+    def _heat_status(row):
+        term = _self_term_label(row)
+        if term:
+            return term
+        code = calculate_rap_code(row, is_blue)
+        return state_labels_dict.get(int(code) if pd.notna(code) else -1, "Unknown")
+
+    df_heat_preds["rap_label"] = df_heat_preds.apply(_heat_status, axis=1)
+    df_heat_preds["rap_code"] = df_heat_preds.apply(
+        lambda r: _SELF_TERM_HEAT_CODE if r.get("self_terminating_phase") else calculate_rap_code(r, is_blue),
+        axis=1,
+    )
 
     # Pivot for Plotly
     heat_z = df_heat_preds.pivot(index='ute', columns='exp_ratio', values='rap_code').sort_index(ascending=False)
     heat_labels = df_heat_preds.pivot(index='ute', columns='exp_ratio', values='rap_label').sort_index(ascending=False)
     
     color_map = {0: "#22c55e", 1: "#fef08a", 2: "#fde047", 3: "#fdba74", 4: "#eab308", 5: "#f97316", 6: "#ea580c", 7: "#ef4444"}
-    
-    # Custom discrete color mapping
-    max_val = 7
+    if use_physics and df_heat_preds["self_terminating_phase"].fillna(False).any():
+        color_map[_SELF_TERM_HEAT_CODE] = _SELF_TERM_GREY
+
+    max_val = max(color_map)
     discrete_colorscale = []
     for val, hex_color in sorted(color_map.items()):
         loc = val / max_val
@@ -341,7 +532,12 @@ with col_main:
     ))
     
     for code, color in color_map.items():
-        fig_heat.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=12, symbol='square', color=color), showlegend=True, name=state_labels_dict.get(code)))
+        name = "Failed Sim" if code == _SELF_TERM_HEAT_CODE else state_labels_dict.get(code)
+        fig_heat.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker=dict(size=12, symbol="square", color=color),
+            showlegend=True, name=name,
+        ))
 
     fig_heat.update_layout(xaxis_title="Experience Ratio", yaxis_title="UTE", height=500)
     st.plotly_chart(fig_heat, width='stretch')
@@ -349,8 +545,9 @@ with col_main:
     # --- CHART 4: INCOMPLETE SYLLABI ---
     st.write("---")
     st.subheader("📉 Incomplete Syllabi (Phase Snapshot)")
+    syll_source = "physics allocator" if use_physics else "ML brain"
     st.caption(
-        "Y-axis is syllabus-normalized count (not %). "
+        f"Y-axis is syllabus-normalized count (not %), from the {syll_source}. "
         "1.0 ≈ one full syllabus incomplete; 0.33 ≈ one-third of a syllabus; "
         "5.0 ≈ five students' worth of incomplete syllabus (aggregate across the cohort)."
     )
@@ -403,38 +600,6 @@ with col_main:
         (df_syll[x_var_syll] >= x_syll_min) & (df_syll[x_var_syll] <= x_syll_max)
     ]
 
-    # 12-output brain: indices 6–11 are remaining-syllabus targets (see hpc_train_brain_multi_output.py)
-    _predict_features = [
-        "paa", "ute", "exp_ratio", "ip_ratio", "fl_congestion",
-        "wg_crowding", "sorties_avail", "pilot_to_sortie", "ip_to_stud_ratio",
-    ]
-    _remaining_total = [
-        "remaining_mqt_syllabi_mean",
-        "remaining_flug_syllabi_mean",
-        "remaining_ipug_syllabi_mean",
-    ]
-    _remaining_sorties = [
-        "remaining_mqt_syllabi_sorties_only_mean",
-        "remaining_flug_syllabi_sorties_only_mean",
-        "remaining_ipug_syllabi_sorties_only_mean",
-    ]
-    _SYLLABI_NEGLIGIBLE = 0.10  # values below this (after clipping negatives) → 0
-
-    def _clean_syllabus_preds(raw: np.ndarray) -> np.ndarray:
-        """Non-negative; treat |value| < threshold as zero (whole column at once)."""
-        vals = np.maximum(raw, 0.0)
-        return np.where(vals < _SYLLABI_NEGLIGIBLE, 0.0, vals)
-
-    _syll_preds = brain.predict(df_syll[_predict_features].fillna(0))
-    for i, col in enumerate(_remaining_total):
-        df_syll[col] = _clean_syllabus_preds(_syll_preds[:, 6 + i])
-    for i, col in enumerate(_remaining_sorties):
-        df_syll[col] = _clean_syllabus_preds(_syll_preds[:, 9 + i])
-    # 16-output brain: indices 10–15 are remaining-syllabus targets
-    # for i, col in enumerate(_remaining_total):
-    #     df_syll[col] = _clean_syllabus_preds(_syll_preds[:, 10 + i])
-    # for i, col in enumerate(_remaining_sorties):
-    #     df_syll[col] = _clean_syllabus_preds(_syll_preds[:, 13 + i])
     if sorties_only_syll:
         syll_series = [
             ("remaining_mqt_syllabi_sorties_only_mean", "MQT"),
@@ -491,21 +656,35 @@ with col_main:
 with col_summary:
     st.subheader("Status Overview")
     
-    # Predict exactly the point defined in the sidebar
     df_single = pd.DataFrame([inputs])
-    row = predict_metrics(df_single).iloc[0]
-    
-    current_code = calculate_rap_code(row, is_blue=False)
-    label = state_labels_dict.get(current_code, "Unknown")
-    
-    wg_t, fl_t, ip_t = f"{row['wg_monthly']:.1f}", f"{row['fl_monthly']:.1f}", f"{row['ip_monthly']:.1f}"
-    wg_b, fl_b, ip_b = f"{row['wg_blue_monthly']:.1f}", f"{row['fl_blue_monthly']:.1f}", f"{row['ip_blue_monthly']:.1f}"
-    wg_r, fl_r, ip_r = f"{row['wg_red_monthly']:.1f}", f"{row['fl_red_monthly']:.1f}", f"{row['ip_red_monthly']:.1f}"
+    row = compute_metrics(df_single, allocation_mode, brain).iloc[0]
+
+    self_term = _self_term_label(row)
+    if self_term:
+        label = self_term
+        status_heading = "PIPELINE STATUS"
+        card_bg = "#991b1b"
+        title_color = "#fecaca"
+    else:
+        current_code = calculate_rap_code(row, is_blue=False)
+        if pd.isna(current_code):
+            current_code = -1
+        label = state_labels_dict.get(current_code, "Invalid / N/A")
+        status_heading = "SIMULATED STATUS" if use_physics else "PREDICTED STATUS"
+        card_bg = "#0f172a"
+        title_color = "#f8fafc"
+
+    def _fmt(val):
+        return f"{val:.1f}" if pd.notna(val) else "—"
+
+    wg_t, fl_t, ip_t = _fmt(row["wg_monthly"]), _fmt(row["fl_monthly"]), _fmt(row["ip_monthly"])
+    wg_b, fl_b, ip_b = _fmt(row["wg_blue_monthly"]), _fmt(row["fl_blue_monthly"]), _fmt(row["ip_blue_monthly"])
+    wg_r, fl_r, ip_r = _fmt(row["wg_red_monthly"]), _fmt(row["fl_red_monthly"]), _fmt(row["ip_red_monthly"])
 
     st.markdown(f"""
-<div style="background-color:#0f172a; padding:20px; border-radius:15px; color:white; margin-bottom:20px;">
-<p style="font-size:0.7rem; color:#94a3b8; margin-bottom:2px; letter-spacing: 0.05em;">PREDICTED STATUS</p>
-<h2 style="margin:0; font-size:1.3rem; color: #f8fafc;">{label}</h2>
+<div style="background-color:{card_bg}; padding:20px; border-radius:15px; color:white; margin-bottom:20px;">
+<p style="font-size:0.7rem; color:#94a3b8; margin-bottom:2px; letter-spacing: 0.05em;">{status_heading}</p>
+<h2 style="margin:0; font-size:1.15rem; color: {title_color};">{label}</h2>
 <hr style="border-color:#1e293b; margin:15px 0;">
 <div style="display:flex; justify-content:space-between; text-align:center; margin-bottom:10px;">
 <div style="flex:1;"></div>
