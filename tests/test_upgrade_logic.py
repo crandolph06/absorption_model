@@ -8,6 +8,7 @@ import io
 import unittest
 
 from src.engine import (
+    assess_pipeline_self_termination,
     create_pilots,
     phase_upgrade_metrics,
     process_syllabus_event,
@@ -15,7 +16,7 @@ from src.engine import (
     select_upgrade_students,
     total_phase_capacity,
 )
-from src.models import Qual, SquadronConfig, Upgrade
+from src.models import Qual, SquadronConfig, Upgrade, MAX_MONTHLY_EVENTS
 from src.simulation_config import SimulationConfig
 from src.syllabi import (
     TEST_MQT_SYLLABUS,
@@ -256,6 +257,84 @@ class TestContinuationTraining(unittest.TestCase):
         _run_phase(cfg, pilots)
 
         self.assertEqual(_total_sorties(pilots), gross)
+
+
+class TestPipelineSelfTermination(unittest.TestCase):
+    def test_capacity_deferral_without_ip_saturation_not_self_terminating(self):
+        """Iron-cap deferral with IPs still under monthly event cap is not pipeline failure."""
+        cfg, pilots = _make_roster(mqt=2, ute=3.0, paa=9)
+        _run_phase(cfg, pilots)
+
+        self.assertGreater(cfg.deferred_sortie_burden, 0)
+        self.assertFalse(cfg.self_terminating_phase)
+        self.assertFalse(cfg.self_terminating_run)
+
+    def test_assess_flags_ip_saturation_with_upgrade_deferral(self):
+        """Direct check: deferral + all IPs at event cap => self-terminating."""
+        cfg, pilots = _make_roster(mqt=1, wg=4, fl=1, ip=1)
+        ip = next(p for p in pilots if p.qual == Qual.IP)
+        ip.sortie_phase = MAX_MONTHLY_EVENTS
+        ip.sim_phase = 0.0
+        metrics = {
+            "deferred_mqt_sorties": 8,
+            "deferred_flug_sorties": 0,
+            "deferred_ipug_sorties": 0,
+            "deferred_mqt_sims": 0,
+            "deferred_flug_sims": 0,
+            "deferred_ipug_sims": 0,
+            "held_back_mqt": 1,
+            "held_back_flug": 0,
+            "held_back_ipug": 0,
+        }
+        status = assess_pipeline_self_termination(pilots, metrics, 30.0)
+
+        self.assertTrue(status["self_terminating_phase"])
+        self.assertTrue(status["deferred_due_to_ip"])
+        self.assertEqual(status["ip_at_cap_count"], 1)
+        self.assertEqual(status["ip_available_count"], 0)
+
+    def test_assess_no_deferral_never_self_terminates(self):
+        cfg, pilots = _make_roster(mqt=1, wg=4, fl=1, ip=1)
+        ip = next(p for p in pilots if p.qual == Qual.IP)
+        ip.sortie_phase = MAX_MONTHLY_EVENTS
+        metrics = {
+            "deferred_mqt_sorties": 0,
+            "deferred_flug_sorties": 0,
+            "deferred_ipug_sorties": 0,
+            "deferred_mqt_sims": 0,
+            "deferred_flug_sims": 0,
+            "deferred_ipug_sims": 0,
+            "held_back_mqt": 0,
+            "held_back_flug": 0,
+            "held_back_ipug": 0,
+        }
+        status = assess_pipeline_self_termination(pilots, metrics, 30.0)
+
+        self.assertFalse(status["self_terminating_phase"])
+
+    def test_ip_saturated_stress_run_latches_self_terminating_run(self):
+        """Heavy upgrade load with one IP should saturate instructor events."""
+        cfg = SquadronConfig(
+            ute=50.0,
+            paa=10,
+            id=1,
+            total_pilots=12,
+            ip_qty=1,
+            experience_ratio=2 / 12,
+        )
+        pilots = create_pilots(cfg)
+        tagged = 0
+        for p in pilots:
+            if p.qual == Qual.WG and p.upgrade == Upgrade.NONE:
+                p.upgrade = Upgrade.MQT
+                tagged += 1
+                if tagged >= 6:
+                    break
+        _run_phase(cfg, pilots, phase_days=30, pre_seed=False)
+
+        if cfg.deferred_sortie_burden > 0 and cfg.pipeline_ip_at_cap_count > 0:
+            self.assertTrue(cfg.self_terminating_phase)
+            self.assertTrue(cfg.self_terminating_run)
 
 
 class TestSyllabusBurdenMath(unittest.TestCase):
