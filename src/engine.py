@@ -232,6 +232,53 @@ def _can_assign_distinct_from_pool(pool: List[Pilot], count: int, phase_length_d
         usage[id(winner)] += 1
     return True
 
+def check_syllabus_resources(
+    event: SyllabusEvent,
+    all_pilots: List[Pilot],
+    syllabus_upgrade_type: Upgrade,
+    total_capacity: int,
+    cfg: SquadronConfig,
+    phase_length_days: float,
+    student: Optional[Pilot] = None,
+) -> bool:
+    """Enough distinct support pilots, iron/sim capacity, and event-cap headroom for one student line."""
+    ips = [
+        p for p in all_pilots
+        if rules.can_fill_seat(pilot=p, min_qual=Qual.IP) and p is not student
+    ]
+    if len(ips) < event.num_instructor:
+        return False
+    if not _can_assign_distinct_from_pool(ips, event.num_instructor, phase_length_days):
+        return False
+
+    wg_pool = [
+        p for p in all_pilots
+        if rules.can_fill_seat(pilot=p, min_qual=Qual.WG) and p is not student
+    ]
+    fl_pool = [
+        p for p in all_pilots
+        if rules.can_fill_seat(pilot=p, min_qual=Qual.FL) and p is not student
+    ]
+    wg_seats = event.num_blue_wg + event.num_red_wg
+    fl_seats = event.num_blue_fl + event.num_red_fl
+    if len(wg_pool) < wg_seats:
+        return False
+    if len(fl_pool) < fl_seats:
+        return False
+    if not _can_assign_distinct_from_pool(wg_pool, wg_seats, phase_length_days):
+        return False
+    if not _can_assign_distinct_from_pool(fl_pool, fl_seats, phase_length_days):
+        return False
+
+    if event.event_type == EventType.SORTIE:
+        slots = 1 + event.num_instructor + event.num_blue_wg + event.num_blue_fl + event.num_red_wg + event.num_red_fl
+        if sum(p.sortie_phase for p in all_pilots) + slots > total_capacity:
+            return False
+    return True
+
+# ----------------------
+# Event Assignment
+# ----------------------
 
 def assign_sortie(
     cfg: SquadronConfig,
@@ -283,49 +330,7 @@ def assign_sim(
     exclude.add(id(winner))
     return True
 
-def check_syllabus_resources(
-    event: SyllabusEvent,
-    all_pilots: List[Pilot],
-    syllabus_upgrade_type: Upgrade,
-    total_capacity: int,
-    cfg: SquadronConfig,
-    phase_length_days: float,
-    student: Optional[Pilot] = None,
-) -> bool:
-    """Enough distinct support pilots, iron/sim capacity, and event-cap headroom for one student line."""
-    ips = [
-        p for p in all_pilots
-        if rules.can_fill_seat(pilot=p, min_qual=Qual.IP) and p is not student
-    ]
-    if len(ips) < event.num_instructor:
-        return False
-    if not _can_assign_distinct_from_pool(ips, event.num_instructor, phase_length_days):
-        return False
 
-    wg_pool = [
-        p for p in all_pilots
-        if rules.can_fill_seat(pilot=p, min_qual=Qual.WG) and p is not student
-    ]
-    fl_pool = [
-        p for p in all_pilots
-        if rules.can_fill_seat(pilot=p, min_qual=Qual.FL) and p is not student
-    ]
-    wg_seats = event.num_blue_wg + event.num_red_wg
-    fl_seats = event.num_blue_fl + event.num_red_fl
-    if len(wg_pool) < wg_seats:
-        return False
-    if len(fl_pool) < fl_seats:
-        return False
-    if not _can_assign_distinct_from_pool(wg_pool, wg_seats, phase_length_days):
-        return False
-    if not _can_assign_distinct_from_pool(fl_pool, fl_seats, phase_length_days):
-        return False
-
-    if event.event_type == EventType.SORTIE:
-        slots = 1 + event.num_instructor + event.num_blue_wg + event.num_blue_fl + event.num_red_wg + event.num_red_fl
-        if sum(p.sortie_phase for p in all_pilots) + slots > total_capacity:
-            return False
-    return True
 # ----------------------
 # Syllabus Execution
 # ----------------------
