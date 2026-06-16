@@ -119,6 +119,13 @@ def process_single_config(args):
                 "remaining_mqt_syllabi_sorties_only": float(u["remaining_mqt_syllabi_sorties_only"]),
                 "remaining_flug_syllabi_sorties_only": float(u["remaining_flug_syllabi_sorties_only"]),
                 "remaining_ipug_syllabi_sorties_only": float(u["remaining_ipug_syllabi_sorties_only"]),
+                "self_terminating_phase": float(cfg.self_terminating_phase),
+                "self_terminating_run": float(cfg.self_terminating_run),
+                "ip_at_cap_count": float(cfg.pipeline_ip_at_cap_count),
+                "ip_available_count": float(cfg.pipeline_ip_available_count),
+                "max_ip_events_monthly": float(cfg.pipeline_max_ip_events_monthly),
+                "deferred_due_to_ip": float(cfg.pipeline_deferred_due_to_ip),
+                "unallocated_iron": float(cfg.unallocated_iron),
             })
         except ValueError:
             return None # Catch-all for edge case logic errors
@@ -171,6 +178,13 @@ def process_single_config(args):
         "remaining_mqt_syllabi_sorties_only_mean": avg["remaining_mqt_syllabi_sorties_only"],
         "remaining_flug_syllabi_sorties_only_mean": avg["remaining_flug_syllabi_sorties_only"],
         "remaining_ipug_syllabi_sorties_only_mean": avg["remaining_ipug_syllabi_sorties_only"],
+        "self_terminating_phase_mean": avg["self_terminating_phase"],
+        "self_terminating_run_mean": avg["self_terminating_run"],
+        "ip_at_cap_count_mean": avg["ip_at_cap_count"],
+        "ip_available_count_mean": avg["ip_available_count"],
+        "max_ip_events_monthly_mean": avg["max_ip_events_monthly"],
+        "deferred_due_to_ip_mean": avg["deferred_due_to_ip"],
+        "unallocated_iron_mean": avg["unallocated_iron"],
     }
 
 def run_parallel_sweep():
