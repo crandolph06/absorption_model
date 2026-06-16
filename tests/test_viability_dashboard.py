@@ -248,6 +248,25 @@ class ViabilityDashboardTest(unittest.TestCase):
             self.assertEqual(relaxations.iloc[0]["constraint"], "wg_rap")
             self.assertEqual(misses.iloc[0]["schedule_id"], "schedule_best")
 
+    def test_dynamic_artifact_loading_includes_closeout_artifacts_when_supplied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = _write_dynamic_artifacts(
+                self.config,
+                root,
+                include_relaxation=True,
+                include_closeout=True,
+            )
+
+            artifacts = load_dynamic_dashboard_artifacts(paths)
+
+            self.assertIsNotNone(artifacts.bound_relaxation_summary)
+            self.assertIsNotNone(artifacts.bound_relaxation_best_by_experiment)
+            self.assertIsNotNone(artifacts.ipug_summary)
+            self.assertIsNotNone(artifacts.ipug_evaluations)
+            self.assertIsNotNone(artifacts.paper_figure_paths)
+            self.assertIn("inventory", artifacts.paper_figure_paths)
+
     def test_dynamic_loading_fails_clearly_when_relaxation_artifacts_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -540,7 +559,14 @@ def _dynamic_evaluations(config):
     return pd.DataFrame(rows)
 
 
-def _write_dynamic_artifacts(config, root, *, evaluations=None, include_relaxation=False):
+def _write_dynamic_artifacts(
+    config,
+    root,
+    *,
+    evaluations=None,
+    include_relaxation=False,
+    include_closeout=False,
+):
     evaluations_path = root / "all_evaluations.csv"
     if evaluations is None:
         evaluations = _dynamic_evaluations(config)
@@ -610,6 +636,45 @@ def _write_dynamic_artifacts(config, root, *, evaluations=None, include_relaxati
             ]
         ).to_csv(relaxation_dir / "relaxation_sets.csv", index=False)
         (relaxation_dir / "relaxation_report.md").write_text("# Relaxation\n", encoding="utf-8")
+    bound_dir = None
+    ipug_dir = None
+    paper_dir = None
+    if include_closeout:
+        bound_dir = root / "bound_relaxation_v2"
+        bound_dir.mkdir()
+        (bound_dir / "bound_relaxation_summary.json").write_text(
+            json.dumps({"best_phi": 0.2, "feasible_count": 0}),
+            encoding="utf-8",
+        )
+        pd.DataFrame(
+            [
+                {
+                    "experiment_id": "baseline",
+                    "phi": 0.2,
+                    "feasible": False,
+                    "active_constraint": "wg_rap",
+                }
+            ]
+        ).to_csv(bound_dir / "best_by_bound_experiment.csv", index=False)
+        ipug_dir = root / "ipug_counterfactual_v2"
+        ipug_dir.mkdir()
+        (ipug_dir / "ipug_counterfactual_summary.json").write_text(
+            json.dumps({"best_phi": 0.2, "feasible_count": 0}),
+            encoding="utf-8",
+        )
+        pd.DataFrame(
+            [
+                {
+                    "sweep_value": 0.0,
+                    "phi": 0.2,
+                    "feasible": False,
+                    "active_constraint": "wg_rap",
+                }
+            ]
+        ).to_parquet(ipug_dir / "ipug_counterfactual_evaluations.parquet", index=False)
+        paper_dir = root / "paper_artifacts_v1"
+        paper_dir.mkdir()
+        (paper_dir / "trajectory_total_pilots.png").write_bytes(b"fake-png")
 
     return DynamicDashboardArtifactPaths(
         config=Path("configs/viability.example.yaml"),
@@ -618,6 +683,9 @@ def _write_dynamic_artifacts(config, root, *, evaluations=None, include_relaxati
         sensitivity=sensitivity_path,
         report=report_path,
         relaxation_dir=relaxation_dir,
+        bound_relaxation_dir=bound_dir,
+        ipug_diagnostic_dir=ipug_dir,
+        paper_artifacts_dir=paper_dir,
     )
 
 

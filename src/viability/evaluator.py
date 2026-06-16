@@ -438,7 +438,19 @@ def _design_metadata(row: pd.Series) -> dict[str, Any]:
 
 def _schedule_metadata(row: pd.Series) -> dict[str, Any]:
     metadata = {}
-    for column in ["schedule_source", "sample_index", "template_name"]:
+    for column in [
+        "schedule_source",
+        "sample_index",
+        "seed_offset",
+        "template_name",
+        "experiment_id",
+        "base_schedule_id",
+        "relaxed_variable",
+        "relaxed_high",
+        "sweep_value",
+        "counterfactual",
+        "analysis_note",
+    ]:
         if column in row and pd.notna(row[column]):
             value = row[column]
             if hasattr(value, "item"):
@@ -448,6 +460,8 @@ def _schedule_metadata(row: pd.Series) -> dict[str, Any]:
 
 
 def _seed_offset(row: pd.Series, index: int) -> int:
+    if "seed_offset" in row and pd.notna(row["seed_offset"]):
+        return int(row["seed_offset"])
     source = str(row["doe_source"]) if "doe_source" in row and pd.notna(row["doe_source"]) else ""
     if (
         source not in {"corner", "baseline"}

@@ -69,6 +69,9 @@ class DynamicDashboardArtifactPaths:
     sensitivity: Path | None = None
     report: Path | None = None
     relaxation_dir: Path | None = None
+    bound_relaxation_dir: Path | None = None
+    ipug_diagnostic_dir: Path | None = None
+    paper_artifacts_dir: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +87,11 @@ class DynamicDashboardArtifacts:
     relaxation_pareto: pd.DataFrame | None = None
     relaxation_sets: pd.DataFrame | None = None
     relaxation_report: str | None = None
+    bound_relaxation_summary: dict[str, Any] | None = None
+    bound_relaxation_best_by_experiment: pd.DataFrame | None = None
+    ipug_summary: dict[str, Any] | None = None
+    ipug_evaluations: pd.DataFrame | None = None
+    paper_figure_paths: dict[str, Path] | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +184,9 @@ def default_dynamic_artifact_paths(root: str | Path = ".") -> DynamicDashboardAr
         sensitivity=run_dir / "diagnostic" / "local_sensitivity.csv",
         report=run_dir / "diagnostic" / "dynamic_control_report.md",
         relaxation_dir=dynamic_root / "relaxation_study_v1",
+        bound_relaxation_dir=dynamic_root / "bound_relaxation_v2",
+        ipug_diagnostic_dir=dynamic_root / "ipug_counterfactual_v2",
+        paper_artifacts_dir=dynamic_root / "paper_artifacts_v1",
     )
 
 
@@ -271,6 +282,11 @@ def load_dynamic_dashboard_artifacts(
     relaxation_pareto = None
     relaxation_sets = None
     relaxation_report = None
+    bound_relaxation_summary = None
+    bound_relaxation_best = None
+    ipug_summary = None
+    ipug_evaluations = None
+    paper_figure_paths = None
     if paths.relaxation_dir is not None:
         relaxation_dir = paths.relaxation_dir
         if relaxation_dir.exists():
@@ -298,6 +314,47 @@ def load_dynamic_dashboard_artifacts(
                 relaxation_report = report_path.read_text(encoding="utf-8")
         elif str(relaxation_dir).strip():
             raise FileNotFoundError(f"Dynamic relaxation artifact directory does not exist: {relaxation_dir}")
+    if paths.bound_relaxation_dir is not None:
+        bound_dir = paths.bound_relaxation_dir
+        if bound_dir.exists():
+            bound_relaxation_summary = _read_json_object(bound_dir / "bound_relaxation_summary.json")
+            bound_relaxation_best = read_evaluations_table(bound_dir / "best_by_bound_experiment.csv")
+            _require_columns(
+                bound_relaxation_best,
+                ["experiment_id", "phi", "feasible", "active_constraint"],
+                "dynamic bound-relaxation best-by-experiment table",
+            )
+        elif str(bound_dir).strip():
+            raise FileNotFoundError(f"Dynamic bound-relaxation artifact directory does not exist: {bound_dir}")
+    if paths.ipug_diagnostic_dir is not None:
+        ipug_dir = paths.ipug_diagnostic_dir
+        if ipug_dir.exists():
+            ipug_summary = _read_json_object(ipug_dir / "ipug_counterfactual_summary.json")
+            ipug_evaluations = read_evaluations_table(ipug_dir / "ipug_counterfactual_evaluations.parquet")
+            _require_columns(
+                ipug_evaluations,
+                ["sweep_value", "phi", "feasible", "active_constraint"],
+                "dynamic IPUG diagnostic evaluations",
+            )
+        elif str(ipug_dir).strip():
+            raise FileNotFoundError(f"Dynamic IPUG diagnostic artifact directory does not exist: {ipug_dir}")
+    if paths.paper_artifacts_dir is not None:
+        paper_dir = paths.paper_artifacts_dir
+        if paper_dir.exists():
+            figure_names = {
+                "inventory": "trajectory_total_pilots.png",
+                "rap": "trajectory_rap_shortfalls.png",
+                "staff": "trajectory_staff_counts.png",
+                "policy": "best_policy_epoch_controls.png",
+                "trade_space": "trade_space_total_wg_fl.png",
+            }
+            paper_figure_paths = {
+                name: paper_dir / filename
+                for name, filename in figure_names.items()
+                if (paper_dir / filename).exists()
+            }
+        elif str(paper_dir).strip():
+            raise FileNotFoundError(f"Dynamic paper-artifacts directory does not exist: {paper_dir}")
     return DynamicDashboardArtifacts(
         paths=paths,
         config=config,
@@ -310,6 +367,11 @@ def load_dynamic_dashboard_artifacts(
         relaxation_pareto=relaxation_pareto,
         relaxation_sets=relaxation_sets,
         relaxation_report=relaxation_report,
+        bound_relaxation_summary=bound_relaxation_summary,
+        bound_relaxation_best_by_experiment=bound_relaxation_best,
+        ipug_summary=ipug_summary,
+        ipug_evaluations=ipug_evaluations,
+        paper_figure_paths=paper_figure_paths,
     )
 
 

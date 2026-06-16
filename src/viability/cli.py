@@ -12,6 +12,11 @@ from src.viability.dynamic_search import (
     run_dynamic_policy_refinement,
     run_dynamic_policy_search,
 )
+from src.viability.dynamic_analysis import (
+    run_dynamic_bound_relaxation_study,
+    run_dynamic_ipug_diagnostic,
+    run_dynamic_trajectory_artifacts,
+)
 from src.viability.evaluator import evaluate_design, evaluate_designs_parallel
 from src.viability.io import run_output_dir, write_config_resolved, write_table
 from src.viability.plots import run_envelope_plots_from_files
@@ -385,6 +390,90 @@ def main() -> int:
         default=50,
         help="Number of nearest-under-relaxation policies to write",
     )
+    bound_parser = subparsers.add_parser(
+        "dynamic-bound-relaxation-study",
+        help="Run one-at-a-time direct input-bound relaxation sweeps around the best dynamic schedule",
+    )
+    bound_parser.add_argument("--config", required=True, help="Path to viability YAML config")
+    bound_parser.add_argument(
+        "--evaluations",
+        required=True,
+        help="Dynamic evaluations parquet/CSV path used to select the base schedule",
+    )
+    bound_parser.add_argument("--output-dir", required=True, help="Bound-relaxation output directory")
+    bound_parser.add_argument("--epochs", type=int, default=3, help="Number of policy epochs")
+    bound_parser.add_argument(
+        "--sweep-points",
+        type=int,
+        default=5,
+        help="Fixed-shape sweep points per relaxed upper-bound value",
+    )
+    bound_parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Override run.workers for direct bound-relaxation evaluations",
+    )
+    bound_parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=10,
+        help="Flush bound-relaxation checkpoints every N completed schedules",
+    )
+    ipug_parser = subparsers.add_parser(
+        "dynamic-ipug-diagnostic",
+        help="Run direct all-epoch IPUG counterfactuals around the best dynamic schedule",
+    )
+    ipug_parser.add_argument("--config", required=True, help="Path to viability YAML config")
+    ipug_parser.add_argument(
+        "--evaluations",
+        required=True,
+        help="Dynamic evaluations parquet/CSV path used to select the base schedule",
+    )
+    ipug_parser.add_argument("--output-dir", required=True, help="IPUG diagnostic output directory")
+    ipug_parser.add_argument("--epochs", type=int, default=3, help="Number of policy epochs")
+    ipug_parser.add_argument(
+        "--ipug-values",
+        default="0,2,5,8,10,15,20",
+        help="Comma-separated all-epoch IPUG quota values to direct-evaluate",
+    )
+    ipug_parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Override run.workers for direct IPUG evaluations",
+    )
+    ipug_parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=10,
+        help="Flush IPUG diagnostic checkpoints every N completed schedules",
+    )
+    trajectory_parser = subparsers.add_parser(
+        "dynamic-trajectory-artifacts",
+        help="Rerun selected dynamic schedules and write trajectory/trade-space figures",
+    )
+    trajectory_parser.add_argument("--config", required=True, help="Path to viability YAML config")
+    trajectory_parser.add_argument("--output-dir", required=True, help="Trajectory artifact output directory")
+    trajectory_parser.add_argument(
+        "--evaluation",
+        action="append",
+        required=True,
+        help="Dynamic evaluations parquet/CSV path; repeat for multiple result bundles",
+    )
+    trajectory_parser.add_argument(
+        "--epoch-count",
+        action="append",
+        type=int,
+        required=True,
+        help="Epoch count corresponding to each --evaluation; repeat in the same order",
+    )
+    trajectory_parser.add_argument(
+        "--label",
+        action="append",
+        default=None,
+        help="Optional label corresponding to each --evaluation; repeat in the same order",
+    )
     args = parser.parse_args()
 
     if args.command == "plot-gpr-overlay":
@@ -712,6 +801,85 @@ def main() -> int:
         )
         return 0
 
+    if args.command == "dynamic-bound-relaxation-study":
+        result = run_dynamic_bound_relaxation_study(
+            config=config,
+            evaluations_path=args.evaluations,
+            output_dir=args.output_dir,
+            epoch_count=args.epochs,
+            workers=args.workers,
+            checkpoint_every=args.checkpoint_every,
+            sweep_points=args.sweep_points,
+        )
+        print(
+            json.dumps(
+                {
+                    "output_dir": str(result.output_dir),
+                    "candidates_path": str(result.candidates_path),
+                    "evaluations_path": str(result.evaluations_path),
+                    "best_by_experiment_path": str(result.best_by_experiment_path),
+                    "summary_path": str(result.summary_path),
+                    "report_path": str(result.report_path),
+                    "evaluated_count": result.evaluated_count,
+                    "feasible_count": result.feasible_count,
+                    "best_phi": result.best_phi,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    if args.command == "dynamic-ipug-diagnostic":
+        result = run_dynamic_ipug_diagnostic(
+            config=config,
+            evaluations_path=args.evaluations,
+            output_dir=args.output_dir,
+            epoch_count=args.epochs,
+            ipug_values=_parse_float_list(args.ipug_values),
+            workers=args.workers,
+            checkpoint_every=args.checkpoint_every,
+        )
+        print(
+            json.dumps(
+                {
+                    "output_dir": str(result.output_dir),
+                    "candidates_path": str(result.candidates_path),
+                    "evaluations_path": str(result.evaluations_path),
+                    "summary_path": str(result.summary_path),
+                    "report_path": str(result.report_path),
+                    "evaluated_count": result.evaluated_count,
+                    "feasible_count": result.feasible_count,
+                    "best_phi": result.best_phi,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    if args.command == "dynamic-trajectory-artifacts":
+        specs = _parse_evaluation_specs(args.evaluation, args.epoch_count, args.label)
+        result = run_dynamic_trajectory_artifacts(
+            config=config,
+            evaluation_specs=specs,
+            output_dir=args.output_dir,
+        )
+        print(
+            json.dumps(
+                {
+                    "output_dir": str(result.output_dir),
+                    "summary_path": str(result.summary_path),
+                    "selected_policies_path": str(result.selected_policies_path),
+                    "trajectory_paths": {name: str(path) for name, path in result.trajectory_paths.items()},
+                    "figure_paths": {name: str(path) for name, path in result.figure_paths.items()},
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
     if args.command == "plot-envelope":
         result = run_envelope_plots_from_files(
             surrogate_path=args.surrogate,
@@ -753,6 +921,31 @@ def _parse_constraints(value: str | None) -> list[str]:
     if value is None or value.strip() == "":
         return list(DEFAULT_RELAXATION_CONSTRAINTS)
     return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _parse_float_list(value: str) -> list[float]:
+    parsed = [float(part.strip()) for part in value.split(",") if part.strip()]
+    if not parsed:
+        raise ValueError("Expected at least one numeric value")
+    return parsed
+
+
+def _parse_evaluation_specs(
+    evaluations: list[str],
+    epoch_counts: list[int],
+    labels: list[str] | None,
+) -> list[tuple[str, int, str]]:
+    if len(evaluations) != len(epoch_counts):
+        raise ValueError("--evaluation and --epoch-count must be supplied the same number of times")
+    if labels is None:
+        labels = []
+    if labels and len(labels) != len(evaluations):
+        raise ValueError("--label must be omitted or supplied once per --evaluation")
+    specs = []
+    for index, (evaluation, epoch_count) in enumerate(zip(evaluations, epoch_counts, strict=True)):
+        label = labels[index] if labels else f"run_{index + 1}_{epoch_count}epoch"
+        specs.append((evaluation, int(epoch_count), label))
+    return specs
 
 
 if __name__ == "__main__":

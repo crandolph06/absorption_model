@@ -66,6 +66,9 @@ def _load_dynamic_artifacts(
     sensitivity: str,
     report: str,
     relaxation_dir: str,
+    bound_relaxation_dir: str,
+    ipug_diagnostic_dir: str,
+    paper_artifacts_dir: str,
 ):
     return load_dynamic_dashboard_artifacts(
         DynamicDashboardArtifactPaths(
@@ -75,6 +78,9 @@ def _load_dynamic_artifacts(
             sensitivity=Path(sensitivity) if sensitivity else None,
             report=Path(report) if report else None,
             relaxation_dir=Path(relaxation_dir) if relaxation_dir else None,
+            bound_relaxation_dir=Path(bound_relaxation_dir) if bound_relaxation_dir else None,
+            ipug_diagnostic_dir=Path(ipug_diagnostic_dir) if ipug_diagnostic_dir else None,
+            paper_artifacts_dir=Path(paper_artifacts_dir) if paper_artifacts_dir else None,
         )
     )
 
@@ -341,9 +347,27 @@ def _render_dynamic_dashboard():
             if defaults.relaxation_dir is not None and defaults.relaxation_dir.exists()
             else None
         )
+        bound_default = (
+            defaults.bound_relaxation_dir
+            if defaults.bound_relaxation_dir is not None and defaults.bound_relaxation_dir.exists()
+            else None
+        )
+        ipug_default = (
+            defaults.ipug_diagnostic_dir
+            if defaults.ipug_diagnostic_dir is not None and defaults.ipug_diagnostic_dir.exists()
+            else None
+        )
+        paper_default = (
+            defaults.paper_artifacts_dir
+            if defaults.paper_artifacts_dir is not None and defaults.paper_artifacts_dir.exists()
+            else None
+        )
         sensitivity_path = _path_input("Local sensitivity", sensitivity_default, container=artifact_box)
         report_path = _path_input("Dynamic report", report_default, container=artifact_box)
         relaxation_dir = _path_input("Relaxation study directory", relaxation_default, container=artifact_box)
+        bound_relaxation_dir = _path_input("Bound relaxation directory", bound_default, container=artifact_box)
+        ipug_diagnostic_dir = _path_input("IPUG diagnostic directory", ipug_default, container=artifact_box)
+        paper_artifacts_dir = _path_input("Paper artifacts directory", paper_default, container=artifact_box)
 
     try:
         artifacts = _load_dynamic_artifacts(
@@ -353,6 +377,9 @@ def _render_dynamic_dashboard():
             sensitivity_path,
             report_path,
             relaxation_dir,
+            bound_relaxation_dir,
+            ipug_diagnostic_dir,
+            paper_artifacts_dir,
         )
     except Exception as exc:
         st.error(str(exc))
@@ -498,6 +525,12 @@ def _render_dynamic_dashboard():
     direct_result = st.session_state.get("viability_dynamic_direct_result")
     direct_key = st.session_state.get("viability_dynamic_direct_key")
     with trajectory_tab:
+        if artifacts.paper_figure_paths:
+            st.subheader("Report Figures")
+            figure_cols = st.columns(2)
+            for index, (name, path) in enumerate(artifacts.paper_figure_paths.items()):
+                figure_cols[index % 2].image(str(path), caption=name.replace("_", " ").title())
+            st.divider()
         if direct_result is None or direct_key != selected_key:
             st.write("Re-run the selected schedule to populate trajectory plots.")
         elif direct_result.evaluation.status != "ok":
@@ -547,6 +580,50 @@ def _render_dynamic_dashboard():
             if artifacts.relaxation_report:
                 st.subheader("Study Report")
                 st.markdown(artifacts.relaxation_report)
+        if artifacts.bound_relaxation_summary is not None:
+            st.subheader("Input-Bound Relaxation")
+            st.json(artifacts.bound_relaxation_summary)
+            if artifacts.bound_relaxation_best_by_experiment is not None:
+                display = artifacts.bound_relaxation_best_by_experiment
+                columns = _display_columns(
+                    display,
+                    [
+                        "experiment_id",
+                        "relaxed_variable",
+                        "relaxed_high",
+                        "sweep_value",
+                        "phi",
+                        "feasible",
+                        "active_constraint",
+                        "constraint_total_pilots_window",
+                        "constraint_wg_rap",
+                        "constraint_fl_rap",
+                        "constraint_ip_rap",
+                    ],
+                )
+                st.dataframe(display[columns].sort_values("phi"), width="stretch", hide_index=True)
+        if artifacts.ipug_summary is not None:
+            st.subheader("IPUG Counterfactual")
+            st.json(artifacts.ipug_summary)
+            if artifacts.ipug_evaluations is not None:
+                columns = _display_columns(
+                    artifacts.ipug_evaluations,
+                    [
+                        "sweep_value",
+                        "phi",
+                        "feasible",
+                        "active_constraint",
+                        "constraint_total_pilots_window",
+                        "constraint_wg_rap",
+                        "constraint_fl_rap",
+                        "constraint_ip_rap",
+                    ],
+                )
+                st.dataframe(
+                    artifacts.ipug_evaluations[columns].sort_values("sweep_value"),
+                    width="stretch",
+                    hide_index=True,
+                )
 
     with authority_tab:
         if artifacts.sensitivity is None:
