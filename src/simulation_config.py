@@ -13,6 +13,8 @@ class SimulationConfig:
 
     phase_length_days: int = DEFAULT_PHASE_LENGTH_DAYS
     allocation_noise: float = 0.0
+    # Max single-ship CT sorties allocated per pilot per notional month (extra iron stays unallocated).
+    single_ship_monthly_cap: float = 1.0
     # When set (0–1), sortie iron is split: syllabus vs CT each get a reserved share.
     upgrade_sortie_fraction: Optional[float] = None
 

@@ -3,6 +3,7 @@ import math
 import random
 from typing import List, Optional, Set
 from src.models import (
+    Assignment,
     EventType,
     SquadronConfig,
     Pilot,
@@ -152,6 +153,107 @@ def apply_deferred_burden_to_squadron(cfg: SquadronConfig, metrics: dict) -> Non
     cfg.ipug_sim_carry = metrics["remaining_ipug_syllabi_sims_only"]
 
 
+def assess_pipeline_self_termination(
+    pilots: List[Pilot],
+    metrics: dict,
+    phase_length_days: float,
+    cfg: SquadronConfig,
+    phase_gross_iron: int,
+    single_ship_monthly_cap: float,
+) -> dict:
+    """
+    Phase pipeline diagnostics and iron-based self-termination.
+
+    ``pipeline_deferred_due_to_ip`` tracks upgrade deferrals attributed to required IP
+    seats (leading indicator only). ``self_terminating_phase`` is True when squadron
+    iron is left unallocated because no supervised or capped single-ship CT sortie can
+    still be assigned.
+    """
+    months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
+    deferred_slots = (
+        metrics["deferred_mqt_sorties"]
+        + metrics["deferred_flug_sorties"]
+        + metrics["deferred_ipug_sorties"]
+        + metrics["deferred_mqt_sims"]
+        + metrics["deferred_flug_sims"]
+        + metrics["deferred_ipug_sims"]
+    )
+    held_back = (
+        metrics["held_back_mqt"]
+        + metrics["held_back_flug"]
+        + metrics["held_back_ipug"]
+    )
+    has_upgrade_deferral = deferred_slots > 0 or held_back > 0
+
+    ips = [
+        p for p in pilots
+        if p.active and p.qual == Qual.IP and p.current_assignment == Assignment.LINE
+    ]
+    ip_available = [p for p in ips if p.has_events_capacity(phase_length_days)]
+    ip_at_cap = [p for p in ips if not p.has_events_capacity(phase_length_days)]
+
+    max_ip_events_mo = 0.0
+    if ips and months > 0:
+        max_ip_events_mo = max(p.phase_events() / months for p in ips)
+
+    deferred_due_to_ip = bool(has_upgrade_deferral and cfg.deferral_due_to_ip)
+    sorties_flown = int(round(sum(p.sortie_phase for p in pilots)))
+    unallocated_iron = max(0, int(phase_gross_iron) - sorties_flown)
+    can_assign_more_ct = _can_assign_more_ct_sorties(
+        pilots, phase_length_days, single_ship_monthly_cap,
+    )
+    self_terminating_phase = unallocated_iron > 0 and not can_assign_more_ct
+
+    return {
+        "self_terminating_phase": self_terminating_phase,
+        "deferred_due_to_ip": deferred_due_to_ip,
+        "has_upgrade_deferral": has_upgrade_deferral,
+        "unallocated_iron": unallocated_iron,
+        "can_assign_more_ct": can_assign_more_ct,
+        "ip_count": len(ips),
+        "ip_at_cap_count": len(ip_at_cap),
+        "ip_available_count": len(ip_available),
+        "max_ip_events_monthly": max_ip_events_mo,
+    }
+
+
+def _can_assign_more_ct_sorties(
+    pilots: List[Pilot],
+    phase_length_days: float,
+    single_ship_monthly_cap: float,
+) -> bool:
+    """Whether another CT sortie could still be assigned under cap and seat rules."""
+    ct_candidates = [p for p in pilots if p.upgrade != Upgrade.MQT]
+
+    supervisors = [
+        p for p in ct_candidates
+        if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)
+        and p.has_events_capacity(phase_length_days)
+    ]
+    if supervisors:
+        return True
+
+    single_ship_wg = [
+        p for p in ct_candidates
+        if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)
+        and p.has_events_capacity(phase_length_days)
+        and p.has_single_ship_allocation_capacity(phase_length_days, single_ship_monthly_cap)
+    ]
+    return len(single_ship_wg) > 0
+
+
+def apply_pipeline_status_to_squadron(cfg: SquadronConfig, status: dict) -> None:
+    """Latch phase pipeline status on ``cfg`` for history, sweeps, and manning."""
+    cfg.self_terminating_phase = bool(status["self_terminating_phase"])
+    cfg.unallocated_iron = int(status["unallocated_iron"])
+    cfg.pipeline_deferred_due_to_ip = bool(status["deferred_due_to_ip"])
+    cfg.pipeline_ip_at_cap_count = int(status["ip_at_cap_count"])
+    cfg.pipeline_ip_available_count = int(status["ip_available_count"])
+    cfg.pipeline_max_ip_events_monthly = float(status["max_ip_events_monthly"])
+    if cfg.self_terminating_phase:
+        cfg.self_terminating_run = True
+
+
 # ----------------------
 # Selection Phase
 # ----------------------
@@ -236,58 +338,6 @@ def _has_event_capacity_under_limit(p: Pilot, max_phase_events: float) -> bool:
     return p.sortie_phase + p.sim_phase + 1.0 <= max_phase_events + 1e-9
 
 
-def assess_pipeline_self_termination(
-    pilots: List[Pilot],
-    metrics: dict,
-    phase_length_days: float,
-) -> dict:
-    """Detect upgrade deferral caused by all instructor pilots hitting the event cap."""
-    deferred_work = any(
-        metrics.get(key, 0) > 0
-        for key in (
-            "deferred_mqt_sorties",
-            "deferred_flug_sorties",
-            "deferred_ipug_sorties",
-            "deferred_mqt_sims",
-            "deferred_flug_sims",
-            "deferred_ipug_sims",
-            "held_back_mqt",
-            "held_back_flug",
-            "held_back_ipug",
-        )
-    )
-    ips = [pilot for pilot in pilots if pilot.qual == Qual.IP]
-    max_phase_events = _phase_event_limit(phase_length_days)
-    if max_phase_events is None:
-        ip_available_count = 0
-        ip_at_cap_count = 0
-    else:
-        ip_available_count = sum(
-            1 for pilot in ips if _has_event_capacity_under_limit(pilot, max_phase_events)
-        )
-        ip_at_cap_count = len(ips) - ip_available_count
-
-    phase_months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
-    if phase_months <= 0 or not ips:
-        max_ip_events_monthly = 0.0
-    else:
-        max_ip_events_monthly = max(pilot.phase_events() for pilot in ips) / phase_months
-
-    deferred_due_to_ip = bool(
-        deferred_work
-        and ips
-        and ip_available_count == 0
-        and ip_at_cap_count == len(ips)
-    )
-    return {
-        "self_terminating_phase": deferred_due_to_ip,
-        "deferred_due_to_ip": deferred_due_to_ip,
-        "ip_at_cap_count": ip_at_cap_count,
-        "ip_available_count": ip_available_count,
-        "max_ip_events_monthly": max_ip_events_monthly,
-    }
-
-
 def _ct_heap_entry(p: Pilot, side: str, order: int) -> tuple:
     if side == "Red":
         return (*_deterministic_red_sortie_key(p), order, p)
@@ -309,12 +359,19 @@ def _assign_ct_sortie_from_heap(
     side: str,
     order_by_id: dict[int, int],
     max_phase_events: float,
+    phase_length_days: float,
     single_ship: bool = False,
+    single_ship_monthly_cap: float = 1.0,
 ) -> bool:
     while heap:
         entry = heapq.heappop(heap)
         pilot = entry[-1]
         if not _has_event_capacity_under_limit(pilot, max_phase_events):
+            continue
+        if single_ship and not pilot.has_single_ship_allocation_capacity(
+            phase_length_days,
+            single_ship_monthly_cap,
+        ):
             continue
 
         current = _ct_heap_entry(pilot, side, order_by_id[id(pilot)])
@@ -327,7 +384,13 @@ def _assign_ct_sortie_from_heap(
             side=side,
             single_ship=single_ship,
         )
-        if _has_event_capacity_under_limit(pilot, max_phase_events):
+        if _has_event_capacity_under_limit(pilot, max_phase_events) and (
+            not single_ship
+            or pilot.has_single_ship_allocation_capacity(
+                phase_length_days,
+                single_ship_monthly_cap,
+            )
+        ):
             heapq.heappush(heap, _ct_heap_entry(pilot, side, order_by_id[id(pilot)]))
         return True
     return False
@@ -397,8 +460,10 @@ def check_syllabus_resources(
         if rules.can_fill_seat(pilot=p, min_qual=Qual.IP) and p is not student
     ]
     if len(ips) < event.num_instructor:
+        cfg.deferral_due_to_ip = True
         return False
     if not _can_assign_distinct_from_pool(ips, event.num_instructor, phase_length_days):
+        cfg.deferral_due_to_ip = True
         return False
 
     wg_pool = [
@@ -438,6 +503,7 @@ def assign_sortie(
     noise: float = 0.0,
     exclude: Optional[Set[int]] = None,
     single_ship: bool = False,
+    single_ship_monthly_cap: float = 1.0,
 ) -> bool:
     """
     Selects the best candidate (lowest total events, then least blue/red sorties) to fly a sortie.
@@ -446,6 +512,11 @@ def assign_sortie(
     exclude = exclude if exclude is not None else set()
     candidates = [p for p in candidates if id(p) not in exclude]
     candidates = _eligible_for_event(candidates, phase_length_days)
+    if single_ship:
+        candidates = [
+            p for p in candidates
+            if p.has_single_ship_allocation_capacity(phase_length_days, single_ship_monthly_cap)
+        ]
     if not candidates:
         return False
 
@@ -630,6 +701,7 @@ def _allocate_ct_buckets_round_robin(
     phase_length_days: float,
     noise: float,
     single_ship: bool = False,
+    single_ship_monthly_cap: float = 1.0,
 ) -> int:
     """Assign CT sorties round-robin across ``buckets``; return count assigned."""
     if not buckets:
@@ -668,7 +740,9 @@ def _allocate_ct_buckets_round_robin(
                     side=bucket.side,
                     order_by_id=order_by_id,
                     max_phase_events=max_phase_events,
+                    phase_length_days=phase_length_days,
                     single_ship=single_ship,
+                    single_ship_monthly_cap=single_ship_monthly_cap,
                 )
             else:
                 eligible = candidate_pools[bucket.min_qual]
@@ -679,6 +753,7 @@ def _allocate_ct_buckets_round_robin(
                     side=bucket.side,
                     noise=noise,
                     single_ship=single_ship,
+                    single_ship_monthly_cap=single_ship_monthly_cap,
                 )
             if assigned_sortie:
                 remaining[bucket] -= 1
@@ -702,6 +777,7 @@ def allocate_continuation_training(
     cfg: SquadronConfig,
     phase_length_days: float,
     ct_sortie_cap: Optional[int] = None,
+    single_ship_monthly_cap: float = 1.0,
 ):
     if ct_sortie_cap is not None:
         remaining_capacity = max(0, ct_sortie_cap)
@@ -743,7 +819,8 @@ def allocate_continuation_training(
     fl_planned = sum(base_qty[b] for b in fl_buckets)
 
     fl_assigned = _allocate_ct_buckets_round_robin(
-        fl_buckets, remaining, ct_candidates, cfg, phase_length_days, noise
+        fl_buckets, remaining, ct_candidates, cfg, phase_length_days, noise,
+        single_ship_monthly_cap=single_ship_monthly_cap,
     )
     fl_ct_shortfall = fl_planned - fl_assigned
 
@@ -757,6 +834,7 @@ def allocate_continuation_training(
             phase_length_days,
             noise,
             single_ship=fl_ct_shortfall > 0,
+            single_ship_monthly_cap=single_ship_monthly_cap,
         )
 
 def allocate_sim_rap(
@@ -836,7 +914,6 @@ def _print_allocation_debug(pilots: List[Pilot], stage: str) -> None:
             f"{p.sortie_phase:>4.0f}{p.sim_phase:>4.0f}{tot:>4.0f}"
         )
 
-
 def run_phase_simulation(
     cfg: SquadronConfig,
     pilots: List[Pilot],
@@ -856,6 +933,7 @@ def run_phase_simulation(
     flug_syllabus = flug_syllabus or FLUG_SYLLABUS
     ipug_syllabus = ipug_syllabus or IPUG_SYLLABUS
     continuation_profile = continuation_profile or CONTINUATION_PROFILE
+    cfg.deferral_due_to_ip = False
 
     # Pilots with open syllabus lines at phase start retry those in step 3 only (not step 4).
     carryover_ids = {id(p) for p in pilots if p.incomplete_syllabus_items}
@@ -886,6 +964,7 @@ def run_phase_simulation(
         0,
         int(total_phase_capacity(cfg) * phase_months) - cfg.deferred_sortie_burden,
     )
+    phase_gross_iron = total_iron
     upgrade_capacity, ct_sortie_cap = sim.phase_sortie_budgets(total_iron)
 
     # 3. Carryover: incomplete lines only (not a full new syllabus)
@@ -911,6 +990,7 @@ def run_phase_simulation(
     allocate_continuation_training(
         pilots, continuation_profile, total_iron, noise, cfg, phase_length_days,
         ct_sortie_cap=ct_sortie_cap,
+        single_ship_monthly_cap=sim.single_ship_monthly_cap,
     )
     if debug_verbose:
         _print_allocation_debug(pilots, "CT")
@@ -928,14 +1008,15 @@ def run_phase_simulation(
         ipug_syllabus=ipug_syllabus,
     )
     apply_deferred_burden_to_squadron(cfg, metrics)
-    pipeline_status = assess_pipeline_self_termination(pilots, metrics, phase_length_days)
-    cfg.deferral_due_to_ip = bool(pipeline_status["deferred_due_to_ip"])
-    cfg.self_terminating_phase = bool(pipeline_status["self_terminating_phase"])
-    cfg.self_terminating_run = cfg.self_terminating_run or cfg.self_terminating_phase
-    cfg.pipeline_deferred_due_to_ip = bool(pipeline_status["deferred_due_to_ip"])
-    cfg.pipeline_ip_at_cap_count = int(pipeline_status["ip_at_cap_count"])
-    cfg.pipeline_ip_available_count = int(pipeline_status["ip_available_count"])
-    cfg.pipeline_max_ip_events_monthly = float(pipeline_status["max_ip_events_monthly"])
+    status = assess_pipeline_self_termination(
+        pilots,
+        metrics,
+        phase_length_days,
+        cfg,
+        phase_gross_iron,
+        sim.single_ship_monthly_cap,
+    )
+    apply_pipeline_status_to_squadron(cfg, status)
 
     # 7. Finalize monthly stats and RAP shortfalls
     for p in pilots:

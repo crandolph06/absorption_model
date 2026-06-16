@@ -228,6 +228,19 @@ class Pilot:
             return False
         return (self.phase_events() + additional) / months <= MAX_MONTHLY_EVENTS + 1e-9
 
+    def has_single_ship_allocation_capacity(
+        self,
+        phase_length_days: float,
+        monthly_cap: float = SINGLE_SHIP_RAP_MONTHLY_CAP,
+        additional: float = 1.0,
+    ) -> bool:
+        """True if ``additional`` more single-ship sorties may be allocated this phase."""
+        months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
+        if months <= 0:
+            return False
+        max_phase_single_ship = monthly_cap * months
+        return self.sortie_single_ship + additional <= max_phase_single_ship + 1e-9
+
     def add_sortie(self, avg_sortie_dur: float, side: str = "Blue", *, single_ship: bool = False):
         self.sortie_phase += 1
         if single_ship:
@@ -321,6 +334,7 @@ class SquadronConfig:
     deferral_due_to_ip: bool = False
     self_terminating_phase: bool = False
     self_terminating_run: bool = False
+    unallocated_iron: int = 0
     pipeline_deferred_due_to_ip: bool = False
     pipeline_ip_at_cap_count: int = 0
     pipeline_ip_available_count: int = 0
@@ -643,6 +657,7 @@ class SquadronConfig:
             'deferral_due_to_ip': self.deferral_due_to_ip,
             'self_terminating_phase': self.self_terminating_phase,
             'self_terminating_run': self.self_terminating_run,
+            'unallocated_iron': self.unallocated_iron,
             'pipeline_deferred_due_to_ip': self.pipeline_deferred_due_to_ip,
             'pipeline_ip_at_cap_count': self.pipeline_ip_at_cap_count,
             'pipeline_ip_available_count': self.pipeline_ip_available_count,

@@ -341,18 +341,20 @@ class TestContinuationTraining(unittest.TestCase):
             self.assertLessEqual(student.sortie_phase, float(sortie_student_lines))
             self.assertGreater(student.sortie_phase, 0.0)
 
-    def test_wg_only_roster_tags_ct_as_single_ship(self):
-        """With no FL/IP, FL CT buckets cannot staff; WG CT flies single-ship."""
+    def test_wg_only_roster_caps_single_ship_ct(self):
+        """With no FL/IP, WG CT is single-ship and capped at one per pilot per month."""
         cfg = SquadronConfig(
             ute=10.0, paa=5, id=1, total_pilots=8, ip_qty=0, experience_ratio=0.0,
         )
         pilots = create_pilots(cfg)
         _run_phase(cfg, pilots, phase_days=30, pre_seed=True)
 
-        ct_sorties = sum(p.sortie_phase for p in pilots)
-        single_ship = sum(p.sortie_single_ship for p in pilots)
-        self.assertGreater(ct_sorties, 0)
-        self.assertEqual(single_ship, ct_sorties)
+        wg_pilots = [p for p in pilots if p.qual == Qual.WG]
+        for p in wg_pilots:
+            self.assertLessEqual(p.sortie_single_ship, 1.0)
+        self.assertEqual(sum(p.sortie_single_ship for p in pilots), float(len(wg_pilots)))
+        gross = int(total_phase_capacity(cfg) * 1.0)
+        self.assertLess(_total_sorties(pilots), gross)
 
     def test_ct_uses_leftover_capacity_after_syllabus(self):
         cfg, pilots = _make_roster(mqt=2, ute=3.0, paa=9)
@@ -403,20 +405,19 @@ class TestSimRapAllocation(unittest.TestCase):
 
 class TestPipelineSelfTermination(unittest.TestCase):
     def test_capacity_deferral_without_ip_saturation_not_self_terminating(self):
-        """Iron-cap deferral with IPs still under monthly event cap is not pipeline failure."""
+        """Iron-cap upgrade deferral alone does not self-terminate when iron is fully used."""
         cfg, pilots = _make_roster(mqt=2, ute=3.0, paa=9)
         _run_phase(cfg, pilots)
 
         self.assertGreater(cfg.deferred_sortie_burden, 0)
+        self.assertFalse(cfg.pipeline_deferred_due_to_ip)
         self.assertFalse(cfg.self_terminating_phase)
         self.assertFalse(cfg.self_terminating_run)
 
-    def test_assess_flags_ip_saturation_with_upgrade_deferral(self):
-        """Direct check: deferral + all IPs at event cap => self-terminating."""
+    def test_assess_ip_deferral_tracked_separately_from_termination(self):
+        """IP-block deferral is tracked but does not alone trigger self-termination."""
         cfg, pilots = _make_roster(mqt=1, wg=4, fl=1, ip=1)
-        ip = next(p for p in pilots if p.qual == Qual.IP)
-        ip.sortie_phase = MAX_MONTHLY_EVENTS
-        ip.sim_phase = 0.0
+        cfg.deferral_due_to_ip = True
         metrics = {
             "deferred_mqt_sorties": 8,
             "deferred_flug_sorties": 0,
@@ -428,17 +429,19 @@ class TestPipelineSelfTermination(unittest.TestCase):
             "held_back_flug": 0,
             "held_back_ipug": 0,
         }
-        status = assess_pipeline_self_termination(pilots, metrics, 30.0)
+        status = assess_pipeline_self_termination(
+            pilots, metrics, 30.0, cfg, phase_gross_iron=27, single_ship_monthly_cap=1.0,
+        )
 
-        self.assertTrue(status["self_terminating_phase"])
         self.assertTrue(status["deferred_due_to_ip"])
-        self.assertEqual(status["ip_at_cap_count"], 1)
-        self.assertEqual(status["ip_available_count"], 0)
+        self.assertFalse(status["self_terminating_phase"])
 
-    def test_assess_no_deferral_never_self_terminates(self):
-        cfg, pilots = _make_roster(mqt=1, wg=4, fl=1, ip=1)
-        ip = next(p for p in pilots if p.qual == Qual.IP)
-        ip.sortie_phase = MAX_MONTHLY_EVENTS
+    def test_assess_self_terminates_on_unallocated_iron_no_assignable_ct(self):
+        """Unallocated iron with no eligible CT pilots => self-terminating."""
+        cfg, pilots = _make_roster(mqt=0, wg=0, fl=0, ip=4)
+        for p in pilots:
+            if p.qual == Qual.IP:
+                p.sortie_phase = MAX_MONTHLY_EVENTS
         metrics = {
             "deferred_mqt_sorties": 0,
             "deferred_flug_sorties": 0,
@@ -450,12 +453,52 @@ class TestPipelineSelfTermination(unittest.TestCase):
             "held_back_flug": 0,
             "held_back_ipug": 0,
         }
-        status = assess_pipeline_self_termination(pilots, metrics, 30.0)
+        status = assess_pipeline_self_termination(
+            pilots, metrics, 30.0, cfg, phase_gross_iron=100, single_ship_monthly_cap=1.0,
+        )
+
+        self.assertGreater(status["unallocated_iron"], 0)
+        self.assertFalse(status["can_assign_more_ct"])
+        self.assertTrue(status["self_terminating_phase"])
+
+    def test_assess_no_deferral_not_self_terminating_when_iron_used(self):
+        cfg, pilots = _make_roster(mqt=1, wg=4, fl=1, ip=1)
+        cfg.deferral_due_to_ip = False
+        sorties_flown = int(sum(p.sortie_phase for p in pilots))
+        metrics = {
+            "deferred_mqt_sorties": 0,
+            "deferred_flug_sorties": 0,
+            "deferred_ipug_sorties": 0,
+            "deferred_mqt_sims": 0,
+            "deferred_flug_sims": 0,
+            "deferred_ipug_sims": 0,
+            "held_back_mqt": 0,
+            "held_back_flug": 0,
+            "held_back_ipug": 0,
+        }
+        status = assess_pipeline_self_termination(
+            pilots, metrics, 30.0, cfg,
+            phase_gross_iron=sorties_flown,
+            single_ship_monthly_cap=1.0,
+        )
 
         self.assertFalse(status["self_terminating_phase"])
+        self.assertEqual(status["unallocated_iron"], 0)
 
-    def test_ip_saturated_stress_run_latches_self_terminating_run(self):
-        """Heavy upgrade load with one IP should saturate instructor events."""
+    def test_wg_only_roster_self_terminates_with_unallocated_iron(self):
+        """No supervisors: one single-ship per WG, remaining iron unallocated => terminate."""
+        cfg = SquadronConfig(
+            ute=10.0, paa=5, id=1, total_pilots=8, ip_qty=0, experience_ratio=0.0,
+        )
+        pilots = create_pilots(cfg)
+        _run_phase(cfg, pilots, phase_days=30, pre_seed=True)
+
+        self.assertGreater(cfg.unallocated_iron, 0)
+        self.assertTrue(cfg.self_terminating_phase)
+        self.assertTrue(cfg.self_terminating_run)
+
+    def test_ip_saturated_stress_tracks_ip_deferral_without_auto_terminate(self):
+        """Heavy upgrade load may tag IP deferral; termination depends on iron use."""
         cfg = SquadronConfig(
             ute=50.0,
             paa=10,
@@ -474,9 +517,8 @@ class TestPipelineSelfTermination(unittest.TestCase):
                     break
         _run_phase(cfg, pilots, phase_days=30, pre_seed=False)
 
-        if cfg.deferred_sortie_burden > 0 and cfg.pipeline_ip_at_cap_count > 0:
-            self.assertTrue(cfg.self_terminating_phase)
-            self.assertTrue(cfg.self_terminating_run)
+        if cfg.pipeline_deferred_due_to_ip:
+            self.assertTrue(cfg.deferral_due_to_ip)
 
 
 class TestSyllabusBurdenMath(unittest.TestCase):
