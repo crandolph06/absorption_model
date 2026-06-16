@@ -240,12 +240,24 @@ def write_dynamic_figures(
         ax.grid(True, alpha=0.25)
         paths["trade_space"] = save_figure(fig, output_dir / "trade_space_total_wg_fl.png", plt)
 
-        fig = plt.figure(figsize=(8.8, 7.3), constrained_layout=True)
-        grid = fig.add_gridspec(2, 4)
+        fig = plt.figure(figsize=(8.8, 7.3), constrained_layout=False)
+        grid = fig.add_gridspec(
+            2,
+            5,
+            width_ratios=[1.0, 0.045, 0.18, 1.0, 0.045],
+            height_ratios=[1.0, 1.08],
+            wspace=0.55,
+            hspace=0.48,
+        )
         axes = [
-            fig.add_subplot(grid[0, 0:2]),
-            fig.add_subplot(grid[0, 2:4]),
-            fig.add_subplot(grid[1, 1:3]),
+            fig.add_subplot(grid[0, 0]),
+            fig.add_subplot(grid[0, 3]),
+            fig.add_subplot(grid[1, 1:4]),
+        ]
+        color_axes = [
+            fig.add_subplot(grid[0, 1]),
+            fig.add_subplot(grid[0, 4]),
+            fig.add_subplot(grid[1, 4]),
         ]
         front_mask = _nondominated_mask(
             ok,
@@ -288,7 +300,16 @@ def write_dynamic_figures(
                 "Total-pilot-window violation",
             ),
         ]
-        for axis, x_col, y_col, color_col, title, xlabel, ylabel, color_label in panels:
+        for panel_index, (
+            axis,
+            x_col,
+            y_col,
+            color_col,
+            title,
+            xlabel,
+            ylabel,
+            color_label,
+        ) in enumerate(panels):
             scatter = axis.scatter(
                 ok[x_col],
                 ok[y_col],
@@ -324,7 +345,7 @@ def write_dynamic_figures(
             axis.set_ylabel(ylabel, fontsize=9)
             axis.grid(True, alpha=0.25)
             axis.tick_params(axis="both", labelsize=8)
-            cbar = fig.colorbar(scatter, ax=axis, fraction=0.046, pad=0.03)
+            cbar = fig.colorbar(scatter, cax=color_axes[panel_index])
             cbar.set_label(color_label, fontsize=8)
             cbar.ax.tick_params(labelsize=7)
         axes[0].legend(loc="best", fontsize=7)

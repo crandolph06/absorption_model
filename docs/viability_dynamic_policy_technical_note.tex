@@ -55,14 +55,13 @@ but still violated both inventory timing and RAP requirements. A subsequent
 joint widened-bound refinement, with annual intake, retention, UTE, and PAA
 bounds relaxed together, improved the nearest miss to $\phi=5.63722$ but still
 found no feasible schedule. These results are not a proof of infeasibility, but
-they give concrete nearest misses and a clear trade-space basis for the next
-policy or requirements decision.
+they very strongly suggest with the current pilot production model, it is not
+possible to meet both pilot headcount and readiness goals.
 \end{abstract}
 
 \section{Introduction}
 
-The practical question is not whether a simulator can be tuned to improve one
-metric. The question is whether a policy exists that can generate the required
+We explore whether a policy exists that can generate the required
 pilot inventory and keep the force trained enough to meet RAP requirements.
 For this analysis, the inventory target is 3500 total pilots, and the enabled
 RAP constraints require zero positive WG, FL, and IP RAP shortfall during the
@@ -87,7 +86,7 @@ epochs, and each epoch holds the seven policy levers fixed.
 
 The search uses a two-level evidence hierarchy. Surrogates are used to explore
 the policy space, rank candidates, and focus direct evaluations near promising
-regions. Direct physics remains the authority for all feasibility statements.
+regions. Direct ''physics'' (or running the simulator directly) remains the authority for all feasibility statements.
 Sobol sequences are used for the main design-of-experiments steps because they
 are deterministic low-discrepancy sequences that cover bounded
 high-dimensional spaces more evenly than naive random sampling at the same
@@ -148,7 +147,6 @@ budget. The workflow is summarized in Fig.~\ref{fig:workflow}.
 \draw[line] (surrogate) -- (direct);
 \draw[line] (direct) -- (diagnostic);
 \draw[line] (diagnostic) -- (trade);
-\draw[line] (trade.north) to[out=90,in=270] (problem.south);
 \end{tikzpicture}
 \caption{Viability-search workflow. Surrogates are used to propose and refine
 candidate policies, while direct physics is the source of truth for feasibility
@@ -190,7 +188,8 @@ u_e =
 The 20-year horizon contains 60 simulation phases. An $E$-epoch policy divides
 those 60 phases into $E$ contiguous blocks. Within each block, the same seven
 controls are applied at every phase. Thus, a three-epoch policy has 21 decision
-variables, and each epoch is roughly one third of the 20-year horizon.
+variables, and each epoch is roughly one third of the 20-year horizon. An arbitrary
+number of epochs could be used for an arbitrarily complex policy schedule.
 
 The physics-backed simulator defines the nonlinear transition map
 \[
@@ -473,9 +472,9 @@ Baseline best schedule & 5.83075 & 533 & 5.83075 & 2.94844 \\
 PAA upper bound to 40 & 5.33 & 533 & 5.19227 & 1.03900 \\
 UTE upper bound to 25 & 5.33 & 533 & 5.19785 & 1.86937 \\
 Retention upper bound to 0.95 & 5.83075 & 517 & 5.83075 & 3.09891 \\
-Annual intake upper bound to 400 & 8.0 & -132 & 6.89748 & 8.0 \\
+Annual intake upper bound to 400 & 8.0 & -142 & 6.81618 & 8.0 \\
 FLUG upper bound to 20 & 5.79383 & 533 & 5.79383 & 3.15091 \\
-IPUG upper bound to 20 & 8.0 & 536 & 6.16600 & 8.0 \\
+IPUG upper bound to 20 & 8.0 & 533 & 5.83075 & 8.0 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -559,7 +558,7 @@ a feasible policy.
 
 \section{Limitations and Recommendations}
 
-The search is direct-physics evidence, not a mathematical infeasibility proof.
+The results in this report depend on the pilot manning simulation model.
 It covers structured three- and five-epoch open-loop schedules under the bounds
 in Table~\ref{tab:policy-bounds}. It does not cover fully free per-phase
 controls, closed-loop feedback, or an exhaustive widened-bound optimization.
@@ -567,7 +566,9 @@ The one-at-a-time input-bound study shows that no single tested bound change
 solved the problem around the current best schedule. The targeted joint-bound
 check in Table~\ref{tab:joint-bound} shows that widening the most relevant
 input bounds together improved the nearest miss but still did not produce
-feasibility.
+feasibility. In other words, this analysis cannot guarantee that no feasible
+policy exists under the current model, but the evidence suggests that such a
+policy is exceedingly unlikely.
 
 The decision implications are:
 \begin{enumerate}
