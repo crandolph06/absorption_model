@@ -6,6 +6,7 @@ from src.models import (
 )
 
 _COHORT_QUAL = {"WG": Qual.WG, "FL": Qual.FL, "IP": Qual.IP}
+_SHORTFALL_BIT = {"WG": 1, "FL": 2, "IP": 4}
 
 
 def _rap_cohort_groups(pilots):
@@ -30,6 +31,7 @@ def rap_assess(pilots):
     red_dict = {}
 
     for group_name, group_pilots in groups.items():
+        # No pilots in this cohort → no shortfall (don't treat avg=0 as below RAP).
         if not group_pilots:
             rap_dict[group_name] = [0, 0]
             blue_rap_dict[group_name] = [0, 0]
@@ -42,7 +44,7 @@ def rap_assess(pilots):
 
         qual = _COHORT_QUAL[group_name]
         rap_req = monthly_sortie_rap_target(qual)
-        bit_mask = {"WG": 1, "FL": 2, "IP": 4}[group_name]
+        bit_mask = _SHORTFALL_BIT[group_name]
 
         rap_dict[group_name] = [bit_mask if avg_sorties < rap_req else 0, avg_sorties]
         blue_rap_dict[group_name] = [bit_mask if avg_blue_sorties < rap_req else 0, avg_blue_sorties]
