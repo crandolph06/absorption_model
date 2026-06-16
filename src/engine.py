@@ -236,6 +236,58 @@ def _has_event_capacity_under_limit(p: Pilot, max_phase_events: float) -> bool:
     return p.sortie_phase + p.sim_phase + 1.0 <= max_phase_events + 1e-9
 
 
+def assess_pipeline_self_termination(
+    pilots: List[Pilot],
+    metrics: dict,
+    phase_length_days: float,
+) -> dict:
+    """Detect upgrade deferral caused by all instructor pilots hitting the event cap."""
+    deferred_work = any(
+        metrics.get(key, 0) > 0
+        for key in (
+            "deferred_mqt_sorties",
+            "deferred_flug_sorties",
+            "deferred_ipug_sorties",
+            "deferred_mqt_sims",
+            "deferred_flug_sims",
+            "deferred_ipug_sims",
+            "held_back_mqt",
+            "held_back_flug",
+            "held_back_ipug",
+        )
+    )
+    ips = [pilot for pilot in pilots if pilot.qual == Qual.IP]
+    max_phase_events = _phase_event_limit(phase_length_days)
+    if max_phase_events is None:
+        ip_available_count = 0
+        ip_at_cap_count = 0
+    else:
+        ip_available_count = sum(
+            1 for pilot in ips if _has_event_capacity_under_limit(pilot, max_phase_events)
+        )
+        ip_at_cap_count = len(ips) - ip_available_count
+
+    phase_months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
+    if phase_months <= 0 or not ips:
+        max_ip_events_monthly = 0.0
+    else:
+        max_ip_events_monthly = max(pilot.phase_events() for pilot in ips) / phase_months
+
+    deferred_due_to_ip = bool(
+        deferred_work
+        and ips
+        and ip_available_count == 0
+        and ip_at_cap_count == len(ips)
+    )
+    return {
+        "self_terminating_phase": deferred_due_to_ip,
+        "deferred_due_to_ip": deferred_due_to_ip,
+        "ip_at_cap_count": ip_at_cap_count,
+        "ip_available_count": ip_available_count,
+        "max_ip_events_monthly": max_ip_events_monthly,
+    }
+
+
 def _ct_heap_entry(p: Pilot, side: str, order: int) -> tuple:
     if side == "Red":
         return (*_deterministic_red_sortie_key(p), order, p)
@@ -330,6 +382,53 @@ def _can_assign_distinct_from_pool(pool: List[Pilot], count: int, phase_length_d
                 return True
     return False
 
+def check_syllabus_resources(
+    event: SyllabusEvent,
+    all_pilots: List[Pilot],
+    syllabus_upgrade_type: Upgrade,
+    total_capacity: int,
+    cfg: SquadronConfig,
+    phase_length_days: float,
+    student: Optional[Pilot] = None,
+) -> bool:
+    """Enough distinct support pilots, iron/sim capacity, and event-cap headroom for one student line."""
+    ips = [
+        p for p in all_pilots
+        if rules.can_fill_seat(pilot=p, min_qual=Qual.IP) and p is not student
+    ]
+    if len(ips) < event.num_instructor:
+        return False
+    if not _can_assign_distinct_from_pool(ips, event.num_instructor, phase_length_days):
+        return False
+
+    wg_pool = [
+        p for p in all_pilots
+        if rules.can_fill_seat(pilot=p, min_qual=Qual.WG) and p is not student
+    ]
+    fl_pool = [
+        p for p in all_pilots
+        if rules.can_fill_seat(pilot=p, min_qual=Qual.FL) and p is not student
+    ]
+    wg_seats = event.num_blue_wg + event.num_red_wg
+    fl_seats = event.num_blue_fl + event.num_red_fl
+    if len(wg_pool) < wg_seats:
+        return False
+    if len(fl_pool) < fl_seats:
+        return False
+    if not _can_assign_distinct_from_pool(wg_pool, wg_seats, phase_length_days):
+        return False
+    if not _can_assign_distinct_from_pool(fl_pool, fl_seats, phase_length_days):
+        return False
+
+    if event.event_type == EventType.SORTIE:
+        slots = 1 + event.num_instructor + event.num_blue_wg + event.num_blue_fl + event.num_red_wg + event.num_red_fl
+        if sum(p.sortie_phase for p in all_pilots) + slots > total_capacity:
+            return False
+    return True
+
+# ----------------------
+# Event Assignment
+# ----------------------
 
 def assign_sortie(
     cfg: SquadronConfig,
@@ -391,49 +490,7 @@ def assign_sim(
     exclude.add(id(winner))
     return True
 
-def check_syllabus_resources(
-    event: SyllabusEvent,
-    all_pilots: List[Pilot],
-    syllabus_upgrade_type: Upgrade,
-    total_capacity: int,
-    cfg: SquadronConfig,
-    phase_length_days: float,
-    student: Optional[Pilot] = None,
-) -> bool:
-    """Enough distinct support pilots, iron/sim capacity, and event-cap headroom for one student line."""
-    ips = [
-        p for p in all_pilots
-        if rules.can_fill_seat(pilot=p, min_qual=Qual.IP) and p is not student
-    ]
-    if len(ips) < event.num_instructor:
-        return False
-    if not _can_assign_distinct_from_pool(ips, event.num_instructor, phase_length_days):
-        return False
 
-    wg_pool = [
-        p for p in all_pilots
-        if rules.can_fill_seat(pilot=p, min_qual=Qual.WG) and p is not student
-    ]
-    fl_pool = [
-        p for p in all_pilots
-        if rules.can_fill_seat(pilot=p, min_qual=Qual.FL) and p is not student
-    ]
-    wg_seats = event.num_blue_wg + event.num_red_wg
-    fl_seats = event.num_blue_fl + event.num_red_fl
-    if len(wg_pool) < wg_seats:
-        return False
-    if len(fl_pool) < fl_seats:
-        return False
-    if not _can_assign_distinct_from_pool(wg_pool, wg_seats, phase_length_days):
-        return False
-    if not _can_assign_distinct_from_pool(fl_pool, fl_seats, phase_length_days):
-        return False
-
-    if event.event_type == EventType.SORTIE:
-        slots = 1 + event.num_instructor + event.num_blue_wg + event.num_blue_fl + event.num_red_wg + event.num_red_fl
-        if sum(p.sortie_phase for p in all_pilots) + slots > total_capacity:
-            return False
-    return True
 # ----------------------
 # Syllabus Execution
 # ----------------------
@@ -871,6 +928,14 @@ def run_phase_simulation(
         ipug_syllabus=ipug_syllabus,
     )
     apply_deferred_burden_to_squadron(cfg, metrics)
+    pipeline_status = assess_pipeline_self_termination(pilots, metrics, phase_length_days)
+    cfg.deferral_due_to_ip = bool(pipeline_status["deferred_due_to_ip"])
+    cfg.self_terminating_phase = bool(pipeline_status["self_terminating_phase"])
+    cfg.self_terminating_run = cfg.self_terminating_run or cfg.self_terminating_phase
+    cfg.pipeline_deferred_due_to_ip = bool(pipeline_status["deferred_due_to_ip"])
+    cfg.pipeline_ip_at_cap_count = int(pipeline_status["ip_at_cap_count"])
+    cfg.pipeline_ip_available_count = int(pipeline_status["ip_available_count"])
+    cfg.pipeline_max_ip_events_monthly = float(pipeline_status["max_ip_events_monthly"])
 
     # 7. Finalize monthly stats and RAP shortfalls
     for p in pilots:

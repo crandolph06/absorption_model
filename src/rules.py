@@ -2,10 +2,6 @@ from src.models import Pilot, Qual, Upgrade
 
 
 def can_start_upgrade(pilot: Pilot, upgrade_type: Upgrade) -> bool:
-    """
-    Determines if a pilot is eligible to BEGIN a specific upgrade.
-    Replaces: is_student_eligible
-    """
     # Pilots already in an upgrade cannot start another
     if pilot.upgrade is not Upgrade.NONE:
         return False

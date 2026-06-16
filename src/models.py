@@ -318,6 +318,13 @@ class SquadronConfig:
     ipug_sim_carry: float = 0.0
     deferred_sortie_burden: int = 0
     deferred_sim_burden: int = 0
+    deferral_due_to_ip: bool = False
+    self_terminating_phase: bool = False
+    self_terminating_run: bool = False
+    pipeline_deferred_due_to_ip: bool = False
+    pipeline_ip_at_cap_count: int = 0
+    pipeline_ip_available_count: int = 0
+    pipeline_max_ip_events_monthly: float = 0.0
     wg_qty: int = 0
     fl_qty: int = 0
     ip_qty: int = 0
@@ -572,6 +579,7 @@ class SquadronConfig:
             'ipug_sim_carry': self.ipug_sim_carry,
             'deferred_sortie_burden': self.deferred_sortie_burden,
             'deferred_sim_burden': self.deferred_sim_burden,
+            'deferral_due_to_ip': self.deferral_due_to_ip,
             'percent_manned': self.line_pilots / self.desired_manning,
             'line_pilots': self.line_pilots,
             'total_pilots': self.total_pilots,
@@ -632,6 +640,13 @@ class SquadronConfig:
             'ipug_sim_carry': self.ipug_sim_carry,
             'deferred_sortie_burden': self.deferred_sortie_burden,
             'deferred_sim_burden': self.deferred_sim_burden,
+            'deferral_due_to_ip': self.deferral_due_to_ip,
+            'self_terminating_phase': self.self_terminating_phase,
+            'self_terminating_run': self.self_terminating_run,
+            'pipeline_deferred_due_to_ip': self.pipeline_deferred_due_to_ip,
+            'pipeline_ip_at_cap_count': self.pipeline_ip_at_cap_count,
+            'pipeline_ip_available_count': self.pipeline_ip_available_count,
+            'pipeline_max_ip_events_monthly': self.pipeline_max_ip_events_monthly,
             'percent_manned': self.line_pilots / self.desired_manning,
             'line_pilots': self.line_pilots,
             'total_pilots': self.total_pilots,
