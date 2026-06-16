@@ -26,7 +26,7 @@ def get_initial_squadrons(current_year: int, squadron_data: list | None = None):
     squadrons = []
     for seed in squadron_data:
         sq_id, paa, ip_qty, target_total, ute, exp_ratio, upgradees = (
-            _normalize_squadron_seed(seed)
+            _validate_squadron_seed(seed)
         )
         sq = SquadronConfig(id=sq_id, paa=paa, ute=ute, ip_qty=ip_qty, pilots=[], experience_ratio=exp_ratio)
         
@@ -90,14 +90,11 @@ def get_initial_squadrons(current_year: int, squadron_data: list | None = None):
     return squadrons
 
 
-def _normalize_squadron_seed(seed):
-    if len(seed) == 5:
-        sq_id, paa, ip_qty, target_total, upgradees = seed
-        return sq_id, paa, ip_qty, target_total, 10.0, 0.5, upgradees
-    if len(seed) == 7:
-        return seed
-    raise ValueError(
-        "Squadron seed must be (id, paa, ip_qty, target_total, upgradees) "
-        "or (id, paa, ip_qty, target_total, ute, experience_ratio, upgradees); "
-        f"got {seed!r}"
-    )
+def _validate_squadron_seed(seed):
+    if len(seed) != 7:
+        raise ValueError(
+            "Squadron seed must be "
+            "(id, paa, ip_qty, target_total, ute, experience_ratio, upgradees); "
+            f"got {seed!r}"
+        )
+    return seed
