@@ -12,8 +12,8 @@
 ## Optional Slurm Directives --------------------------------------
 #SBATCH --job-name=single_phase_sweep_5
 #SBATCH --export=ALL
-#SBATCH --output=logs/sweep_5_%j.out
-#SBATCH --error=logs/sweep_5_%j.err
+#SBATCH --output=logs/sweep_5/%x_%j.out
+#SBATCH --error=logs/sweep_5/%x_%j.err
 #
 ## Execution Block ----------------------------------------------
 JOBID=`echo $SLURM_JOB_ID`
@@ -32,8 +32,9 @@ python --version
 #
 export PYTHONUNBUFFERED=1
 #
-mkdir -p $WORKDIR/absorption_model/logs
-timeout 14100s python -u hpc_single_phase_sweeper_5.py || true
+mkdir -p "$PROJECT_DIR/logs/sweep_5"
+export PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+timeout 14100s python -u single_phase_sweepers/hpc_single_phase_sweeper_5.py || true
 #
 
 if [ -f SWEEP_5_COMPLETE.txt ]; then
