@@ -24,7 +24,10 @@ def get_initial_squadrons(current_year: int, squadron_data: list | None = None):
     if squadron_data is None:
         squadron_data = SQUADRON_DATA
     squadrons = []
-    for sq_id, paa, ip_qty, target_total, ute, exp_ratio, upgradees in squadron_data:
+    for seed in squadron_data:
+        sq_id, paa, ip_qty, target_total, ute, exp_ratio, upgradees = (
+            _validate_squadron_seed(seed)
+        )
         sq = SquadronConfig(id=sq_id, paa=paa, ute=ute, ip_qty=ip_qty, pilots=[], experience_ratio=exp_ratio)
         
         # 1. Seed IPs
@@ -50,7 +53,15 @@ def get_initial_squadrons(current_year: int, squadron_data: list | None = None):
                              squadron_id=sq_id, current_assignment=Assignment.LINE, active=True))
         
         # 4. Seed upgrades within current manning
-        mqt, flug, ipug = upgradees if upgradees else (0, 0, 0)
+        if len(upgradees) == 0:
+            mqt, flug, ipug = 0, 0, 0
+        elif len(upgradees) == 3:
+            mqt, flug, ipug = upgradees
+        else:
+            raise ValueError(
+                f"Squadron {sq_id} upgrade seed must be empty or (mqt, flug, ipug); "
+                f"got {upgradees!r}"
+            )
 
         if mqt > 0: # Default to youngest wingmen
             mqt_eligible_wingmen = [p for p in sq.pilots if p.qual == Qual.WG] 
@@ -77,3 +88,13 @@ def get_initial_squadrons(current_year: int, squadron_data: list | None = None):
         sq.update_stats()
         squadrons.append(sq)
     return squadrons
+
+
+def _validate_squadron_seed(seed):
+    if len(seed) != 7:
+        raise ValueError(
+            "Squadron seed must be "
+            "(id, paa, ip_qty, target_total, ute, experience_ratio, upgradees); "
+            f"got {seed!r}"
+        )
+    return seed

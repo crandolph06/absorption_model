@@ -5,10 +5,18 @@ Run: python -m unittest tests.test_upgrade_logic -v
 """
 import contextlib
 import io
+import random
 import unittest
+from unittest.mock import patch
 
+from src import rules
 from src.engine import (
+    _allocate_ct_buckets_round_robin,
+    _can_assign_distinct_from_pool,
+    allocate_sim_rap,
     assess_pipeline_self_termination,
+    assign_sim,
+    assign_sortie,
     create_pilots,
     phase_upgrade_metrics,
     process_syllabus_event,
@@ -16,9 +24,10 @@ from src.engine import (
     select_upgrade_students,
     total_phase_capacity,
 )
-from src.models import Qual, SquadronConfig, Upgrade, MAX_MONTHLY_EVENTS
+from src.models import MAX_MONTHLY_EVENTS, Pilot, Qual, SquadronConfig, Upgrade
 from src.simulation_config import SimulationConfig
 from src.syllabi import (
+    ContinuationBucket,
     TEST_MQT_SYLLABUS,
     TEST_FLUG_SYLLABUS,
     TEST_IPUG_SYLLABUS,
@@ -221,7 +230,102 @@ class TestSelectUpgradeStudents(unittest.TestCase):
         self.assertEqual(len(selected), 1)
 
 
+class TestAllocationHelpers(unittest.TestCase):
+    def test_distinct_pool_check_counts_pilots_with_remaining_event_capacity(self):
+        pilots = [Pilot(Qual.WG), Pilot(Qual.WG), Pilot(Qual.WG)]
+        pilots[0].sortie_phase = 20
+        pilots[1].sortie_phase = 19
+        pilots[2].sortie_phase = 18
+
+        self.assertTrue(_can_assign_distinct_from_pool(pilots, 2, phase_length_days=30))
+        self.assertFalse(_can_assign_distinct_from_pool(pilots, 3, phase_length_days=30))
+        self.assertFalse(_can_assign_distinct_from_pool(pilots, 1, phase_length_days=0))
+
+    def test_assign_sortie_prefers_lower_qual_when_event_loads_tie(self):
+        cfg = SquadronConfig(ute=10.0, paa=10, id=1, total_pilots=2, ip_qty=1, experience_ratio=0.5)
+        ip = Pilot(Qual.IP)
+        wg = Pilot(Qual.WG)
+
+        assigned = assign_sortie(cfg, [ip, wg], phase_length_days=30, noise=0.0)
+
+        self.assertTrue(assigned)
+        self.assertEqual(wg.sortie_phase, 1)
+        self.assertEqual(ip.sortie_phase, 0)
+
+    def test_zero_noise_sortie_assignment_does_not_consume_rng(self):
+        cfg = SquadronConfig(ute=10.0, paa=10, id=1, total_pilots=2, ip_qty=1, experience_ratio=0.5)
+        pilots = [Pilot(Qual.WG), Pilot(Qual.WG)]
+        random.seed(12345)
+        expected_next = random.random()
+        random.seed(12345)
+
+        assign_sortie(cfg, pilots, phase_length_days=30, noise=0.0)
+
+        self.assertEqual(random.random(), expected_next)
+
+    def test_assign_sim_prefers_lower_qual_when_event_loads_tie(self):
+        cfg = SquadronConfig(ute=10.0, paa=10, id=1, total_pilots=2, ip_qty=1, experience_ratio=0.5)
+        ip = Pilot(Qual.IP)
+        wg = Pilot(Qual.WG)
+
+        assigned = assign_sim(cfg, [ip, wg], phase_length_days=30, noise=0.0)
+
+        self.assertTrue(assigned)
+        self.assertEqual(wg.sim_phase, 1)
+        self.assertEqual(ip.sim_phase, 0)
+
+
 class TestContinuationTraining(unittest.TestCase):
+    def test_ct_round_robin_caches_static_eligibility_by_bucket_qual(self):
+        cfg, pilots = _make_roster(wg=4, fl=1, ip=1, ute=10.0, paa=10)
+        buckets = [
+            ContinuationBucket("Blue WG", Qual.WG, "Blue", 0.5),
+            ContinuationBucket("Red WG", Qual.WG, "Red", 0.5),
+        ]
+        remaining = {buckets[0]: 3, buckets[1]: 3}
+        real_can_fill = rules.can_fill_seat
+        calls = 0
+
+        def counted_can_fill(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return real_can_fill(*args, **kwargs)
+
+        with patch("src.engine.rules.can_fill_seat", side_effect=counted_can_fill):
+            assigned = _allocate_ct_buckets_round_robin(
+                buckets=buckets,
+                remaining=remaining,
+                ct_candidates=pilots,
+                cfg=cfg,
+                phase_length_days=30,
+                noise=0.0,
+            )
+
+        self.assertEqual(assigned, 6)
+        self.assertEqual(calls, len(pilots))
+
+    def test_ct_round_robin_heap_stops_at_event_capacity(self):
+        cfg, pilots = _make_roster(wg=2, fl=0, ip=0, ute=10.0, paa=10)
+        pilots[0].sortie_phase = 19
+        pilots[0].sortie_blue_phase = 19
+        pilots[1].sortie_phase = 20
+        pilots[1].sortie_blue_phase = 20
+        bucket = ContinuationBucket("Blue WG", Qual.WG, "Blue", 1.0)
+        remaining = {bucket: 2}
+
+        assigned = _allocate_ct_buckets_round_robin(
+            buckets=[bucket],
+            remaining=remaining,
+            ct_candidates=pilots,
+            cfg=cfg,
+            phase_length_days=30,
+            noise=0.0,
+        )
+
+        self.assertEqual(assigned, 1)
+        self.assertEqual(pilots[0].sortie_phase, 20)
+        self.assertEqual(pilots[1].sortie_phase, 20)
+
     def test_mqt_students_do_not_receive_ct_sorties(self):
         """CT pool excludes MQT; MQT sorties come from syllabus only (not CT top-up)."""
         cfg, pilots = _make_roster(mqt=2, ute=3.0, paa=9, wg=5, fl=2, ip=2)
@@ -259,6 +363,44 @@ class TestContinuationTraining(unittest.TestCase):
         _run_phase(cfg, pilots)
 
         self.assertEqual(_total_sorties(pilots), gross)
+
+
+class TestSimRapAllocation(unittest.TestCase):
+    def test_sim_rap_heap_prioritizes_largest_shortfall(self):
+        cfg = SquadronConfig(ute=10.0, paa=10, id=1, total_pilots=2, ip_qty=0, experience_ratio=0.0)
+        high_shortfall = Pilot(Qual.WG)
+        low_shortfall = Pilot(Qual.WG)
+        high_shortfall.target_sims = 2.0
+        low_shortfall.target_sims = 1.0
+
+        allocate_sim_rap(
+            [low_shortfall, high_shortfall],
+            cfg,
+            phase_length_days=30,
+            noise=0.0,
+        )
+
+        self.assertEqual(high_shortfall.sim_phase, 2.0)
+        self.assertEqual(low_shortfall.sim_phase, 1.0)
+
+    def test_sim_rap_heap_respects_sim_wing_capacity(self):
+        cfg = SquadronConfig(
+            ute=10.0,
+            paa=10,
+            id=1,
+            total_pilots=2,
+            ip_qty=0,
+            experience_ratio=0.0,
+            sim_sessions_monthly=1.0,
+            sim_bays_per_session=1,
+        )
+        pilots = [Pilot(Qual.WG), Pilot(Qual.WG)]
+        for pilot in pilots:
+            pilot.target_sims = 2.0
+
+        allocate_sim_rap(pilots, cfg, phase_length_days=30, noise=0.0)
+
+        self.assertEqual(sum(p.sim_phase for p in pilots), 1.0)
 
 
 class TestPipelineSelfTermination(unittest.TestCase):

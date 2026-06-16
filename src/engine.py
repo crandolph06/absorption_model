@@ -1,3 +1,4 @@
+import heapq
 import math
 import random
 from typing import List, Optional, Set
@@ -273,7 +274,13 @@ def select_upgrade_students(pilots: List[Pilot], upgrade_type: Upgrade, count: i
 # Allocation Helpers
 # ----------------------
 def _eligible_for_event(candidates: List[Pilot], phase_length_days: float) -> List[Pilot]:
-    return [p for p in candidates if p.has_events_capacity(phase_length_days)]
+    max_phase_events = _phase_event_limit(phase_length_days)
+    if max_phase_events is None:
+        return []
+    return [
+        p for p in candidates
+        if _has_event_capacity_under_limit(p, max_phase_events)
+    ]
 
 
 def _total_phase_events(p: Pilot) -> float:
@@ -308,31 +315,135 @@ def _allocation_sort_key(
     )
 
 
+def _deterministic_blue_sortie_key(p: Pilot) -> tuple:
+    return (p.sortie_phase + p.sim_phase, p.sortie_blue_phase, _QUAL_RANK[p.qual])
+
+
+def _deterministic_red_sortie_key(p: Pilot) -> tuple:
+    return (p.sortie_phase + p.sim_phase, p.sortie_red_phase, _QUAL_RANK[p.qual])
+
+
+def _deterministic_sim_key(p: Pilot) -> tuple:
+    return (p.sortie_phase + p.sim_phase, p.sim_phase, _QUAL_RANK[p.qual])
+
+
+def _phase_event_limit(phase_length_days: float) -> float | None:
+    months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
+    if months <= 0:
+        return None
+    return MAX_MONTHLY_EVENTS * months
+
+
+def _has_event_capacity_under_limit(p: Pilot, max_phase_events: float) -> bool:
+    return p.sortie_phase + p.sim_phase + 1.0 <= max_phase_events + 1e-9
+
+
+def _ct_heap_entry(p: Pilot, side: str, order: int) -> tuple:
+    if side == "Red":
+        return (*_deterministic_red_sortie_key(p), order, p)
+    return (*_deterministic_blue_sortie_key(p), order, p)
+
+
+def _sim_rap_shortfall(p: Pilot, phase_months: float) -> float:
+    return p.target_sims * phase_months - p.sim_phase
+
+
+def _sim_rap_heap_entry(p: Pilot, phase_months: float, order: int) -> tuple:
+    return (-_sim_rap_shortfall(p, phase_months), *_deterministic_sim_key(p), order, p)
+
+
+def _assign_ct_sortie_from_heap(
+    heap: list[tuple],
+    *,
+    cfg: SquadronConfig,
+    side: str,
+    order_by_id: dict[int, int],
+    max_phase_events: float,
+    phase_length_days: float,
+    single_ship: bool = False,
+    single_ship_monthly_cap: float = 1.0,
+) -> bool:
+    while heap:
+        entry = heapq.heappop(heap)
+        pilot = entry[-1]
+        if not _has_event_capacity_under_limit(pilot, max_phase_events):
+            continue
+        if single_ship and not pilot.has_single_ship_allocation_capacity(
+            phase_length_days,
+            single_ship_monthly_cap,
+        ):
+            continue
+
+        current = _ct_heap_entry(pilot, side, order_by_id[id(pilot)])
+        if entry[:-1] != current[:-1]:
+            heapq.heappush(heap, current)
+            continue
+
+        pilot.add_sortie(
+            avg_sortie_dur=cfg.avg_sortie_dur,
+            side=side,
+            single_ship=single_ship,
+        )
+        if _has_event_capacity_under_limit(pilot, max_phase_events) and (
+            not single_ship
+            or pilot.has_single_ship_allocation_capacity(
+                phase_length_days,
+                single_ship_monthly_cap,
+            )
+        ):
+            heapq.heappush(heap, _ct_heap_entry(pilot, side, order_by_id[id(pilot)]))
+        return True
+    return False
+
+
+def _assign_sim_rap_from_heap(
+    heap: list[tuple],
+    *,
+    cfg: SquadronConfig,
+    phase_months: float,
+    order_by_id: dict[int, int],
+    max_phase_events: float,
+) -> bool:
+    while heap:
+        entry = heapq.heappop(heap)
+        pilot = entry[-1]
+        if _sim_rap_shortfall(pilot, phase_months) <= 1e-9:
+            continue
+        if not _has_event_capacity_under_limit(pilot, max_phase_events):
+            continue
+
+        current = _sim_rap_heap_entry(pilot, phase_months, order_by_id[id(pilot)])
+        if entry[:-1] != current[:-1]:
+            heapq.heappush(heap, current)
+            continue
+
+        pilot.add_sim(cfg.avg_sortie_dur)
+        if (
+            _sim_rap_shortfall(pilot, phase_months) > 1e-9
+            and _has_event_capacity_under_limit(pilot, max_phase_events)
+        ):
+            heapq.heappush(
+                heap,
+                _sim_rap_heap_entry(pilot, phase_months, order_by_id[id(pilot)]),
+            )
+        return True
+    return False
+
+
 def _can_assign_distinct_from_pool(pool: List[Pilot], count: int, phase_length_days: float) -> bool:
     """Whether ``count`` distinct pilots in ``pool`` can each take one more event under the cap."""
     if count <= 0:
         return True
-    months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
-    if months <= 0:
+    max_phase_events = _phase_event_limit(phase_length_days)
+    if max_phase_events is None:
         return False
-    max_phase_events = MAX_MONTHLY_EVENTS * months
-    eligible = _eligible_for_event(pool, phase_length_days)
-    if len(eligible) < count:
-        return False
-    usage = {id(p): p.phase_events() for p in eligible}
-    picked: Set[int] = set()
-    for _ in range(count):
-        available = [
-            p for p in eligible
-            if id(p) not in picked and usage[id(p)] + 1 <= max_phase_events + 1e-9
-        ]
-        if not available:
-            return False
-        available.sort(key=lambda p: (usage[id(p)], _qual_rank(p)))
-        winner = available[0]
-        picked.add(id(winner))
-        usage[id(winner)] += 1
-    return True
+    eligible_count = 0
+    for pilot in pool:
+        if _has_event_capacity_under_limit(pilot, max_phase_events):
+            eligible_count += 1
+            if eligible_count >= count:
+                return True
+    return False
 
 def check_syllabus_resources(
     event: SyllabusEvent,
@@ -409,9 +520,14 @@ def assign_sortie(
     if not candidates:
         return False
 
-    candidates.sort(key=lambda p: _allocation_sort_key(p, EventType.SORTIE, side, noise))
-
-    winner = candidates[0]
+    if noise == 0.0:
+        key = _deterministic_red_sortie_key if side == "Red" else _deterministic_blue_sortie_key
+        winner = min(candidates, key=key)
+    else:
+        winner = min(
+            candidates,
+            key=lambda p: _allocation_sort_key(p, EventType.SORTIE, side, noise),
+        )
     winner.add_sortie(avg_sortie_dur=cfg.avg_sortie_dur, side=side, single_ship=single_ship)
     exclude.add(id(winner))
     return True
@@ -434,8 +550,13 @@ def assign_sim(
     if not candidates:
         return False
 
-    candidates.sort(key=lambda p: _allocation_sort_key(p, EventType.SIM, noise=noise))
-    winner = candidates[0]
+    if noise == 0.0:
+        winner = min(candidates, key=_deterministic_sim_key)
+    else:
+        winner = min(
+            candidates,
+            key=lambda p: _allocation_sort_key(p, EventType.SIM, noise=noise),
+        )
     winner.add_sim(cfg.avg_sortie_dur)
     exclude.add(id(winner))
     return True
@@ -583,29 +704,64 @@ def _allocate_ct_buckets_round_robin(
     single_ship_monthly_cap: float = 1.0,
 ) -> int:
     """Assign CT sorties round-robin across ``buckets``; return count assigned."""
+    if not buckets:
+        return 0
+    candidate_pools = {
+        min_qual: [
+            p for p in ct_candidates
+            if rules.can_fill_seat(pilot=p, min_qual=min_qual)
+        ]
+        for min_qual in {bucket.min_qual for bucket in buckets}
+    }
+    deterministic_heaps: dict[ContinuationBucket, list[tuple]] = {}
+    order_by_id = {id(p): index for index, p in enumerate(ct_candidates)}
+    max_phase_events = _phase_event_limit(phase_length_days)
+    if noise == 0.0 and max_phase_events is not None:
+        for bucket in buckets:
+            heap = [
+                _ct_heap_entry(p, bucket.side, order_by_id[id(p)])
+                for p in candidate_pools[bucket.min_qual]
+                if _has_event_capacity_under_limit(p, max_phase_events)
+            ]
+            heapq.heapify(heap)
+            deterministic_heaps[bucket] = heap
+
     assigned = 0
-    while sum(remaining.get(b, 0) for b in buckets) > 0:
+    remaining_total = sum(remaining.get(b, 0) for b in buckets)
+    while remaining_total > 0:
         assigned_this_pass = False
         for bucket in buckets:
             if remaining.get(bucket, 0) <= 0:
                 continue
-            eligible = [
-                p for p in ct_candidates
-                if rules.can_fill_seat(pilot=p, min_qual=bucket.min_qual)
-            ]
-            if assign_sortie(
-                cfg=cfg,
-                candidates=eligible,
-                phase_length_days=phase_length_days,
-                side=bucket.side,
-                noise=noise,
-                single_ship=single_ship,
-                single_ship_monthly_cap=single_ship_monthly_cap,
-            ):
+            if bucket in deterministic_heaps:
+                assigned_sortie = _assign_ct_sortie_from_heap(
+                    deterministic_heaps[bucket],
+                    cfg=cfg,
+                    side=bucket.side,
+                    order_by_id=order_by_id,
+                    max_phase_events=max_phase_events,
+                    phase_length_days=phase_length_days,
+                    single_ship=single_ship,
+                    single_ship_monthly_cap=single_ship_monthly_cap,
+                )
+            else:
+                eligible = candidate_pools[bucket.min_qual]
+                assigned_sortie = assign_sortie(
+                    cfg=cfg,
+                    candidates=eligible,
+                    phase_length_days=phase_length_days,
+                    side=bucket.side,
+                    noise=noise,
+                    single_ship=single_ship,
+                    single_ship_monthly_cap=single_ship_monthly_cap,
+                )
+            if assigned_sortie:
                 remaining[bucket] -= 1
+                remaining_total -= 1
                 assigned += 1
                 assigned_this_pass = True
             else:
+                remaining_total -= remaining.get(bucket, 0)
                 remaining[bucket] = 0
 
         if not assigned_this_pass:
@@ -700,6 +856,28 @@ def allocate_sim_rap(
     else:
         sim_capacity = None  # no sim-bay limit (e.g. SIM_SESSIONS_MONTHLY = inf)
     used_sims = int(round(sum(p.sim_phase for p in pilots)))
+
+    max_phase_events = _phase_event_limit(phase_length_days)
+    if noise == 0.0 and max_phase_events is not None:
+        order_by_id = {id(p): index for index, p in enumerate(pilots)}
+        heap = [
+            _sim_rap_heap_entry(p, phase_months, order_by_id[id(p)])
+            for p in pilots
+            if _sim_rap_shortfall(p, phase_months) > 1e-9
+            and _has_event_capacity_under_limit(p, max_phase_events)
+        ]
+        heapq.heapify(heap)
+        while (sim_capacity is None or used_sims < sim_capacity) and heap:
+            if not _assign_sim_rap_from_heap(
+                heap,
+                cfg=cfg,
+                phase_months=phase_months,
+                order_by_id=order_by_id,
+                max_phase_events=max_phase_events,
+            ):
+                break
+            used_sims += 1
+        return
 
     while sim_capacity is None or used_sims < sim_capacity:
         pool = []
