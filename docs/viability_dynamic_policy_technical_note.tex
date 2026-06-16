@@ -7,6 +7,7 @@
 \usepackage{enumitem}
 \usepackage{graphicx}
 \usepackage{hyperref}
+\usepackage{placeins}
 \usepackage{xcolor}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,positioning,fit,backgrounds}
@@ -27,7 +28,7 @@
 \setlist[enumerate]{leftmargin=1.5em}
 
 \title{\textbf{Policy Search for Pilot-Production Viability}}
-\author{Tyler K. B.}
+\author{Tyler Korenyi-Both}
 \date{June 2026}
 
 \begin{document}
@@ -42,16 +43,20 @@ search is framed as a finite-horizon, open-loop control problem over a
 20-year simulation. Candidate policies are generated with Sobol sampling,
 heuristic seeds, and Gaussian-process surrogate screening, but feasibility
 claims are made only after direct evaluation with the physics-backed simulator.
-The closeout campaign evaluated 2158 unique direct-physics schedules in
-three- and five-epoch policy classes and found no feasible policy. The best
-observed schedule was a three-epoch policy with $\phi=5.83075$, requiring
+The current-bound closeout bundle contains 2158 successful direct-physics
+evaluation rows across three- and five-epoch policy classes; no feasible policy
+was found. The best observed current-bound schedule was a three-epoch
+policy with $\phi=5.83075$, requiring
 simultaneous relaxation of the total-pilot window, WG RAP, and FL RAP
 constraints. A seed-controlled input-bound study found that one-at-a-time
 relaxation of retention, intake, UTE, PAA, manning, FLUG, or IPUG bounds did
 not produce feasibility; the best such counterfactual reduced $\phi$ to 5.33
-but still violated both inventory timing and RAP requirements. The result is
-not a proof of infeasibility, but it gives a concrete nearest miss and a clear
-trade-space basis for the next policy or requirements decision.
+but still violated both inventory timing and RAP requirements. A subsequent
+joint widened-bound refinement, with annual intake, retention, UTE, and PAA
+bounds relaxed together, improved the nearest miss to $\phi=5.63722$ but still
+found no feasible schedule. These results are not a proof of infeasibility, but
+they give concrete nearest misses and a clear trade-space basis for the next
+policy or requirements decision.
 \end{abstract}
 
 \section{Introduction}
@@ -62,6 +67,15 @@ pilot inventory and keep the force trained enough to meet RAP requirements.
 For this analysis, the inventory target is 3500 total pilots, and the enabled
 RAP constraints require zero positive WG, FL, and IP RAP shortfall during the
 post-assessment window.
+
+A few terms are used throughout the note. WG, FL, and IP denote wingman,
+flight-lead, and instructor-pilot categories. RAP is the ready aircrew program,
+so a positive RAP shortfall means the simulated force lacks enough training
+capacity or qualified personnel to satisfy that category's configured
+requirement. UTE is aircraft utilization. PAA is primary aircraft authorization.
+FLUG and IPUG are per-phase flight-lead and instructor-pilot upgrade quotas.
+The assessment window begins in 2040 in this 2026--2045 simulation; results in
+that window, not only final-year values, determine feasibility.
 
 The policy levers are annual B-course intake, retention rate, utilization
 (UTE), primary aircraft authorization (PAA), maximum manning percentage, FLUG
@@ -142,6 +156,8 @@ and for all reported nearest-miss results.}
 \label{fig:workflow}
 \end{figure}
 
+\FloatBarrier
+
 The internal phase MLP is not used as an authority in this workflow.\footnote{
 The configured 16-output MLP was audited on a Sobol holdout set. Its all-target
 $R^2$ was about 0.595, and the sortie-rate-group $R^2$ was about 0.244. That
@@ -149,7 +165,9 @@ was too inaccurate for policy claims. A later 4096-row shared ARD Matern
 $\nu=2.5$ GPR improved holdout metrics, with all-target $R^2$ about 0.933,
 sortie-rate $R^2$ about 0.881, and simulator-rate $R^2$ about 0.949, but it is
 still used only for screening.}
-The final evaluator uses \texttt{model.phase\_backend: physics}.
+The final evaluator uses \texttt{model.phase\_backend: physics}. In other
+words, learned models narrow the search, but every feasibility label and
+nearest-miss value reported below comes from the long-horizon simulator.
 
 \section{Problem Formulation}
 
@@ -194,7 +212,8 @@ The total-pilot window constraint is
   g_{\mathrm{window}} =
   3500 - \min_{k \in \mathcal{A}} \mathrm{total\_pilots}_k ,
 \]
-where $\mathcal{A}$ is the post-assessment window. Therefore,
+where $\mathcal{A}$ is the post-assessment window, beginning at the configured
+assessment year 2040. Therefore,
 \texttt{total\_pilots\_window}=533 means the force falls to 2967 total pilots
 at the worst point in the assessment window. It does not necessarily mean the
 final force is short by 533 pilots.
@@ -237,6 +256,8 @@ Target staff IPs / FLs & disabled \\
 \end{tabular}
 \end{table}
 
+\FloatBarrier
+
 \section{Search Campaign}
 
 The main campaign used the physics-backed configuration in
@@ -251,7 +272,7 @@ the best $\phi$, so the planned 10-epoch expansion was not run.
 
 \begin{table}[htbp]
 \centering
-\caption{Direct-physics dynamic search summary.}
+\caption{Current-bound direct-physics dynamic search summary.}
 \label{tab:search-summary}
 \begin{tabular}{lr}
 \toprule
@@ -262,7 +283,7 @@ Simulation phases & 60 \\
 Original three-epoch evaluations & 615 \\
 Three-epoch refinement evaluations & 256 \\
 Five-epoch evaluations & 1287 \\
-Unique direct evaluations in relaxation study & 2158 \\
+Combined closeout evaluation rows & 2158 \\
 Direct-feasible policies found & 0 \\
 Best observed $\phi$ & 5.83075 \\
 Best active constraint & WG RAP \\
@@ -313,13 +334,6 @@ IP RAP shortfall & none \\
 \end{tabular}
 \end{table}
 
-The IPUG row in Table~\ref{tab:best-policy} does not mean the simulated force
-has no instructor pilots. With IPUG quota set to zero in all epochs, the best
-policy still ends with 71 staff IPs, has a minimum post-assessment staff-IP
-count of 58, and has IP RAP slack of 5.15. The optimizer is effectively using
-existing IP inventory and pipeline dynamics while avoiding the FL RAP penalty
-associated with additional IP upgrades.
-
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.88\linewidth]{trajectory_total_pilots.png}
@@ -340,6 +354,16 @@ while WG and FL RAP become positive during the assessment window.}
 
 \begin{figure}[htbp]
 \centering
+\includegraphics[width=0.88\linewidth]{trajectory_staff_counts.png}
+\caption{Staff IP and staff FL trajectories for the best three-epoch
+refinement and the best five-epoch schedule. The best schedules maintain staff
+IP inventory even with all-epoch IPUG quota set to zero, while staff FL counts
+increase substantially through the assessment window.}
+\label{fig:staff-counts}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
 \includegraphics[width=0.88\linewidth]{best_policy_epoch_controls.png}
 \caption{Epoch controls for the best observed three-epoch policy. The policy
 keeps UTE and PAA at or near their upper bounds, gradually reduces intake and
@@ -349,21 +373,32 @@ retention, and sets IPUG quota to zero in all epochs.}
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.78\linewidth]{trade_space_total_wg_fl.png}
-\caption{Observed direct-physics trade space over total-pilot-window violation
-and WG RAP violation, colored by FL RAP violation. The vertical and horizontal
-zero lines mark the feasible directions for the plotted constraints. The best
-observed point remains jointly constrained: it is not blocked by only one
-requirement.}
+\includegraphics[width=0.95\linewidth]{trade_space_constraint_views.png}
+\caption{Three direct-physics views of the current-bound constraint trade
+space. Each panel shows the same evaluated policies with two violations on the
+axes and the third violation encoded by color. Lower-left is better; dashed
+lines mark zero violation. Open circles mark policies that are nondominated
+over total-pilot-window, WG RAP, and FL RAP violations, and the red star marks
+the best observed policy.}
 \label{fig:trade-space}
 \end{figure}
 
+\FloatBarrier
+
+The IPUG row in Table~\ref{tab:best-policy} does not mean the simulated force
+has no instructor pilots. With IPUG quota set to zero in all epochs, the best
+policy still ends with 71 staff IPs, has a minimum post-assessment staff-IP
+count of 58, and has IP RAP slack of 5.15. Figure~\ref{fig:staff-counts} shows
+the same point over the full horizon. The optimizer is effectively using
+existing IP inventory and pipeline dynamics while avoiding the FL RAP penalty
+associated with additional IP upgrades.
+
 The active-constraint distribution reinforces this joint-trade interpretation.
-Among the unique closeout direct evaluations, the active constraint was FL RAP
-1128 times, WG RAP 731 times, and total-pilot window 299 times. Each core
-constraint was satisfied by at least one policy somewhere in the search, but
-the search did not find a policy satisfying the inventory window, WG RAP, and
-FL RAP simultaneously.
+Across the 2158 current-bound closeout evaluation rows, the active constraint
+was FL RAP 1128 times, WG RAP 731 times, and total-pilot window 299 times. Each
+core constraint was satisfied by at least one policy somewhere in the search,
+but the search did not find a policy satisfying the inventory window, WG RAP,
+and FL RAP simultaneously.
 
 \section{Requirement and Input-Bound Relaxations}
 
@@ -392,6 +427,28 @@ Maximum normalized relaxation & 5.83075 \\
 \end{tabular}
 \end{table}
 
+The single-constraint minima in the relaxation study are all zero: at least one
+direct-evaluated policy satisfies each individual core requirement in isolation.
+The useful information is therefore in the combined sets. Table~\ref{tab:req-set-relaxation}
+shows that the inventory window, WG RAP, and FL RAP conflict jointly rather
+than through one isolated blocker.
+
+\begin{table}[htbp]
+\centering
+\caption{Best observed normalized relaxation for selected requirement sets.}
+\label{tab:req-set-relaxation}
+\begin{tabular}{llr}
+\toprule
+Relaxed requirement set & Best schedule & Max normalized relaxation \\
+\midrule
+WG RAP + FL RAP & \texttt{heuristic\_0005} & 3.63206 \\
+Total window + FL RAP & \texttt{heuristic\_0000} & 4.40232 \\
+Total window + WG RAP & \texttt{refine\_0008} & 5.83075 \\
+Total window + WG RAP + FL RAP & \texttt{refine\_0008} & 5.83075 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 A separate seed-controlled input-bound study widened each policy upper bound
 one at a time around the best schedule and reran direct physics. This is not a
 global reoptimization under widened bounds. It is a first, controlled answer to
@@ -404,11 +461,13 @@ current 0.65 cap did not solve the RAP constraints in this fixed-shape sweep.
 
 \begin{table}[htbp]
 \centering
-\caption{Seed-controlled one-at-a-time input-bound counterfactuals.}
+\caption{Seed-controlled one-at-a-time input-bound counterfactuals. Positive
+total-window values are assessment-window inventory violations; negative values
+mean surplus relative to the 3500-pilot target.}
 \label{tab:bound-relaxation}
 \begin{tabular}{lrrrr}
 \toprule
-Counterfactual & Best $\phi$ & Window & WG RAP & FL RAP \\
+Counterfactual & Best $\phi$ & Total-window $g$ & WG RAP & FL RAP \\
 \midrule
 Baseline best schedule & 5.83075 & 533 & 5.83075 & 2.94844 \\
 PAA upper bound to 40 & 5.33 & 533 & 5.19227 & 1.03900 \\
@@ -458,25 +517,68 @@ another or while changing the inventory window. IPUG has authority over IP
 inventory, but near the best schedule it worsens the active objective through
 FL RAP. This supports a combined trade study rather than a single-knob fix.
 
+\section{Joint Input-Bound Reoptimization Check}
+
+The one-at-a-time bound study is intentionally local, so a final targeted check
+jointly widened the most relevant upper bounds and reran the dynamic search
+machinery. The widened configuration set annual intake high to 400, retention
+high to 0.85, UTE high to 25, and PAA high to 40. Maximum manning, FLUG, and
+IPUG bounds were left at their current values because the preceding diagnostics
+did not identify them as promising first-order relaxations.
+
+Two runs were made under the joint-bound configuration. The first was a fresh
+three-epoch dynamic search with 519 initial direct evaluations and 128
+optimizer-selected direct verifications. The second was an anchored refinement
+from the current-bound best schedule, with 128 new direct verifications and the
+previous 871-row current-bound refinement bundle retained for comparison. This
+is still observed-search evidence, not a proof over the widened design space.
+
+\begin{table}[htbp]
+\centering
+\caption{Targeted joint-bound reoptimization check. Positive total-window
+values are assessment-window inventory violations. IP RAP was slack in all
+listed nearest misses.}
+\label{tab:joint-bound}
+\begin{tabular}{lrrrrrr}
+\toprule
+Case & Rows & Feasible & Best $\phi$ & Total window & WG RAP & FL RAP \\
+\midrule
+Current-bound refined bundle & 871 & 0 & 5.83075 & 533 & 5.83075 & 2.94844 \\
+Joint-bound fresh search & 647 & 0 & 6.00173 & 456 & 6.00173 & 2.86928 \\
+Joint-bound anchored refinement & 999 & 0 & 5.63722 & 534 & 5.63722 & 4.91042 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The anchored joint-bound refinement improved the maximum normalized violation
+from 5.83075 to 5.63722, but it did not remove the joint conflict. The best
+widened-bound point reduced WG RAP violation while keeping the inventory-window
+violation essentially unchanged and increasing FL RAP violation. In other
+words, relaxing these input bounds together created a better nearest miss, not
+a feasible policy.
+
 \section{Limitations and Recommendations}
 
 The search is direct-physics evidence, not a mathematical infeasibility proof.
 It covers structured three- and five-epoch open-loop schedules under the bounds
 in Table~\ref{tab:policy-bounds}. It does not cover fully free per-phase
-controls, closed-loop feedback, or a full reoptimization after jointly widening
-multiple input bounds. The input-bound study is intentionally local and
-one-at-a-time; it shows that no single tested bound change solved the problem
-around the current best schedule.
+controls, closed-loop feedback, or an exhaustive widened-bound optimization.
+The one-at-a-time input-bound study shows that no single tested bound change
+solved the problem around the current best schedule. The targeted joint-bound
+check in Table~\ref{tab:joint-bound} shows that widening the most relevant
+input bounds together improved the nearest miss but still did not produce
+feasibility.
 
 The decision implications are:
 \begin{enumerate}
   \item If policy input bounds remain fixed, the best observed requirements
   trade starts from 533 pilots in the assessment window, 5.83075 WG RAP
   shortfall, and 2.94844 FL RAP shortfall.
-  \item If requirements remain fixed, the next useful input-bound analysis is a
-  joint widened-bound reoptimization, not another one-at-a-time sweep. PAA and
-  UTE are the most promising first levers because they reduced RAP violations
-  without creating the severe FL RAP penalty seen with high intake or IPUG.
+  \item If requirements remain fixed, the completed joint-bound check suggests
+  that modest widening of intake, retention, UTE, and PAA is insufficient by
+  itself. Any further input-bound search should either broaden the bound set or
+  increase the policy-class richness, rather than repeat another one-at-a-time
+  sweep.
   \item If neither requirements nor input bounds can change, the next justified
   search class is richer dynamic policy structure. A fully free per-phase
   schedule should be considered only after deciding that the added complexity
@@ -493,8 +595,10 @@ the direct-physics search did not find a feasible policy. The nearest miss is
 clear: the force eventually exceeds 3500 pilots, but not soon enough in the
 assessment window, and WG/FL RAP constraints remain positive. The first
 input-bound relaxation study did not reveal a single simple bound change that
-creates feasibility. The evidence therefore points to a joint trade: relax the
-inventory/RAP requirements, run a joint widened-bound reoptimization, or expand
+creates feasibility. The targeted joint widened-bound refinement improved the
+nearest miss but still did not create feasibility. The evidence therefore
+points to a joint trade: relax the inventory/RAP requirements, broaden the
+input-bound or policy-class search beyond the targeted check here, or expand
 the dynamic policy class with a clear reason for the added complexity.
 
 \appendix
@@ -502,13 +606,86 @@ the dynamic policy class with a clear reason for the added complexity.
 
 The main artifacts used in this note are:
 \begin{itemize}
-  \item \path{outputs/viability/dynamic_policy_search/run_3epoch_refine_2048_131072_256/}
-  \item \path{outputs/viability/dynamic_policy_search/run_5epoch_1024_131072_256/}
-  \item \path{outputs/viability/dynamic_policy_search/relaxation_study_v1/}
-  \item \path{outputs/viability/dynamic_policy_search/bound_relaxation_v2/}
-  \item \path{outputs/viability/dynamic_policy_search/ipug_counterfactual_v2/}
-  \item \path{outputs/viability/dynamic_policy_search/paper_artifacts_v1/}
+  \item current-bound three-epoch refinement and five-epoch search bundles;
+  \item requirement-relaxation, one-at-a-time bound-relaxation, and IPUG
+  counterfactual outputs;
+  \item trajectory and trade-space figure artifacts used for the paper figures;
+  \item the generated joint-bound config and its fresh-search and anchored
+  refinement result bundles.
 \end{itemize}
+
+These output directories and generated configs are analysis artifacts and are
+intentionally ignored by git. The tracked repository contains the curated
+publication figures under \path{docs/figures/viability/}, the source code used
+to regenerate the analysis, and this compiled note. The dashboard defaults to
+the ignored local output tree; on a clean checkout, regenerate the artifacts
+below or point the sidebar paths at an equivalent local result bundle.
+
+The trained single-phase GPR used during surrogate screening is also a generated
+artifact. The canonical shared ARD Matern $\nu=2.5$ bundle from this campaign is
+about 129 MB, so it is not tracked in normal git. If long-term preservation of
+that model is required, it should be stored through Git LFS or an external
+artifact store with a checksum and a small repository manifest. The direct
+physics evaluations remain the source of truth for all claims in this note.
+
+The joint-bound config is the baseline physics config with four upper-bound
+changes: annual intake 350 to 400, retention 0.65 to 0.85, UTE 20 to 25, and
+PAA 30 to 40. Other policy bounds are unchanged.
+
+The closeout artifacts can be regenerated with:
+\begingroup
+\footnotesize
+\begin{verbatim}
+ROOT=outputs/viability/dynamic_policy_search
+BASE_CFG=$ROOT/config_physics.yaml
+BASE_REFINE=$ROOT/run_3epoch_refine_2048_131072_256/all_evaluations.parquet
+BASE_SENS=$ROOT/run_3epoch_refine_2048_131072_256/diagnostic/local_sensitivity.csv
+FIVE_EVALS=$ROOT/run_5epoch_1024_131072_256/all_evaluations.parquet
+JOINT_CFG=$ROOT/config_physics_joint_bounds_paa40_ute25_ret085_intake400.yaml
+JOINT_SEARCH=$ROOT/run_3epoch_joint_bounds_paa40_ute25_ret085_intake400_512_65536_128
+JOINT_REFINE=$ROOT/run_3epoch_joint_bounds_refine_paa40_ute25_ret085_intake400_1024_65536_128
+
+venv/bin/python -m src.viability.cli dynamic-relaxation-study \
+  --config $BASE_CFG \
+  --evaluations $BASE_REFINE \
+  --evaluations $FIVE_EVALS \
+  --output-dir $ROOT/relaxation_study_v1
+
+venv/bin/python -m src.viability.cli dynamic-bound-relaxation-study \
+  --config $BASE_CFG \
+  --evaluations $BASE_REFINE \
+  --output-dir $ROOT/bound_relaxation_v2 \
+  --epochs 3 --sweep-points 5 --workers 8 --checkpoint-every 10
+
+venv/bin/python -m src.viability.cli dynamic-ipug-diagnostic \
+  --config $BASE_CFG \
+  --evaluations $BASE_REFINE \
+  --output-dir $ROOT/ipug_counterfactual_v2 \
+  --epochs 3 --ipug-values 0,2,5,8,10,15,20 --workers 8 --checkpoint-every 10
+
+venv/bin/python -m src.viability.cli dynamic-trajectory-artifacts \
+  --config $BASE_CFG \
+  --output-dir $ROOT/paper_artifacts_v1 \
+  --evaluation $BASE_REFINE \
+  --epoch-count 3 --label best_3epoch_refined \
+  --evaluation $FIVE_EVALS \
+  --epoch-count 5 --label best_5epoch
+
+venv/bin/python -m src.viability.cli dynamic-search \
+  --config $JOINT_CFG \
+  --output-dir $JOINT_SEARCH \
+  --epochs 3 --initial-samples 512 --optimizer-pool-size 65536 \
+  --verify-top 128 --workers 8 --checkpoint-every 25
+
+venv/bin/python -m src.viability.cli dynamic-refine \
+  --config $JOINT_CFG \
+  --previous-evaluations $BASE_REFINE \
+  --diagnostic-sensitivity $BASE_SENS \
+  --output-dir $JOINT_REFINE \
+  --epochs 3 --local-samples 1024 --optimizer-pool-size 65536 \
+  --verify-top 128 --workers 8 --checkpoint-every 25
+\end{verbatim}
+\endgroup
 
 \begin{thebibliography}{9}
 \raggedright

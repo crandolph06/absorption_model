@@ -12,9 +12,9 @@ from src.viability.dynamic_search import (
     run_dynamic_policy_refinement,
     run_dynamic_policy_search,
 )
-from src.viability.dynamic_analysis import (
-    run_dynamic_bound_relaxation_study,
-    run_dynamic_ipug_diagnostic,
+from src.viability.dynamic_bound_relaxation import run_dynamic_bound_relaxation_study
+from src.viability.dynamic_ipug import run_dynamic_ipug_diagnostic
+from src.viability.dynamic_trajectory_artifacts import (
     run_dynamic_trajectory_artifacts,
 )
 from src.viability.evaluator import evaluate_design, evaluate_designs_parallel

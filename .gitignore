@@ -4,12 +4,15 @@ __pycache__/
 venv/
 .vscode/
 .DS_Store
+tmp/
+*.synctex.gz
 
 # Ignore all model results
 outputs/
 *.csv
 *.png
 *.jpg
+!docs/figures/viability/*.png
 
 # Machine Learning Artifacts
 logs/

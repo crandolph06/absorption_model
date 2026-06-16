@@ -169,7 +169,7 @@ Goal: answer what policy-input bounds would need to change to create a feasible 
   - max manning upper bound: `200 -> 225 -> 250`;
   - FLUG and IPUG quota upper bounds: `10 -> 15 -> 20`.
 - [x] For each extension, run fixed-shape schedule sweeps first so the response is cheap and interpretable.
-- [ ] Then run widened-bound dynamic search for promising combinations only. Deferred: the one-at-a-time study found no feasible point and points toward a joint widened-bound reoptimization as next work, not another local sweep.
+- [x] Run a targeted widened-bound dynamic search for the most promising combination. The completed joint-bound check widened annual intake, retention, UTE, and PAA together, then ran both a fresh three-epoch search and an anchored refinement. It improved the nearest miss but still found no feasible policy.
 - [x] Produce a table saying: bound changed, best observed `phi`, active constraint, total-window relaxation, WG/FL/IP RAP relaxations, and whether feasibility was found.
 - [x] Clearly label this as observed evidence, not a proof over all possible policies.
 
@@ -242,6 +242,16 @@ Goal: make the dashboard support the paper and review, not compete with it.
 - [x] Put the compiled PDF next to the TeX.
 - [x] Confirm no raw generated outputs are staged.
 - [x] Commit locally only after the plan items above are coherently complete. Do not push.
+
+## PR Readiness Remediation
+
+- [x] Do not track the generated GPR bundle in normal git. The useful shared ARD Matern GPR artifact is about 129 MB; preserve it through Git LFS or external artifact storage only if the project needs a canonical portable model.
+- [x] Update the paper author to `Tyler Korenyi-Both`.
+- [x] Add paper language explaining that raw outputs stay ignored, curated figures are tracked, and dashboard users must regenerate or point to local artifacts.
+- [x] Add exact closeout artifact regeneration commands to the paper appendix.
+- [x] Clarify the Table 7 total-window sign convention so negative values are not mistaken for shortfall.
+- [x] Distinguish the completed targeted joint widened-bound check from future exhaustive widened-bound or richer policy-class optimization.
+- [x] Split the oversized `src/viability/dynamic_analysis.py` implementation into focused viability-local modules while preserving import compatibility.
 
 ## Acceptance Criteria
 

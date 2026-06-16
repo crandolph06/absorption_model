@@ -5,12 +5,16 @@ from pathlib import Path
 import pandas as pd
 
 from src.viability.config import load_config
-from src.viability.dynamic_analysis import (
-    clone_config_with_policy_highs,
+from src.viability.dynamic_analysis_common import clone_config_with_policy_highs
+from src.viability.dynamic_bound_relaxation import (
     generate_bound_relaxation_candidates,
-    generate_ipug_counterfactual_candidates,
     run_dynamic_bound_relaxation_study,
+)
+from src.viability.dynamic_ipug import (
+    generate_ipug_counterfactual_candidates,
     run_dynamic_ipug_diagnostic,
+)
+from src.viability.dynamic_trajectory_artifacts import (
     run_dynamic_trajectory_artifacts,
 )
 from src.viability.dynamic_policy import dynamic_feature_names
@@ -127,7 +131,9 @@ class ViabilityDynamicAnalysisTest(unittest.TestCase):
             self.assertTrue(result.summary_path.exists())
             self.assertTrue(result.selected_policies_path.exists())
             self.assertIn("inventory", result.figure_paths)
+            self.assertIn("constraint_trade_space", result.figure_paths)
             self.assertTrue(result.figure_paths["inventory"].exists())
+            self.assertTrue(result.figure_paths["constraint_trade_space"].exists())
             self.assertTrue(result.trajectory_paths["three_epoch"].exists())
 
 
