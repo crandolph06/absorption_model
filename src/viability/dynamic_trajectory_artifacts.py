@@ -112,6 +112,8 @@ def write_dynamic_figures(
     import matplotlib
 
     matplotlib.use("Agg")
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
     import matplotlib.pyplot as plt
 
     paths: dict[str, Path] = {}
@@ -244,15 +246,34 @@ def write_dynamic_figures(
         y_col = "constraint_wg_rap"
         color_col = "constraint_fl_rap"
         fig, axis = plt.subplots(figsize=(6.4, 4.8))
-        scatter = axis.scatter(
-            ok[x_col],
-            ok[y_col],
-            c=ok[color_col],
-            cmap="viridis",
-            s=18,
-            alpha=0.62,
-            edgecolor="none",
+        norm = Normalize(
+            vmin=float(ok[color_col].min()),
+            vmax=float(ok[color_col].max()),
         )
+        axis.set_axisbelow(True)
+        for lower, upper, zorder in [
+            (6.0, float("inf"), 1),
+            (5.0, 6.0, 2),
+            (4.0, 5.0, 3),
+            (3.0, 4.0, 4),
+            (2.0, 3.0, 5),
+            (1.0, 2.0, 6),
+            (float("-inf"), 1.0, 7),
+        ]:
+            layer = ok[(ok[color_col] >= lower) & (ok[color_col] < upper)]
+            if layer.empty:
+                continue
+            axis.scatter(
+                layer[x_col],
+                layer[y_col],
+                c=layer[color_col],
+                cmap="viridis",
+                norm=norm,
+                s=18,
+                alpha=0.68,
+                edgecolor="none",
+                zorder=zorder,
+            )
         axis.scatter(
             [best[x_col]],
             [best[y_col]],
@@ -260,16 +281,18 @@ def write_dynamic_figures(
             s=170,
             color="#b91c1c",
             label="best observed",
-            zorder=5,
+            zorder=20,
         )
-        axis.axvline(0.0, color="#111827", linestyle="--", linewidth=0.95)
-        axis.axhline(0.0, color="#111827", linestyle="--", linewidth=0.95)
+        axis.axvline(0.0, color="#111827", linestyle="--", linewidth=0.95, zorder=10)
+        axis.axhline(0.0, color="#111827", linestyle="--", linewidth=0.95, zorder=10)
         axis.set_title("Inventory window vs WG RAP")
         axis.set_xlabel("Total-pilot-window violation")
         axis.set_ylabel("WG RAP violation")
         axis.grid(True, alpha=0.25)
         axis.legend(loc="best", fontsize=8)
-        cbar = fig.colorbar(scatter, ax=axis)
+        colorbar_mappable = ScalarMappable(norm=norm, cmap="viridis")
+        colorbar_mappable.set_array([])
+        cbar = fig.colorbar(colorbar_mappable, ax=axis)
         cbar.set_label("FL RAP violation")
         paths["constraint_trade_space"] = save_figure(
             fig,
