@@ -27,8 +27,11 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def get_sweep_configs():
     ute_values = (10,11)
-    ip_qty_values = range(3, 10)
-    exp_ratios = np.linspace(0.0, 1.0, 21).round(2)
+    ip_qty_values = range(1, 10)
+    exp_ratios = np.concatenate([
+        np.arange(0.02, 0.10, 0.02),
+        np.linspace(0.10, 1.0, 19).round(2)
+    ])
     paa_values = range(18, 24)
     mqt_students = range(0, 15)
     flug_students = range(0, 15)
