@@ -924,6 +924,7 @@ def run_phase_simulation(
     flug_syllabus: Optional[List[SyllabusEvent]] = None,
     ipug_syllabus: Optional[List[SyllabusEvent]] = None,
     continuation_profile: Optional[ContinuationProfile] = None,
+    auto_graduate: bool = True,
 ):
     sim = sim_config or SimulationConfig()
     phase_length_days = float(sim.phase_length_days)
@@ -999,7 +1000,6 @@ def run_phase_simulation(
     allocate_sim_rap(pilots, cfg, phase_length_days, noise)
     if debug_verbose:
         _print_allocation_debug(pilots, "SimRAP")
-    graduate_completed_upgrades(pilots)
 
     metrics = phase_upgrade_metrics(
         pilots,
@@ -1018,10 +1018,13 @@ def run_phase_simulation(
     )
     apply_pipeline_status_to_squadron(cfg, status)
 
-    # 7. Finalize monthly stats and RAP shortfalls
+    # Finalize monthly stats before reporting snapshot (optionally before graduation).
     for p in pilots:
         p.update_total(phase_length_days)
         p.update_monthly(phase_length_days)
+
+    if auto_graduate:
+        graduate_completed_upgrades(pilots)
 
     return pilots
 
