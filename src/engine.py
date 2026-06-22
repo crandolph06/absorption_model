@@ -1,7 +1,10 @@
 import heapq
+import itertools
 import math
 import random
-from typing import List, Optional, Set
+from typing import List, Literal, Optional, Set
+
+SortieAllocationMode = Literal["rap_priority", "equity"]
 from src.models import (
     Assignment,
     AssignedUTCRank,
@@ -289,6 +292,62 @@ def _candidates_for_utc(candidates: List[Pilot], utc: AssignedUTCRank) -> List[P
     return [p for p in candidates if p.assigned_utc == utc]
 
 
+def _utc_sortie_pool(
+    candidates: List[Pilot],
+    utc: AssignedUTCRank,
+    phase_length_days: float,
+) -> List[Pilot]:
+    """UTC-ordered sortie pool: pilots in ``utc`` who still need sortie RAP."""
+    return [
+        p for p in _candidates_for_utc(candidates, utc)
+        if _pilot_needs_sortie_rap(p, phase_length_days)
+    ]
+
+
+def _utc_sim_pool(
+    candidates: List[Pilot],
+    utc: AssignedUTCRank,
+    phase_length_days: float,
+) -> List[Pilot]:
+    """UTC-ordered sim pool: pilots in ``utc`` who still need sim RAP."""
+    return [
+        p for p in _candidates_for_utc(candidates, utc)
+        if _pilot_needs_sim_rap(p, phase_length_days)
+    ]
+
+
+def _ip_support_sortie_pool(all_pilots: List[Pilot], phase_length_days: float) -> List[Pilot]:
+    """IPs for syllabus support: prefer those still short of sortie RAP."""
+    ips = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.IP)]
+    needing = [p for p in ips if _pilot_needs_sortie_rap(p, phase_length_days)]
+    return needing if needing else ips
+
+
+def _ip_support_sim_pool(all_pilots: List[Pilot], phase_length_days: float) -> List[Pilot]:
+    """IPs for syllabus sim support: prefer those still short of sim RAP."""
+    ips = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.IP)]
+    needing = [p for p in ips if _pilot_needs_sim_rap(p, phase_length_days)]
+    return needing if needing else ips
+
+
+def _pilot_needs_sortie_rap(p: Pilot, phase_length_days: float) -> bool:
+    """True when the pilot still has sortie RAP shortfall this phase."""
+    months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
+    if months <= 0 or p.target_sorties <= 0:
+        return False
+    expected = p.target_sorties * months
+    return p.sortie_rap_credit(months) < expected - 1e-9
+
+
+def _pilot_needs_sim_rap(p: Pilot, phase_length_days: float) -> bool:
+    """True when the pilot still has sim RAP shortfall this phase."""
+    months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
+    if months <= 0 or p.target_sims <= 0:
+        return False
+    expected = p.target_sims * months
+    return p.sim_phase < expected - 1e-9
+
+
 def _total_phase_events(p: Pilot) -> float:
     return p.sortie_phase + p.sim_phase
 
@@ -390,11 +449,14 @@ def _assign_ct_sortie_from_heap(
             side=side,
             single_ship=single_ship,
         )
-        if _has_event_capacity_under_limit(pilot, max_phase_events) and (
-            not single_ship
-            or pilot.has_single_ship_allocation_capacity(
-                phase_length_days,
-                single_ship_monthly_cap,
+        if (
+            _has_event_capacity_under_limit(pilot, max_phase_events)
+            and (
+                not single_ship
+                or pilot.has_single_ship_allocation_capacity(
+                    phase_length_days,
+                    single_ship_monthly_cap,
+                )
             )
         ):
             heapq.heappush(heap, _ct_heap_entry(pilot, side, order_by_id[id(pilot)]))
@@ -501,39 +563,17 @@ def check_syllabus_resources(
 # Event Assignment
 # ----------------------
 
-def assign_sortie(
+def _assign_sortie_equity(
     cfg: SquadronConfig,
     candidates: List[Pilot],
     phase_length_days: float,
-    side: str = "Blue",
-    noise: float = 0.0,
-    exclude: Optional[Set[int]] = None,
-    single_ship: bool = False,
-    single_ship_monthly_cap: float = 1.0,
-    utc_wise_allocation: bool = False,
+    side: str,
+    noise: float,
+    exclude: Set[int],
+    single_ship: bool,
+    single_ship_monthly_cap: float,
 ) -> bool:
-    """
-    Selects the best candidate (lowest total events, then least blue/red sorties) to fly a sortie.
-    Returns True if a pilot was found and assigned, False otherwise.
-    """
-    if utc_wise_allocation:
-        for utc in UTC_ALLOCATION_ORDER:
-            pool = _candidates_for_utc(candidates, utc)
-            if assign_sortie(
-                cfg,
-                pool,
-                phase_length_days,
-                side,
-                noise,
-                exclude=exclude,
-                single_ship=single_ship,
-                single_ship_monthly_cap=single_ship_monthly_cap,
-                utc_wise_allocation=False,
-            ):
-                return True
-        return False
-
-    exclude = exclude if exclude is not None else set()
+    """Lowest-load pilot within ``candidates``; no RAP or UTC filtering."""
     candidates = [p for p in candidates if id(p) not in exclude]
     candidates = _eligible_for_event(candidates, phase_length_days)
     if single_ship:
@@ -557,33 +597,78 @@ def assign_sortie(
     return True
 
 
-def assign_sim(
+def assign_sortie_policy(
     cfg: SquadronConfig,
     candidates: List[Pilot],
     phase_length_days: float,
+    side: str = "Blue",
     noise: float = 0.0,
     exclude: Optional[Set[int]] = None,
-    utc_wise_allocation: bool = False,
+    single_ship: bool = False,
+    single_ship_monthly_cap: float = 1.0,
+    *,
+    mode: SortieAllocationMode = "equity",
+    utc_wise: bool = False,
 ) -> bool:
     """
-    Selects the best candidate (lowest total events, then least sims) for a simulator event.
-    Returns True if a pilot was found and assigned, False otherwise.
+    Assign one sortie using either UTC-ordered RAP priority or squad-wide equity.
+
+    ``rap_priority``: UTC 1 → 2 → 3 → unassigned; within each UTC only pilots
+    still short of sortie RAP. No hard cap — pilots drop out once RAP is met.
     """
-    if utc_wise_allocation:
+    exclude = exclude if exclude is not None else set()
+    if mode == "rap_priority" and utc_wise:
         for utc in UTC_ALLOCATION_ORDER:
-            pool = _candidates_for_utc(candidates, utc)
-            if assign_sim(
-                cfg,
-                pool,
-                phase_length_days,
-                noise,
-                exclude=exclude,
-                utc_wise_allocation=False,
+            pool = _utc_sortie_pool(candidates, utc, phase_length_days)
+            if _assign_sortie_equity(
+                cfg, pool, phase_length_days, side, noise, exclude,
+                single_ship, single_ship_monthly_cap,
             ):
                 return True
         return False
+    return _assign_sortie_equity(
+        cfg, candidates, phase_length_days, side, noise, exclude,
+        single_ship, single_ship_monthly_cap,
+    )
 
-    exclude = exclude if exclude is not None else set()
+
+def assign_sortie(
+    cfg: SquadronConfig,
+    candidates: List[Pilot],
+    phase_length_days: float,
+    side: str = "Blue",
+    noise: float = 0.0,
+    exclude: Optional[Set[int]] = None,
+    single_ship: bool = False,
+    single_ship_monthly_cap: float = 1.0,
+    utc_wise_allocation: bool = False,
+    utc_rap_priority: bool = False,
+) -> bool:
+    """Backward-compatible wrapper around ``assign_sortie_policy``."""
+    mode: SortieAllocationMode = (
+        "rap_priority" if (utc_rap_priority or utc_wise_allocation) else "equity"
+    )
+    return assign_sortie_policy(
+        cfg,
+        candidates,
+        phase_length_days,
+        side,
+        noise,
+        exclude=exclude,
+        single_ship=single_ship,
+        single_ship_monthly_cap=single_ship_monthly_cap,
+        mode=mode,
+        utc_wise=utc_wise_allocation or utc_rap_priority,
+    )
+
+
+def _assign_sim_equity(
+    cfg: SquadronConfig,
+    candidates: List[Pilot],
+    phase_length_days: float,
+    noise: float,
+    exclude: Set[int],
+) -> bool:
     candidates = [p for p in candidates if id(p) not in exclude]
     candidates = _eligible_for_event(candidates, phase_length_days)
     if not candidates:
@@ -599,6 +684,51 @@ def assign_sim(
     winner.add_sim(cfg.avg_sortie_dur)
     exclude.add(id(winner))
     return True
+
+
+def assign_sim_policy(
+    cfg: SquadronConfig,
+    candidates: List[Pilot],
+    phase_length_days: float,
+    noise: float = 0.0,
+    exclude: Optional[Set[int]] = None,
+    *,
+    mode: SortieAllocationMode = "equity",
+    utc_wise: bool = False,
+) -> bool:
+    """Assign one sim using UTC-ordered RAP priority or squad-wide equity."""
+    exclude = exclude if exclude is not None else set()
+    if mode == "rap_priority" and utc_wise:
+        for utc in UTC_ALLOCATION_ORDER:
+            pool = _utc_sim_pool(candidates, utc, phase_length_days)
+            if _assign_sim_equity(cfg, pool, phase_length_days, noise, exclude):
+                return True
+        return False
+    return _assign_sim_equity(cfg, candidates, phase_length_days, noise, exclude)
+
+
+def assign_sim(
+    cfg: SquadronConfig,
+    candidates: List[Pilot],
+    phase_length_days: float,
+    noise: float = 0.0,
+    exclude: Optional[Set[int]] = None,
+    utc_wise_allocation: bool = False,
+    utc_rap_priority: bool = False,
+) -> bool:
+    """Backward-compatible wrapper around ``assign_sim_policy``."""
+    mode: SortieAllocationMode = (
+        "rap_priority" if (utc_rap_priority or utc_wise_allocation) else "equity"
+    )
+    return assign_sim_policy(
+        cfg,
+        candidates,
+        phase_length_days,
+        noise,
+        exclude=exclude,
+        mode=mode,
+        utc_wise=utc_wise_allocation or utc_rap_priority,
+    )
 
 
 # ----------------------
@@ -638,62 +768,86 @@ def process_syllabus_event(
             line_ok = True
             if event.event_type == EventType.SIM:
                 for _ in range(event.num_instructor):
-                    ips = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.IP)]
-                    if not assign_sim(cfg, ips, phase_length_days, noise, exclude=line_assigned, utc_wise_allocation=utc_wise_allocation):
+                    ips = _ip_support_sim_pool(all_pilots, phase_length_days)
+                    if not assign_sim(cfg, ips, phase_length_days, noise, exclude=line_assigned):
                         line_ok = False
                         break
                 if line_ok:
                     for _ in range(event.num_blue_fl):
                         candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
-                        if not assign_sim(cfg, candidates, phase_length_days, noise, exclude=line_assigned, utc_wise_allocation=utc_wise_allocation):
+                        if not assign_sim_policy(
+                            cfg, candidates, phase_length_days, noise, exclude=line_assigned,
+                            mode="rap_priority", utc_wise=utc_wise_allocation,
+                        ):
                             line_ok = False
                             break
                 if line_ok:
                     for _ in range(event.num_red_fl):
                         candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
-                        if not assign_sim(cfg, candidates, phase_length_days, noise, exclude=line_assigned, utc_wise_allocation=utc_wise_allocation):
+                        if not assign_sim_policy(
+                            cfg, candidates, phase_length_days, noise, exclude=line_assigned,
+                            mode="rap_priority", utc_wise=utc_wise_allocation,
+                        ):
                             line_ok = False
                 if line_ok:
                     for _ in range(event.num_blue_wg):
                         candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
-                        if not assign_sim(cfg, candidates, phase_length_days, noise, exclude=line_assigned, utc_wise_allocation=utc_wise_allocation):
+                        if not assign_sim_policy(
+                            cfg, candidates, phase_length_days, noise, exclude=line_assigned,
+                            mode="rap_priority", utc_wise=utc_wise_allocation,
+                        ):
                             line_ok = False
                             break
                 if line_ok:
                     for _ in range(event.num_red_wg):
                         candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
-                        if not assign_sim(cfg, candidates, phase_length_days, noise, exclude=line_assigned, utc_wise_allocation=utc_wise_allocation):
+                        if not assign_sim_policy(
+                            cfg, candidates, phase_length_days, noise, exclude=line_assigned,
+                            mode="rap_priority", utc_wise=utc_wise_allocation,
+                        ):
                             line_ok = False
                             break
                 if line_ok:
                     student.add_sim(cfg.avg_sortie_dur)
             else:
                 for _ in range(event.num_instructor):
-                    ips = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.IP)]
-                    if not assign_sortie(cfg, ips, phase_length_days, "Blue", noise, exclude=line_assigned, utc_wise_allocation=utc_wise_allocation):
+                    ips = _ip_support_sortie_pool(all_pilots, phase_length_days)
+                    if not assign_sortie(cfg, ips, phase_length_days, "Blue", noise, exclude=line_assigned):
                         line_ok = False
                         break
                 if line_ok:
                     for _ in range(event.num_blue_fl):
                         candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
-                        if not assign_sortie(cfg, candidates, phase_length_days, "Blue", noise, exclude=line_assigned, utc_wise_allocation=utc_wise_allocation):
+                        if not assign_sortie_policy(
+                            cfg, candidates, phase_length_days, "Blue", noise, exclude=line_assigned,
+                            mode="rap_priority", utc_wise=utc_wise_allocation,
+                        ):
                             line_ok = False
                             break
                 if line_ok:
                     for _ in range(event.num_red_fl):
                         candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.FL)]
-                        if not assign_sortie(cfg, candidates, phase_length_days, "Red", noise, exclude=line_assigned, utc_wise_allocation=utc_wise_allocation):
+                        if not assign_sortie_policy(
+                            cfg, candidates, phase_length_days, "Red", noise, exclude=line_assigned,
+                            mode="rap_priority", utc_wise=utc_wise_allocation,
+                        ):
                             line_ok = False
                 if line_ok:
                     for _ in range(event.num_blue_wg):
                         candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
-                        if not assign_sortie(cfg, candidates, phase_length_days, "Blue", noise, exclude=line_assigned, utc_wise_allocation=utc_wise_allocation):
+                        if not assign_sortie_policy(
+                            cfg, candidates, phase_length_days, "Blue", noise, exclude=line_assigned,
+                            mode="rap_priority", utc_wise=utc_wise_allocation,
+                        ):
                             line_ok = False
                             break
                 if line_ok:
                     for _ in range(event.num_red_wg):
                         candidates = [p for p in all_pilots if rules.can_fill_seat(pilot=p, min_qual=Qual.WG)]
-                        if not assign_sortie(cfg, candidates, phase_length_days, "Red", noise, exclude=line_assigned, utc_wise_allocation=utc_wise_allocation):
+                        if not assign_sortie_policy(
+                            cfg, candidates, phase_length_days, "Red", noise, exclude=line_assigned,
+                            mode="rap_priority", utc_wise=utc_wise_allocation,
+                        ):
                             line_ok = False
                             break
                 if line_ok:
@@ -744,10 +898,48 @@ def _allocate_ct_buckets_round_robin(
     noise: float,
     single_ship: bool = False,
     single_ship_monthly_cap: float = 1.0,
+    sortie_mode: SortieAllocationMode = "equity",
+    utc_wise: bool = False,
 ) -> int:
     """Assign CT sorties round-robin across ``buckets``; return count assigned."""
     if not buckets:
         return 0
+
+    if sortie_mode == "rap_priority" and utc_wise:
+        assigned = 0
+        remaining_total = sum(remaining.get(b, 0) for b in buckets)
+        while remaining_total > 0:
+            assigned_this_pass = False
+            for bucket in buckets:
+                if remaining.get(bucket, 0) <= 0:
+                    continue
+                eligible = [
+                    p for p in ct_candidates
+                    if rules.can_fill_seat(pilot=p, min_qual=bucket.min_qual)
+                ]
+                assigned_sortie = assign_sortie_policy(
+                    cfg,
+                    eligible,
+                    phase_length_days,
+                    bucket.side,
+                    noise,
+                    single_ship=single_ship,
+                    single_ship_monthly_cap=single_ship_monthly_cap,
+                    mode="rap_priority",
+                    utc_wise=True,
+                )
+                if assigned_sortie:
+                    remaining[bucket] -= 1
+                    remaining_total -= 1
+                    assigned += 1
+                    assigned_this_pass = True
+                else:
+                    remaining_total -= remaining.get(bucket, 0)
+                    remaining[bucket] = 0
+            if not assigned_this_pass:
+                break
+        return assigned
+
     candidate_pools = {
         min_qual: [
             p for p in ct_candidates
@@ -788,14 +980,15 @@ def _allocate_ct_buckets_round_robin(
                 )
             else:
                 eligible = candidate_pools[bucket.min_qual]
-                assigned_sortie = assign_sortie(
-                    cfg=cfg,
-                    candidates=eligible,
-                    phase_length_days=phase_length_days,
-                    side=bucket.side,
-                    noise=noise,
+                assigned_sortie = assign_sortie_policy(
+                    cfg,
+                    eligible,
+                    phase_length_days,
+                    bucket.side,
+                    noise,
                     single_ship=single_ship,
                     single_ship_monthly_cap=single_ship_monthly_cap,
+                    mode="equity",
                 )
             if assigned_sortie:
                 remaining[bucket] -= 1
@@ -862,36 +1055,31 @@ def allocate_continuation_training(
     fl_planned = sum(base_qty[b] for b in fl_buckets)
 
     if utc_wise_allocation:
-        fl_assigned = 0
-        for utc in UTC_ALLOCATION_ORDER:
-            utc_candidates = _candidates_for_utc(ct_candidates, utc)
-            if not utc_candidates:
-                continue
-            fl_assigned += _allocate_ct_buckets_round_robin(
-                fl_buckets,
+        fl_assigned = _allocate_ct_buckets_round_robin(
+            fl_buckets,
+            remaining,
+            ct_candidates,
+            cfg,
+            phase_length_days,
+            noise,
+            single_ship_monthly_cap=single_ship_monthly_cap,
+            sortie_mode="rap_priority",
+            utc_wise=True,
+        )
+        fl_ct_shortfall = fl_planned - fl_assigned
+        if wg_buckets:
+            _allocate_ct_buckets_round_robin(
+                wg_buckets,
                 remaining,
-                utc_candidates,
+                ct_candidates,
                 cfg,
                 phase_length_days,
                 noise,
+                single_ship=False,
                 single_ship_monthly_cap=single_ship_monthly_cap,
+                sortie_mode="rap_priority",
+                utc_wise=True,
             )
-        fl_ct_shortfall = fl_planned - fl_assigned
-        if wg_buckets:
-            for utc in UTC_ALLOCATION_ORDER:
-                utc_candidates = _candidates_for_utc(ct_candidates, utc)
-                if not utc_candidates:
-                    continue
-                _allocate_ct_buckets_round_robin(
-                    wg_buckets,
-                    remaining,
-                    utc_candidates,
-                    cfg,
-                    phase_length_days,
-                    noise,
-                    single_ship=fl_ct_shortfall > 0,
-                    single_ship_monthly_cap=single_ship_monthly_cap,
-                )
         return
 
     fl_assigned = _allocate_ct_buckets_round_robin(
@@ -912,6 +1100,47 @@ def allocate_continuation_training(
             single_ship=fl_ct_shortfall > 0,
             single_ship_monthly_cap=single_ship_monthly_cap,
         )
+
+
+def _sorties_used(pilots: List[Pilot]) -> int:
+    return int(round(sum(p.sortie_phase for p in pilots)))
+
+
+def allocate_leftover_sorties(
+    pilots: List[Pilot],
+    cfg: SquadronConfig,
+    total_capacity: int,
+    phase_length_days: float,
+    noise: float = 0.0,
+) -> int:
+    """
+    Equity pass on remaining sortie iron after syllabus and CT.
+
+    No RAP filter — lowest-load line pilots receive extras until iron or
+    per-pilot event capacity is exhausted.
+    """
+    ct_candidates = [p for p in pilots if p.upgrade != Upgrade.MQT]
+    if not ct_candidates:
+        return 0
+
+    assigned = 0
+    sides = itertools.cycle(["Blue", "Red"])
+    while _sorties_used(pilots) < total_capacity:
+        side = next(sides)
+        if assign_sortie_policy(
+            cfg, ct_candidates, phase_length_days, side, noise, mode="equity",
+        ):
+            assigned += 1
+            continue
+        other = "Red" if side == "Blue" else "Blue"
+        if assign_sortie_policy(
+            cfg, ct_candidates, phase_length_days, other, noise, mode="equity",
+        ):
+            assigned += 1
+            continue
+        break
+    return assigned
+
 
 def allocate_sim_rap(
     pilots: List[Pilot],
@@ -936,7 +1165,7 @@ def allocate_sim_rap(
 
     max_phase_events = _phase_event_limit(phase_length_days)
     pilot_groups = (
-        [_candidates_for_utc(pilots, utc) for utc in UTC_ALLOCATION_ORDER]
+        [_utc_sim_pool(pilots, utc, phase_length_days) for utc in UTC_ALLOCATION_ORDER]
         if utc_wise_allocation
         else [pilots]
     )
@@ -1033,10 +1262,6 @@ def run_phase_simulation(
 
     for p in pilots:
         p.reset_phase_counters()
-    if utc_wise:
-        cfg.update_rap_scenarios()
-    for p in pilots:
-        p.set_rap_requirement()
 
     if not pre_seed_upgrades:
         syllabus_mqt = select_upgrade_students(pilots, Upgrade.MQT, cfg.mqt_students)
@@ -1055,6 +1280,12 @@ def run_phase_simulation(
             p for p in pilots
             if p.upgrade == Upgrade.IPUG and id(p) not in carryover_ids
         ]
+
+    # Rank UTC slots on line pilots only (``upgrade == NONE``), after students are tagged.
+    if utc_wise:
+        cfg.update_rap_scenarios()
+    for p in pilots:
+        p.set_rap_requirement()
 
     total_iron = max(
         0,
@@ -1092,6 +1323,13 @@ def run_phase_simulation(
     )
     if debug_verbose:
         _print_allocation_debug(pilots, "CT")
+
+    if utc_wise:
+        allocate_leftover_sorties(
+            pilots, cfg, total_iron, phase_length_days, noise,
+        )
+        if debug_verbose:
+            _print_allocation_debug(pilots, "Leftover")
 
     # 6. Sim RAP (discrete allocation; syllabus sims already credited above)
     allocate_sim_rap(pilots, cfg, phase_length_days, noise, utc_wise_allocation=utc_wise)
