@@ -84,7 +84,7 @@ def get_initial_squadrons(current_year: int, squadron_data: list | None = None):
             ipug_eligible_flight_leads.sort(key=lambda x: x.year_group, reverse=True)
             for i in range(ipug):
                 ipug_eligible_flight_leads[i].upgrade = Upgrade.IPUG
-        
+        sq.update_rap_scenarios()
         sq.update_stats()
         squadrons.append(sq)
     return squadrons
