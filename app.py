@@ -11,11 +11,75 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.engine import create_pilots, phase_upgrade_metrics, run_phase_simulation
-from src.models import Qual, SquadronConfig, monthly_sortie_rap_target
+from src.models import (
+    NUM_FLS_UTC_1,
+    NUM_FLS_UTC_2,
+    NUM_FLS_UTC_3,
+    NUM_WG_UTC_1,
+    NUM_WG_UTC_2,
+    NUM_WG_UTC_3,
+    AssignedUTCRank,
+    Assignment,
+    Qual,
+    SquadronConfig,
+    Upgrade,
+    monthly_sortie_rap_target,
+)
 from src.rap_state import rap_assess, rap_state_code
 from src.simulation_config import DEFAULT_PHASE_LENGTH_DAYS, SimulationConfig
 
-SIM_CONFIG = SimulationConfig(phase_length_days=DEFAULT_PHASE_LENGTH_DAYS)
+_UTC_CHART_LABELS = ("UTC 1", "UTC 2", "UTC 3", "Unassigned")
+_SUMMARY_STATUS_SCOPE_OPTIONS = ("Overall",) + _UTC_CHART_LABELS
+_UTC_STATUS_LABELS = ("UTC 1", "UTC 2", "UTC 3")
+_UTC_RANK_BY_LABEL = {
+    "UTC 1": AssignedUTCRank.UTC_1,
+    "UTC 2": AssignedUTCRank.UTC_2,
+    "UTC 3": AssignedUTCRank.UTC_3,
+    "Unassigned": AssignedUTCRank.UNASSIGNED,
+}
+_UTC_SLOT_REQUIREMENTS: dict[AssignedUTCRank, tuple[int, int]] = {
+    AssignedUTCRank.UTC_1: (NUM_FLS_UTC_1, NUM_WG_UTC_1),
+    AssignedUTCRank.UTC_2: (NUM_FLS_UTC_2, NUM_WG_UTC_2),
+    AssignedUTCRank.UTC_3: (NUM_FLS_UTC_3, NUM_WG_UTC_3),
+}
+
+
+def _sim_config(utc_wise: bool) -> SimulationConfig:
+    return SimulationConfig(
+        phase_length_days=DEFAULT_PHASE_LENGTH_DAYS,
+        utc_wise_allocation=utc_wise,
+        # Dashboard RAP charts assume syllabus first, then CT on leftover iron.
+        upgrade_sortie_fraction=None,
+    )
+
+
+def _utc_filter_cache_key(utc_filter: AssignedUTCRank | None) -> int | None:
+    return None if utc_filter is None else int(utc_filter)
+
+
+def _filter_pilots_by_utc(
+    pilots: list,
+    utc_filter: AssignedUTCRank | None,
+) -> list:
+    if utc_filter is None:
+        return pilots
+    return [p for p in pilots if p.assigned_utc == utc_filter]
+
+
+def _utc_chart_filter(key: str, utc_wise: bool) -> AssignedUTCRank | None:
+    if not utc_wise:
+        return None
+    label = st.selectbox("UTC", _UTC_CHART_LABELS, key=key)
+    return _UTC_RANK_BY_LABEL[label]
+
+
+def _utc_label(rank: AssignedUTCRank | None) -> str | None:
+    if rank is None:
+        return None
+    for label, utc_rank in _UTC_RANK_BY_LABEL.items():
+        if utc_rank == rank:
+            return label
+    return None
 _SYLLABI_NEGLIGIBLE = 0.10
 _REMAINING_TOTAL = [
     "remaining_mqt_syllabi_mean",
@@ -145,61 +209,212 @@ def _self_term_mask(df: pd.DataFrame) -> pd.Series:
     return df["self_terminating_phase"].fillna(False).astype(bool)
 
 
+def _utc_line_fl_count(pilots: list, utc: AssignedUTCRank) -> int:
+    return sum(
+        1
+        for p in pilots
+        if p.assigned_utc == utc
+        and p.active
+        and p.current_assignment == Assignment.LINE
+        and p.qual in (Qual.FL, Qual.IP)
+    )
+
+
+def _utc_line_wg_count(pilots: list, utc: AssignedUTCRank) -> int:
+    return sum(
+        1
+        for p in pilots
+        if p.assigned_utc == utc
+        and p.active
+        and p.current_assignment == Assignment.LINE
+        and p.qual == Qual.WG
+        and p.upgrade != Upgrade.MQT
+    )
+
+
+def _utc_pilots_meet_rap(pilots: list, utc: AssignedUTCRank) -> bool:
+    for p in pilots:
+        if not p.active or p.assigned_utc != utc:
+            continue
+        if p.target_sorties <= 0:
+            continue
+        if p.sortie_rap_monthly < p.target_sorties - 1e-9:
+            return False
+    return True
+
+
+def _assess_utc_mission_ready(
+    pilots: list,
+    utc: AssignedUTCRank,
+) -> tuple[bool, str]:
+    fl_req, wg_req = _UTC_SLOT_REQUIREMENTS[utc]
+    fl_count = _utc_line_fl_count(pilots, utc)
+    wg_count = _utc_line_wg_count(pilots, utc)
+    if fl_count < fl_req:
+        if wg_count < wg_req:
+            if not _utc_pilots_meet_rap(pilots, utc):
+                return False, "UTC not Mission Ready (WG + FL Count and RAP)"
+            return False, "UTC not Mission Ready (WG + FL Count)"
+        else:
+            if not _utc_pilots_meet_rap(pilots, utc):
+                return False, "UTC not Mission Ready (FL Count and RAP)"
+            return False, "UTC not Mission Ready (FL Count)"
+    elif wg_count < wg_req:
+        if not _utc_pilots_meet_rap(pilots, utc):
+            return False, "UTC not Mission Ready (WG Count and RAP)"
+        return False, "UTC not Mission Ready (WG Count)"
+    if not _utc_pilots_meet_rap(pilots, utc):
+        return False, "UTC not Mission Ready (RAP)"
+    return True, "UTC Mission Ready"
+
+
+def _format_utc_status_label(label: str) -> str:
+    prefix = "UTC not Mission Ready ("
+    if label.startswith(prefix) and label.endswith(")"):
+        reason = label[len(prefix):-1]
+        return f"UTC not Mission Ready<br>({reason})"
+    return label
+
+
+def _rap_cohort_group_pilots(cohort: list) -> dict[str, list]:
+    """RAP cohorts for a pilot list (same rules as ``rap_assess``)."""
+    return {
+        "WG": [p for p in cohort if p.qual == Qual.WG and p.upgrade != Upgrade.MQT],
+        "FL": [p for p in cohort if p.qual == Qual.FL],
+        "IP": [p for p in cohort if p.qual == Qual.IP],
+    }
+
+
+def _rap_metrics_from_cohort(cohort: list) -> dict:
+    groups = _rap_cohort_group_pilots(cohort)
+    rap, blue_rap, red = rap_assess(cohort)
+
+    def _metric(group: str, value: float) -> float:
+        return value if groups[group] else np.nan
+
+    wg_monthly = _metric("WG", rap["WG"][1])
+    fl_monthly = _metric("FL", rap["FL"][1])
+    ip_monthly = _metric("IP", rap["IP"][1])
+    wg_blue_monthly = _metric("WG", blue_rap["WG"][1])
+    fl_blue_monthly = _metric("FL", blue_rap["FL"][1])
+    ip_blue_monthly = _metric("IP", blue_rap["IP"][1])
+    return {
+        "wg_monthly": wg_monthly,
+        "fl_monthly": fl_monthly,
+        "ip_monthly": ip_monthly,
+        "wg_blue_monthly": wg_blue_monthly,
+        "fl_blue_monthly": fl_blue_monthly,
+        "ip_blue_monthly": ip_blue_monthly,
+        "wg_red_monthly": wg_monthly - wg_blue_monthly if groups["WG"] else np.nan,
+        "fl_red_monthly": fl_monthly - fl_blue_monthly if groups["FL"] else np.nan,
+        "ip_red_monthly": ip_monthly - ip_blue_monthly if groups["IP"] else np.nan,
+        "wg_red_pct": _metric("WG", red["WG"][0]),
+        "fl_red_pct": _metric("FL", red["FL"][0]),
+        "ip_red_pct": _metric("IP", red["IP"][0]),
+        "rap_state_code": rap_state_code(rap),
+        "blue_rap_state_code": rap_state_code(blue_rap),
+    }
+
+
+def _rap_metrics_row_from_pilots(
+    pilots: list,
+    utc_filter: AssignedUTCRank | None,
+    *,
+    base: dict,
+) -> dict:
+    cohort = _filter_pilots_by_utc(pilots, utc_filter)
+    return {**base, **_rap_metrics_from_cohort(cohort)}
+
+
+def _simulate_one_row(
+    row: dict,
+    sim_config: SimulationConfig,
+    utc_filter: AssignedUTCRank | None = None,
+) -> tuple[dict, list | None]:
+    total = int(row["total_pilots"])
+    exp = float(row["exp_ratio"])
+    ip_q = int(row["ip_qty"])
+    mqt = int(row["mqt_qty"])
+    flug = int(row["flug_qty"])
+    ipug = int(row["ipug_qty"])
+    if not is_valid_config(total, exp, ip_q, mqt, flug, ipug):
+        return {**row, **_empty_metrics_row()}, None
+    cfg = SquadronConfig(
+        paa=int(row["paa"]),
+        ute=float(row["ute"]),
+        experience_ratio=exp,
+        ip_qty=ip_q,
+        mqt_students=mqt,
+        flug_students=flug,
+        ipug_students=ipug,
+        total_pilots=total,
+        id=99,
+    )
+    try:
+        pilots = create_pilots(cfg)
+        with contextlib.redirect_stdout(io.StringIO()):
+            final_pilots = run_phase_simulation(
+                cfg, pilots, sim_config=sim_config, auto_graduate=False,
+            )
+        cohort = _filter_pilots_by_utc(final_pilots, utc_filter)
+        upgrade = phase_upgrade_metrics(final_pilots)
+    except ValueError:
+        return {**row, **_empty_metrics_row()}, None
+
+    out = {**row, **_rap_metrics_from_cohort(cohort)}
+    out["self_terminating_phase"] = bool(cfg.self_terminating_phase)
+    out["deferral_due_to_ip"] = bool(cfg.deferral_due_to_ip)
+    _attach_syllabus_from_upgrade_metrics(out, upgrade)
+    return out, final_pilots
+
+
 @st.cache_data(show_spinner=False)
-def _run_physics_metrics(df_inputs: pd.DataFrame) -> pd.DataFrame:
+def _single_point_summary_physics(
+    paa: int,
+    ute: float,
+    total_pilots: int,
+    exp_ratio: float,
+    ip_qty: int,
+    mqt_qty: int,
+    flug_qty: int,
+    ipug_qty: int,
+    utc_wise: bool,
+) -> tuple[dict, dict[int, tuple[bool, str]], list | None]:
+    row = {
+        "paa": paa,
+        "ute": ute,
+        "total_pilots": total_pilots,
+        "exp_ratio": exp_ratio,
+        "ip_qty": ip_qty,
+        "mqt_qty": mqt_qty,
+        "flug_qty": flug_qty,
+        "ipug_qty": ipug_qty,
+    }
+    out, pilots = _simulate_one_row(row, _sim_config(utc_wise))
+    if pilots is None:
+        invalid = (False, "Invalid / N/A")
+        utc_map = {int(utc): invalid for utc in _UTC_SLOT_REQUIREMENTS}
+    else:
+        utc_map = {
+            int(utc): _assess_utc_mission_ready(pilots, utc)
+            for utc in _UTC_SLOT_REQUIREMENTS
+        }
+    return out, utc_map, pilots
+
+
+@st.cache_data(show_spinner=False)
+def _run_physics_metrics(
+    df_inputs: pd.DataFrame,
+    utc_wise: bool = False,
+    utc_filter_value: int | None = None,
+) -> pd.DataFrame:
+    utc_filter = (
+        AssignedUTCRank(utc_filter_value) if utc_filter_value is not None else None
+    )
+    sim_config = _sim_config(utc_wise)
     rows = []
     for _, raw in df_inputs.iterrows():
-        row = raw.to_dict()
-        total = int(row["total_pilots"])
-        exp = float(row["exp_ratio"])
-        ip_q = int(row["ip_qty"])
-        mqt = int(row["mqt_qty"])
-        flug = int(row["flug_qty"])
-        ipug = int(row["ipug_qty"])
-        if not is_valid_config(total, exp, ip_q, mqt, flug, ipug):
-            rows.append({**row, **_empty_metrics_row()})
-            continue
-        cfg = SquadronConfig(
-            paa=int(row["paa"]),
-            ute=float(row["ute"]),
-            experience_ratio=exp,
-            ip_qty=ip_q,
-            mqt_students=mqt,
-            flug_students=flug,
-            ipug_students=ipug,
-            total_pilots=total,
-            id=99,
-        )
-        try:
-            pilots = create_pilots(cfg)
-            with contextlib.redirect_stdout(io.StringIO()):
-                final_pilots = run_phase_simulation(
-                    cfg, pilots, sim_config=SIM_CONFIG, auto_graduate=False,
-                )
-            rap, blue_rap, red = rap_assess(final_pilots)
-            upgrade = phase_upgrade_metrics(final_pilots)
-        except ValueError:
-            rows.append({**row, **_empty_metrics_row()})
-            continue
-
-        out = {**row}
-        out["wg_monthly"] = rap["WG"][1]
-        out["fl_monthly"] = rap["FL"][1]
-        out["ip_monthly"] = rap["IP"][1]
-        out["wg_blue_monthly"] = blue_rap["WG"][1]
-        out["fl_blue_monthly"] = blue_rap["FL"][1]
-        out["ip_blue_monthly"] = blue_rap["IP"][1]
-        out["wg_red_monthly"] = out["wg_monthly"] - out["wg_blue_monthly"]
-        out["fl_red_monthly"] = out["fl_monthly"] - out["fl_blue_monthly"]
-        out["ip_red_monthly"] = out["ip_monthly"] - out["ip_blue_monthly"]
-        out["wg_red_pct"] = red["WG"][0]
-        out["fl_red_pct"] = red["FL"][0]
-        out["ip_red_pct"] = red["IP"][0]
-        out["rap_state_code"] = rap_state_code(rap)
-        out["blue_rap_state_code"] = rap_state_code(blue_rap)
-        out["self_terminating_phase"] = bool(cfg.self_terminating_phase)
-        out["deferral_due_to_ip"] = bool(cfg.deferral_due_to_ip)
-        _attach_syllabus_from_upgrade_metrics(out, upgrade)
+        out, _ = _simulate_one_row(raw.to_dict(), sim_config, utc_filter)
         rows.append(out)
     return pd.DataFrame(rows)
 
@@ -229,9 +444,20 @@ def predict_metrics_ml(df_inputs, brain):
     return df
 
 
-def compute_metrics(df_inputs, mode: str, brain=None) -> pd.DataFrame:
+def compute_metrics(
+    df_inputs,
+    mode: str,
+    brain=None,
+    *,
+    utc_wise: bool = False,
+    utc_filter: AssignedUTCRank | None = None,
+) -> pd.DataFrame:
     if mode == "Physics":
-        return _run_physics_metrics(df_inputs)
+        return _run_physics_metrics(
+            df_inputs,
+            utc_wise=utc_wise,
+            utc_filter_value=_utc_filter_cache_key(utc_filter),
+        )
     if brain is None:
         raise ValueError("ML mode requires a loaded brain model")
     return predict_metrics_ml(df_inputs, brain)
@@ -298,6 +524,18 @@ with st.sidebar:
     inputs['flug_qty'] = st.number_input("FLUG Students", 0, 15, 4)
     inputs['ipug_qty'] = st.number_input("IPUG Students", 0, 15, 2)
 
+    st.divider()
+    utc_wise_mode = st.radio(
+        "UTC-wise allocation",
+        options=["Off", "On"],
+        index=0,
+        help=(
+            "When on, roster slots are ranked into UTCs and sortie allocation "
+            "prioritizes UTC 1 → 2 → 3 → unassigned."
+        ),
+    )
+    utc_wise = utc_wise_mode == "On"
+
 # Ranges for 1D Sweeps
 sweep_ranges = {
     'ute': np.arange(6.0, 24.1, 0.5),
@@ -317,14 +555,24 @@ input_axis_bounds = {
 # ==============================================================================
 # 4. DATA GENERATION HELPERS
 # ==============================================================================
-def generate_1d_sweep(x_var):
+def generate_1d_sweep(
+    x_var,
+    *,
+    utc_filter: AssignedUTCRank | None = None,
+):
     """Creates a synthetic dataframe varying only the x_var."""
     x_vals = sweep_ranges.get(x_var, np.arange(0, 10))
     df_sweep = pd.DataFrame([inputs] * len(x_vals))
     df_sweep[x_var] = x_vals
     if use_physics:
         with st.spinner(f"Running {x_var} sweep…"):
-            return compute_metrics(df_sweep, allocation_mode, brain)
+            return compute_metrics(
+                df_sweep,
+                allocation_mode,
+                brain,
+                utc_wise=utc_wise,
+                utc_filter=utc_filter,
+            )
     return compute_metrics(df_sweep, allocation_mode, brain)
 
 # ==============================================================================
@@ -332,14 +580,21 @@ def generate_1d_sweep(x_var):
 # ==============================================================================
 st.title("✈️ Pilot Supply Chain Analytics")
 engine_label = "physics allocator" if use_physics else "ML brain"
+utc_caption = " · UTC-wise allocation on" if utc_wise else ""
 st.caption(
     f"Interactive Dashboard for RAP Equity and Sortie Composition — "
-    f"120 Day Training Phase Snapshot ({engine_label})"
+    f"120 Day Training Phase Snapshot ({engine_label}{utc_caption})"
 )
 if use_physics:
+    utc_hint = (
+        " Enable **UTC-wise allocation** in the sidebar to filter equity, composition, "
+        "and heatmap charts by UTC ."
+        if not utc_wise
+        else " UTC filters on charts show RAP rates for that UTC only."
+    )
     st.info(
         "Charts refresh from **run_phase_simulation** in real time. "
-        "Large sweeps are cached after the first run.",
+        f"Large sweeps are cached after the first run.{utc_hint}",
         icon="⚙️",
     )
 
@@ -348,6 +603,7 @@ col_main, col_summary = st.columns([3, 1])
 with col_main:
     # --- CHART 1: EQUITY (1D Sweep) ---
     st.subheader("📊 Sortie Equity (Total Monthly)")
+    equity_utc = _utc_chart_filter("equity_utc", utc_wise)
     x_options = list(sweep_ranges.keys())
     x_var_equity = st.selectbox("X-Axis Variable", x_options, index=0, key="equity_x")
 
@@ -381,12 +637,14 @@ with col_main:
             key=f"equity_x_range_{x_var_equity}",
         )
 
-    df_equity = generate_1d_sweep(x_var_equity)
+    df_equity = generate_1d_sweep(x_var_equity, utc_filter=equity_utc)
     df_equity = df_equity[
         (df_equity[x_var_equity] >= x_display_min) &
         (df_equity[x_var_equity] <= x_display_max)
     ]
     df_equity = df_equity[~_self_term_mask(df_equity)]
+
+    equity_title = _utc_label(equity_utc)
 
     fig_equity = go.Figure()
     colors_total = {'wg_monthly': '#3b82f6', 'fl_monthly': '#8b5cf6', 'ip_monthly': '#10b981'}
@@ -401,7 +659,14 @@ with col_main:
         
     fig_equity.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
     fig_equity.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
-    fig_equity.update_layout(xaxis_title=x_var_equity.upper(), yaxis_title='Monthly Sorties', hovermode="x unified", margin=dict(l=20, r=20, t=30, b=20), height=350)
+    fig_equity.update_layout(
+        title=equity_title,
+        xaxis_title=x_var_equity.upper(),
+        yaxis_title='Monthly Sorties',
+        hovermode="x unified",
+        margin=dict(l=20, r=20, t=30, b=20),
+        height=350,
+    )
     
     fig_equity.update_xaxes(range=[x_display_min, x_display_max], autorange=False)
     
@@ -410,6 +675,7 @@ with col_main:
     # --- CHART 2: COMPOSITION (1D Sweep) ---
     st.write("---")
     st.subheader("🧱 Sortie Composition")
+    comp_utc = _utc_chart_filter("comp_utc", utc_wise)
     col_comp_1, col_comp_2 = st.columns([2, 1])
     with col_comp_1:
         x_var_comp = st.selectbox("X-Axis Variable", x_options, index=3, key="comp_x") # Default exp_ratio
@@ -447,12 +713,14 @@ with col_main:
             key=f"comp_x_range_{x_var_comp}",
         )
 
-    df_comp = generate_1d_sweep(x_var_comp)
+    df_comp = generate_1d_sweep(x_var_comp, utc_filter=comp_utc)
     df_comp = df_comp[
         (df_comp[x_var_comp] >= x_comp_min) &
         (df_comp[x_var_comp] <= x_comp_max)
     ]
     df_comp = df_comp[~_self_term_mask(df_comp)]
+
+    comp_title = _utc_label(comp_utc)
     
     fig_comp = go.Figure()
     colors = {'wg': ('#3b82f6', '#93c5fd'), 'fl': ('#8b5cf6', '#c4b5fd'), 'ip': ('#10b981', '#6ee7b7')}
@@ -465,13 +733,22 @@ with col_main:
             
     fig_comp.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
     fig_comp.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
-    fig_comp.update_layout(xaxis_title=x_var_comp.upper(), yaxis_title='Monthly Sorties', barmode='group', height=450, margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    fig_comp.update_layout(
+        title=comp_title,
+        xaxis_title=x_var_comp.upper(),
+        yaxis_title='Monthly Sorties',
+        barmode='group',
+        height=450,
+        margin=dict(l=20, r=20, t=20, b=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
     fig_comp.update_xaxes(range=[x_comp_min, x_comp_max], autorange=False)
     st.plotly_chart(fig_comp, width='stretch')
 
     # --- CHART 3: HEATMAP (2D Sweep) ---
     st.write("---")
     st.subheader("🗺️ RAP State Heatmap")
+    heat_utc = _utc_chart_filter("heat_utc", utc_wise)
     is_blue = st.toggle("Show Only Blue RAP Counters", value=False)
 
     # Generate 2D Grid
@@ -488,7 +765,13 @@ with col_main:
     # Predict Grid
     if use_physics:
         with st.spinner("Running heatmap sweep…"):
-            df_heat_preds = compute_metrics(df_heat_base, allocation_mode, brain)
+            df_heat_preds = compute_metrics(
+                df_heat_base,
+                allocation_mode,
+                brain,
+                utc_wise=utc_wise,
+                utc_filter=heat_utc,
+            )
     else:
         df_heat_preds = compute_metrics(df_heat_base, allocation_mode, brain)
     
@@ -539,7 +822,16 @@ with col_main:
             showlegend=True, name=name,
         ))
 
-    fig_heat.update_layout(xaxis_title="Experience Ratio", yaxis_title="UTE", height=500)
+    heat_label = _utc_label(heat_utc)
+    heat_title = "Experience Ratio vs UTE"
+    if heat_label:
+        heat_title = f"{heat_title} — {heat_label}"
+    fig_heat.update_layout(
+        title=heat_title,
+        xaxis_title="Experience Ratio",
+        yaxis_title="UTE",
+        height=500,
+    )
     st.plotly_chart(fig_heat, width='stretch')
 
     # --- CHART 4: INCOMPLETE SYLLABI ---
@@ -655,11 +947,53 @@ with col_main:
 # ==============================================================================
 with col_summary:
     st.subheader("Status Overview")
-    
-    df_single = pd.DataFrame([inputs])
-    row = compute_metrics(df_single, allocation_mode, brain).iloc[0]
 
-    self_term = _self_term_label(row)
+    utc_status_map = None
+    pilots_for_summary = None
+    base_row_dict = None
+
+    if use_physics and utc_wise:
+        base_row_dict, utc_status_map, pilots_for_summary = _single_point_summary_physics(
+            int(inputs["paa"]),
+            float(inputs["ute"]),
+            int(inputs["total_pilots"]),
+            float(inputs["exp_ratio"]),
+            int(inputs["ip_qty"]),
+            int(inputs["mqt_qty"]),
+            int(inputs["flug_qty"]),
+            int(inputs["ipug_qty"]),
+            utc_wise,
+        )
+    else:
+        df_single = pd.DataFrame([inputs])
+        base_row_dict = compute_metrics(
+            df_single, allocation_mode, brain, utc_wise=utc_wise,
+        ).iloc[0].to_dict()
+
+    if utc_wise:
+        summary_scope = st.selectbox(
+            "Status scope",
+            _SUMMARY_STATUS_SCOPE_OPTIONS,
+            key="summary_status_scope",
+        )
+    else:
+        summary_scope = "Overall"
+
+    if (
+        utc_wise
+        and summary_scope != "Overall"
+        and pilots_for_summary is not None
+    ):
+        utc_filter = _UTC_RANK_BY_LABEL[summary_scope]
+        row_dict = _rap_metrics_row_from_pilots(
+            pilots_for_summary, utc_filter, base=base_row_dict,
+        )
+    else:
+        row_dict = base_row_dict
+
+    row = pd.Series(row_dict)
+
+    self_term = _self_term_label(base_row_dict)
     if self_term:
         label = self_term
         status_heading = "PIPELINE STATUS"
@@ -671,11 +1005,13 @@ with col_summary:
             current_code = -1
         label = state_labels_dict.get(current_code, "Invalid / N/A")
         status_heading = "SIMULATED STATUS" if use_physics else "PREDICTED STATUS"
+        if utc_wise and summary_scope != "Overall":
+            status_heading = f"{status_heading} — {summary_scope.upper()}"
         card_bg = "#0f172a"
         title_color = "#f8fafc"
 
     def _fmt(val):
-        return f"{val:.1f}" if pd.notna(val) else "—"
+        return f"{val:.1f}" if pd.notna(val) else "N/A"
 
     wg_t, fl_t, ip_t = _fmt(row["wg_monthly"]), _fmt(row["fl_monthly"]), _fmt(row["ip_monthly"])
     wg_b, fl_b, ip_b = _fmt(row["wg_blue_monthly"]), _fmt(row["fl_blue_monthly"]), _fmt(row["ip_blue_monthly"])
@@ -710,6 +1046,23 @@ with col_summary:
 <div style="flex:1; color:#fb7185;">{fl_r}</div>
 <div style="flex:1; color:#fb7185;">{ip_r}</div>
 </div>
+</div>
+""", unsafe_allow_html=True)
+
+    if utc_wise and utc_status_map is not None:
+        for utc_status_label in _UTC_STATUS_LABELS:
+            utc_status_rank = _UTC_RANK_BY_LABEL[utc_status_label]
+            utc_ready, utc_label = utc_status_map[int(utc_status_rank)]
+            if utc_ready:
+                utc_card_bg = "#166534"
+                utc_title_color = "#bbf7d0"
+            else:
+                utc_card_bg = "#991b1b"
+                utc_title_color = "#fecaca"
+            st.markdown(f"""
+<div style="background-color:{utc_card_bg}; padding:14px 16px; border-radius:12px; color:white; margin-bottom:10px;">
+<p style="font-size:0.65rem; color:#94a3b8; margin-bottom:2px; letter-spacing: 0.05em;">{utc_status_label.upper()} STATUS </p>
+<h2 style="margin:0; font-size:0.95rem; color: {utc_title_color};">{_format_utc_status_label(utc_label)}</h2>
 </div>
 """, unsafe_allow_html=True)
 
