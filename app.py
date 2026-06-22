@@ -65,7 +65,9 @@ def _filter_pilots_by_utc(
 def _utc_chart_filter(key: str, utc_wise: bool) -> AssignedUTCRank | None:
     if not utc_wise:
         return None
-    label = st.selectbox("UTC", _UTC_CHART_LABELS, key=key)
+    label = st.selectbox("Scope", _SUMMARY_STATUS_SCOPE_OPTIONS, key=key)
+    if label == "Overall":
+        return None
     return _UTC_RANK_BY_LABEL[label]
 
 
@@ -590,9 +592,9 @@ st.caption(
 if use_physics:
     utc_hint = (
         " Enable **UTC-wise allocation** in the sidebar to filter equity, composition, "
-        "and heatmap charts by UTC ."
+        "and heatmap charts by scope (Overall or per-UTC)."
         if not utc_wise
-        else " UTC filters on charts show RAP rates for that UTC only."
+        else " Scope filters on charts: Overall (whole unit) or a single UTC."
     )
     st.info(
         "Charts refresh from **run_phase_simulation** in real time. "
