@@ -665,6 +665,7 @@ class SquadronConfig:
             'wg_blue_shortfall': monthly_sortie_rap_target(Qual.WG) - (rates.wg_blue_phase / months),
             'fl_blue_shortfall': monthly_sortie_rap_target(Qual.FL) - (rates.fl_blue_phase / months),
             'ip_blue_shortfall': monthly_sortie_rap_target(Qual.IP) - (rates.ip_blue_phase / months),
+            **self._utc_rap_shortfall_history_columns(),
         }
     
         return current_stats
@@ -733,8 +734,14 @@ class SquadronConfig:
             'wg_blue_shortfall': monthly_sortie_rap_target(Qual.WG) - wg_rate_blue,
             'fl_blue_shortfall': monthly_sortie_rap_target(Qual.FL) - fl_rate_blue,
             'ip_blue_shortfall': monthly_sortie_rap_target(Qual.IP) - ip_rate_blue,
+            **self._utc_rap_shortfall_history_columns(),
         }
     
+    def _utc_rap_shortfall_history_columns(self) -> dict[str, float]:
+        from src.rap_state import utc_sortie_rap_shortfall_columns
+
+        return utc_sortie_rap_shortfall_columns(self.pilots)
+
     def send_to_staff(self, priority_mode: PriorityMode = PriorityMode.RANDOM, min_ips: int = 3):
         current_line_pilots = []
         limit = self.max_manning

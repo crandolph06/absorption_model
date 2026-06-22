@@ -1,8 +1,17 @@
 from src.models import (
+    AssignedUTCRank,
+    Assignment,
     Qual,
     Upgrade,
     monthly_sortie_rap_target,
     monthly_sim_rap_target,
+)
+
+UTC_RAP_SHORTFALL_COLUMNS = (
+    "utc_1_wg_rap_shortfall",
+    "utc_1_fl_rap_shortfall",
+    "utc_2_wg_rap_shortfall",
+    "utc_2_fl_rap_shortfall",
 )
 
 _COHORT_QUAL = {"WG": Qual.WG, "FL": Qual.FL, "IP": Qual.IP}
@@ -16,6 +25,46 @@ def _rap_cohort_groups(pilots):
         "FL": [p for p in pilots if p.qual == Qual.FL],
         "IP": [p for p in pilots if p.qual == Qual.IP]
     }
+
+
+def _utc_line_cohort_mean_sortie_rap_monthly(pilots, utc: AssignedUTCRank, qual: Qual) -> float | None:
+    """Mean monthly sortie RAP rate for ``qual`` line pilots assigned to ``utc``."""
+    if qual == Qual.WG:
+        cohort = [
+            p
+            for p in pilots
+            if p.active
+            and p.assigned_utc == utc
+            and p.current_assignment == Assignment.LINE
+            and p.qual == Qual.WG
+            and p.upgrade != Upgrade.MQT
+        ]
+    else:
+        cohort = [
+            p
+            for p in pilots
+            if p.active
+            and p.assigned_utc == utc
+            and p.current_assignment == Assignment.LINE
+            and p.qual == qual
+        ]
+    if not cohort:
+        return None
+    return sum(p.sortie_rap_monthly for p in cohort) / len(cohort)
+
+
+def utc_sortie_rap_shortfall_columns(pilots) -> dict[str, float]:
+    """Per-UTC WG/FL sortie RAP shortfalls for squadron history rows."""
+    columns: dict[str, float] = {}
+    for utc in (AssignedUTCRank.UTC_1, AssignedUTCRank.UTC_2):
+        prefix = f"utc_{int(utc)}"
+        for qual_key, qual in (("wg", Qual.WG), ("fl", Qual.FL)):
+            avg = _utc_line_cohort_mean_sortie_rap_monthly(pilots, utc, qual)
+            column = f"{prefix}_{qual_key}_rap_shortfall"
+            columns[column] = (
+                0.0 if avg is None else monthly_sortie_rap_target(qual) - avg
+            )
+    return columns
 
 
 def rap_assess(pilots):
