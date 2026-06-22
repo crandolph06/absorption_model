@@ -66,7 +66,12 @@ def _make_roster(
 
 
 def _run_phase(cfg, pilots, *, phase_days: int = 30, pre_seed: bool = True):
-    sim = SimulationConfig(phase_length_days=phase_days, allocation_noise=0.0)
+    # Legacy split (syllabus first, CT uses leftover): tests predate default fraction=1.0.
+    sim = SimulationConfig(
+        phase_length_days=phase_days,
+        allocation_noise=0.0,
+        upgrade_sortie_fraction=None,
+    )
     with contextlib.redirect_stdout(io.StringIO()):
         return run_phase_simulation(
             cfg,
@@ -170,7 +175,11 @@ class TestGraduation(unittest.TestCase):
 class TestCapacityAccounting(unittest.TestCase):
     def test_sorties_never_exceed_phase_capacity(self):
         cfg, pilots = _make_roster(mqt=2, ute=3.0, paa=9)
-        sim = SimulationConfig(phase_length_days=30, allocation_noise=0.0)
+        sim = SimulationConfig(
+            phase_length_days=30,
+            allocation_noise=0.0,
+            upgrade_sortie_fraction=None,
+        )
         gross = int(total_phase_capacity(cfg) * sim.phase_length_months)
         _run_phase(cfg, pilots)
         self.assertLessEqual(_total_sorties(pilots), gross)
@@ -358,7 +367,11 @@ class TestContinuationTraining(unittest.TestCase):
 
     def test_ct_uses_leftover_capacity_after_syllabus(self):
         cfg, pilots = _make_roster(mqt=2, ute=3.0, paa=9)
-        sim = SimulationConfig(phase_length_days=30, allocation_noise=0.0)
+        sim = SimulationConfig(
+            phase_length_days=30,
+            allocation_noise=0.0,
+            upgrade_sortie_fraction=None,
+        )
         gross = int(total_phase_capacity(cfg) * sim.phase_length_months)
         _run_phase(cfg, pilots)
 
