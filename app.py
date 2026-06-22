@@ -80,6 +80,12 @@ def _utc_label(rank: AssignedUTCRank | None) -> str | None:
         if utc_rank == rank:
             return label
     return None
+
+
+def _utc_chart_layout_title(utc_filter: AssignedUTCRank | None) -> dict:
+    """Plotly renders ``title=None`` as the literal string ``undefined``."""
+    label = _utc_label(utc_filter)
+    return {"title": label} if label else {}
 _SYLLABI_NEGLIGIBLE = 0.10
 _REMAINING_TOTAL = [
     "remaining_mqt_syllabi_mean",
@@ -644,8 +650,6 @@ with col_main:
     ]
     df_equity = df_equity[~_self_term_mask(df_equity)]
 
-    equity_title = _utc_label(equity_utc)
-
     fig_equity = go.Figure()
     colors_total = {'wg_monthly': '#3b82f6', 'fl_monthly': '#8b5cf6', 'ip_monthly': '#10b981'}
     names = {'wg_monthly': 'Wingman', 'fl_monthly': 'Flight Lead', 'ip_monthly': 'Instructor'}
@@ -660,7 +664,7 @@ with col_main:
     fig_equity.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
     fig_equity.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
     fig_equity.update_layout(
-        title=equity_title,
+        **_utc_chart_layout_title(equity_utc),
         xaxis_title=x_var_equity.upper(),
         yaxis_title='Monthly Sorties',
         hovermode="x unified",
@@ -720,8 +724,6 @@ with col_main:
     ]
     df_comp = df_comp[~_self_term_mask(df_comp)]
 
-    comp_title = _utc_label(comp_utc)
-    
     fig_comp = go.Figure()
     colors = {'wg': ('#3b82f6', '#93c5fd'), 'fl': ('#8b5cf6', '#c4b5fd'), 'ip': ('#10b981', '#6ee7b7')}
     
@@ -734,7 +736,7 @@ with col_main:
     fig_comp.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
     fig_comp.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
     fig_comp.update_layout(
-        title=comp_title,
+        **_utc_chart_layout_title(comp_utc),
         xaxis_title=x_var_comp.upper(),
         yaxis_title='Monthly Sorties',
         barmode='group',
