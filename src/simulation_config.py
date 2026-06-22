@@ -15,7 +15,8 @@ class SimulationConfig:
     allocation_noise: float = 0.0
     # Max single-ship CT sorties allocated per pilot per notional month (extra iron stays unallocated).
     single_ship_monthly_cap: float = 1.0
-    # When set (0–1), sortie iron is split: syllabus vs CT each get a reserved share.
+    # When set (0–1), max share of sortie iron for syllabus/upgrades; any unused
+    # allowance rolls to CT (not reserved and left idle).
     upgrade_sortie_fraction: Optional[float] = None
     # When set, pilots are assigned to UTCs and RAP is prioritized by UTC; when false, allocator attempts to prioritize equity
     utc_wise_allocation: bool = False
@@ -26,12 +27,15 @@ class SimulationConfig:
 
     def phase_sortie_budgets(self, total_iron: int) -> tuple[int, Optional[int]]:
         """
-        Return (upgrade_sortie_cap, ct_sortie_cap).
+        Return (upgrade_sortie_max, ct_sortie_cap).
 
-        ``ct_sortie_cap`` is None when fraction is unset (legacy: CT uses leftover iron).
+        When ``upgrade_sortie_fraction`` is set, syllabus sorties are capped at
+        ``fraction * total_iron``. CT always consumes leftover iron after
+        upgrades (``ct_sortie_cap`` is always None). Unused upgrade allowance
+        is not reserved — it rolls to CT automatically.
         """
         if self.upgrade_sortie_fraction is None:
             return total_iron, None
         frac = max(0.0, min(1.0, float(self.upgrade_sortie_fraction)))
-        upgrade_cap = int(total_iron * frac)
-        return upgrade_cap, total_iron - upgrade_cap
+        upgrade_max = int(total_iron * frac)
+        return upgrade_max, None
