@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, IntEnum
 import math
 import random
 from typing import List, Optional, Tuple
@@ -21,7 +21,12 @@ SIM_BAYS_PER_SESSION: int = 4
 MAX_MONTHLY_EVENTS: float = 20.0
 # Single-ship CT sorties: at most this many count toward sortie RAP per month.
 SINGLE_SHIP_RAP_MONTHLY_CAP: float = 1.0
-
+NUM_FLS_UTC_1 = 10
+NUM_WG_UTC_1 = 8
+NUM_FLS_UTC_2 = 5
+NUM_WG_UTC_2 = 4
+NUM_FLS_UTC_3 = 5
+NUM_WG_UTC_3 = 4
 
 # ----------------------
 # Enums & Simple Classes
@@ -53,7 +58,6 @@ def monthly_sim_rap_target(qual: Qual) -> float:
         return float(SIM_RAP_MONTHLY)
     return 0.0
 
-
 class Upgrade(Enum):
     NONE = 'None'
     MQT = 'MQT'
@@ -74,6 +78,26 @@ class PriorityMode(Enum):
     IP_FIRST = 'ip_first'
     RANDOM = 'random'
 
+class AssignedUTCRank(IntEnum):
+    UTC_1 = 1
+    UTC_2 = 2
+    UTC_3 = 3
+    UNASSIGNED = 4
+
+
+UTC_ALLOCATION_ORDER: tuple[AssignedUTCRank, ...] = (
+    AssignedUTCRank.UTC_1,
+    AssignedUTCRank.UTC_2,
+    AssignedUTCRank.UTC_3,
+    AssignedUTCRank.UNASSIGNED,
+)
+
+
+def pilot_utc_merit(p: "Pilot") -> float:
+    """Standing merit for UTC roster slots; prior-phase RAP rate or lifetime sorties."""
+    if p.sortie_rap_monthly > 0:
+        return p.sortie_rap_monthly
+    return float(p.sorties_flown)
 
 @dataclass 
 class AgingRate:
@@ -128,6 +152,7 @@ class AgingRate:
 class Pilot:
     qual: Qual = Qual.WG 
     upgrade: Upgrade = Upgrade.NONE
+    assigned_utc: AssignedUTCRank = AssignedUTCRank.UNASSIGNED
     incomplete_syllabus_items: List = field(default_factory=list)
     sortie_phase: float = 0 
     flight_hours_phase: float = 0.0
@@ -207,7 +232,7 @@ class Pilot:
             self.sim_hours_monthly = self.sim_hours_phase / months
             self.sortie_blue_monthly = self.sortie_blue_phase / months
             self.sortie_red_monthly = self.sortie_red_phase / months
-
+ 
     def reset_phase_counters(self):
         self.sortie_phase = 0
         self.flight_hours_phase = 0.0
@@ -301,13 +326,14 @@ class Pilot:
             if random.random() > retention_pct:
                 self.active = False  # The pilot separates
                 self.separation_date = (current_year, current_phase)
-
+                self.assigned_utc = AssignedUTCRank.UNASSIGNED
             else: 
                 self.adsc_remaining += 24.1 # Assumes additional 2-year ADSC; .1 is a flag for logic elsewhere in the code
 
     def move_to_staff(self):
         self.current_assignment = Assignment.STAFF
         self.squadron_id = 0
+        self.assigned_utc = AssignedUTCRank.UNASSIGNED
     
 # ----------------------
 # Squadron Config 
@@ -568,6 +594,36 @@ class SquadronConfig:
             sim_rate = self._phase_sim_rate_for_pilot(p, rates)
             p.age_sim_phase_with_rates(sim_rate, self.avg_sortie_dur)
 
+    def update_rap_scenarios(self):
+        for p in self.pilots:
+            if p.active and p.current_assignment == Assignment.LINE:
+                p.assigned_utc = AssignedUTCRank.UNASSIGNED
+
+        pilots = sorted(self.pilots, key=pilot_utc_merit, reverse=True)
+        fls = [
+            p for p in pilots
+            if p.active and p.current_assignment == Assignment.LINE
+            and p.qual in (Qual.FL, Qual.IP)
+        ]
+        wg = [
+            p for p in pilots
+            if p.active and p.current_assignment == Assignment.LINE
+            and p.qual == Qual.WG and p.upgrade != Upgrade.MQT
+        ]
+
+        for p in fls[:NUM_FLS_UTC_1]:
+            p.assigned_utc = AssignedUTCRank.UTC_1
+        for p in wg[:NUM_WG_UTC_1]:
+            p.assigned_utc = AssignedUTCRank.UTC_1
+        for p in fls[NUM_FLS_UTC_1:(NUM_FLS_UTC_1 + NUM_FLS_UTC_2)]:
+            p.assigned_utc = AssignedUTCRank.UTC_2
+        for p in wg[NUM_WG_UTC_1:(NUM_WG_UTC_1 + NUM_WG_UTC_2)]:
+            p.assigned_utc = AssignedUTCRank.UTC_2
+        for p in fls[(NUM_FLS_UTC_1 + NUM_FLS_UTC_2):(NUM_FLS_UTC_1 + NUM_FLS_UTC_2 + NUM_FLS_UTC_3)]:
+            p.assigned_utc = AssignedUTCRank.UTC_3
+        for p in wg[(NUM_WG_UTC_1 + NUM_WG_UTC_2):(NUM_WG_UTC_1 + NUM_WG_UTC_2 + NUM_WG_UTC_3)]:
+            p.assigned_utc = AssignedUTCRank.UTC_3
+
     def store_stats(self, year: int, phase_num: int, rates: AgingRate, phase_length_days: float):
         months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
         if months <= 0:
@@ -723,3 +779,6 @@ class SquadronConfig:
                 funnel_queue[i].move_to_staff()
 
             self.update_stats()
+
+    def utc_allocation_rank(p: Pilot) -> int:
+        return p.assigned_utc if p.assigned_utc is not None else 4
