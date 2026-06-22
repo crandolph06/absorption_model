@@ -14,10 +14,8 @@ from src.engine import create_pilots, phase_upgrade_metrics, run_phase_simulatio
 from src.models import (
     NUM_FLS_UTC_1,
     NUM_FLS_UTC_2,
-    NUM_FLS_UTC_3,
     NUM_WG_UTC_1,
     NUM_WG_UTC_2,
-    NUM_WG_UTC_3,
     AssignedUTCRank,
     Assignment,
     Qual,
@@ -28,19 +26,17 @@ from src.models import (
 from src.rap_state import rap_assess, rap_state_code
 from src.simulation_config import DEFAULT_PHASE_LENGTH_DAYS, SimulationConfig
 
-_UTC_CHART_LABELS = ("UTC 1", "UTC 2", "UTC 3", "Unassigned")
+_UTC_CHART_LABELS = ("UTC 1", "UTC 2", "Unassigned")
 _SUMMARY_STATUS_SCOPE_OPTIONS = ("Overall",) + _UTC_CHART_LABELS
-_UTC_STATUS_LABELS = ("UTC 1", "UTC 2", "UTC 3")
+_UTC_STATUS_LABELS = ("UTC 1", "UTC 2")
 _UTC_RANK_BY_LABEL = {
     "UTC 1": AssignedUTCRank.UTC_1,
     "UTC 2": AssignedUTCRank.UTC_2,
-    "UTC 3": AssignedUTCRank.UTC_3,
     "Unassigned": AssignedUTCRank.UNASSIGNED,
 }
 _UTC_SLOT_REQUIREMENTS: dict[AssignedUTCRank, tuple[int, int]] = {
     AssignedUTCRank.UTC_1: (NUM_FLS_UTC_1, NUM_WG_UTC_1),
     AssignedUTCRank.UTC_2: (NUM_FLS_UTC_2, NUM_WG_UTC_2),
-    AssignedUTCRank.UTC_3: (NUM_FLS_UTC_3, NUM_WG_UTC_3),
 }
 
 

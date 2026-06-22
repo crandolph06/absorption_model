@@ -25,8 +25,6 @@ NUM_FLS_UTC_1 = 10
 NUM_WG_UTC_1 = 8
 NUM_FLS_UTC_2 = 5
 NUM_WG_UTC_2 = 4
-NUM_FLS_UTC_3 = 5
-NUM_WG_UTC_3 = 4
 
 # ----------------------
 # Enums & Simple Classes
@@ -81,14 +79,12 @@ class PriorityMode(Enum):
 class AssignedUTCRank(IntEnum):
     UTC_1 = 1
     UTC_2 = 2
-    UTC_3 = 3
-    UNASSIGNED = 4
+    UNASSIGNED = 3
 
 
 UTC_ALLOCATION_ORDER: tuple[AssignedUTCRank, ...] = (
     AssignedUTCRank.UTC_1,
     AssignedUTCRank.UTC_2,
-    AssignedUTCRank.UTC_3,
     AssignedUTCRank.UNASSIGNED,
 )
 
@@ -619,10 +615,6 @@ class SquadronConfig:
             p.assigned_utc = AssignedUTCRank.UTC_2
         for p in wg[NUM_WG_UTC_1:(NUM_WG_UTC_1 + NUM_WG_UTC_2)]:
             p.assigned_utc = AssignedUTCRank.UTC_2
-        for p in fls[(NUM_FLS_UTC_1 + NUM_FLS_UTC_2):(NUM_FLS_UTC_1 + NUM_FLS_UTC_2 + NUM_FLS_UTC_3)]:
-            p.assigned_utc = AssignedUTCRank.UTC_3
-        for p in wg[(NUM_WG_UTC_1 + NUM_WG_UTC_2):(NUM_WG_UTC_1 + NUM_WG_UTC_2 + NUM_WG_UTC_3)]:
-            p.assigned_utc = AssignedUTCRank.UTC_3
 
     def store_stats(self, year: int, phase_num: int, rates: AgingRate, phase_length_days: float):
         months = float(phase_length_days) / PHASE_DAYS_PER_NOTIONAL_MONTH
@@ -781,4 +773,4 @@ class SquadronConfig:
             self.update_stats()
 
     def utc_allocation_rank(p: Pilot) -> int:
-        return p.assigned_utc if p.assigned_utc is not None else 4
+        return int(p.assigned_utc if p.assigned_utc is not None else AssignedUTCRank.UNASSIGNED)
