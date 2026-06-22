@@ -45,23 +45,23 @@ class UTCWiseAllocationTest(unittest.TestCase):
         cfg.pilots = pilots
         wg_pilots = [p for p in pilots if p.qual == Qual.WG and p.upgrade == Upgrade.NONE]
         self.assertGreaterEqual(len(wg_pilots), 2)
-        utc1, utc3 = wg_pilots[0], wg_pilots[1]
+        utc1, unassigned = wg_pilots[0], wg_pilots[1]
         utc1.assigned_utc = AssignedUTCRank.UTC_1
-        utc3.assigned_utc = AssignedUTCRank.UTC_3
+        unassigned.assigned_utc = AssignedUTCRank.UNASSIGNED
         phase_days = 120.0
-        for pilot in (utc1, utc3):
+        for pilot in (utc1, unassigned):
             pilot.set_rap_requirement()
 
         ok = assign_sortie(
             cfg,
-            [utc1, utc3],
+            [utc1, unassigned],
             phase_days,
             utc_wise_allocation=True,
         )
 
         self.assertTrue(ok)
         self.assertEqual(utc1.sortie_phase, 1)
-        self.assertEqual(utc3.sortie_phase, 0)
+        self.assertEqual(unassigned.sortie_phase, 0)
 
     def test_rap_priority_skips_pilots_who_made_sortie_rap(self):
         cfg, pilots = _make_cfg_and_pilots()
@@ -224,8 +224,8 @@ class UTCWiseAllocationTest(unittest.TestCase):
         self.assertGreater(len(utc1), 0)
         self.assertGreater(sum(p.sortie_phase + p.sim_phase for p in pilots), 0)
 
-    def test_utc_wise_ct_prefers_utc1_under_scarce_iron(self):
-        """With limited CT iron, UTC 1 line pilots should fly more than UTC 3."""
+    def test_utc_wise_ct_prefers_utc1_over_unassigned_under_scarce_iron(self):
+        """With limited CT iron, UTC 1 line pilots should fly more than unassigned."""
         total = 40
         ip = 4
         fl = 16
@@ -257,16 +257,16 @@ class UTCWiseAllocationTest(unittest.TestCase):
             p for p in pilots
             if p.assigned_utc == AssignedUTCRank.UTC_1 and p.upgrade == Upgrade.NONE
         ]
-        utc3 = [
+        unassigned = [
             p for p in pilots
-            if p.assigned_utc == AssignedUTCRank.UTC_3 and p.upgrade == Upgrade.NONE
+            if p.assigned_utc == AssignedUTCRank.UNASSIGNED and p.upgrade == Upgrade.NONE
         ]
         self.assertGreater(len(utc1), 0)
-        self.assertGreater(len(utc3), 0)
+        self.assertGreater(len(unassigned), 0)
 
         avg_utc1 = sum(p.sortie_phase for p in utc1) / len(utc1)
-        avg_utc3 = sum(p.sortie_phase for p in utc3) / len(utc3)
-        self.assertGreater(avg_utc1, avg_utc3)
+        avg_unassigned = sum(p.sortie_phase for p in unassigned) / len(unassigned)
+        self.assertGreater(avg_utc1, avg_unassigned)
 
 
 if __name__ == "__main__":
