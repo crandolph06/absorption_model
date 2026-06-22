@@ -24,7 +24,7 @@ from src.engine import (
     select_upgrade_students,
     total_phase_capacity,
 )
-from src.models import MAX_MONTHLY_EVENTS, Pilot, Qual, SquadronConfig, Upgrade
+from src.models import MAX_MONTHLY_EVENTS, PHASE_DAYS_PER_NOTIONAL_MONTH, Pilot, Qual, SquadronConfig, Upgrade
 from src.simulation_config import SimulationConfig
 from src.syllabi import (
     ContinuationBucket,
@@ -532,6 +532,58 @@ class TestPipelineSelfTermination(unittest.TestCase):
 
         if cfg.pipeline_deferred_due_to_ip:
             self.assertTrue(cfg.deferral_due_to_ip)
+
+
+class TestUpgradeSortieFraction(unittest.TestCase):
+    def test_phase_sortie_budgets_fraction_is_upgrade_max_only(self):
+        sim = SimulationConfig(upgrade_sortie_fraction=0.6)
+        upgrade_max, ct_cap = sim.phase_sortie_budgets(100)
+        self.assertEqual(upgrade_max, 60)
+        self.assertIsNone(ct_cap)
+
+        legacy = SimulationConfig(upgrade_sortie_fraction=None)
+        upgrade_max, ct_cap = legacy.phase_sortie_budgets(100)
+        self.assertEqual(upgrade_max, 100)
+        self.assertIsNone(ct_cap)
+
+    def test_unused_upgrade_allowance_rolls_to_ct(self):
+        """High upgrade fraction with no students: CT should use all iron, not just 1-fraction."""
+        cfg = SquadronConfig(
+            ute=10.0,
+            paa=21,
+            id=1,
+            total_pilots=20,
+            ip_qty=4,
+            experience_ratio=0.5,
+            mqt_students=0,
+            flug_students=0,
+            ipug_students=0,
+        )
+        pilots = create_pilots(cfg)
+        phase_days = 120
+        months = phase_days / PHASE_DAYS_PER_NOTIONAL_MONTH
+        gross = int(total_phase_capacity(cfg) * months)
+
+        sim = SimulationConfig(
+            phase_length_days=phase_days,
+            allocation_noise=0.0,
+            upgrade_sortie_fraction=0.6,
+        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            run_phase_simulation(
+                cfg,
+                pilots,
+                sim_config=sim,
+                pre_seed_upgrades=True,
+                auto_graduate=False,
+            )
+
+        used = int(round(sum(p.sortie_phase for p in pilots)))
+        self.assertEqual(
+            used,
+            gross,
+            msg="Unused upgrade cap should roll to CT, not leave iron idle",
+        )
 
 
 class TestSyllabusBurdenMath(unittest.TestCase):
