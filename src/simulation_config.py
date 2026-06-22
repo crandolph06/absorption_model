@@ -17,6 +17,8 @@ class SimulationConfig:
     single_ship_monthly_cap: float = 1.0
     # When set (0–1), sortie iron is split: syllabus vs CT each get a reserved share.
     upgrade_sortie_fraction: Optional[float] = 1.0
+    # When set, pilots are assigned to UTCs and RAP is prioritized by UTC; when false, allocator attempts to prioritize equity
+    utc_wise_allocation: bool = False
 
     @property
     def phase_length_months(self) -> float:
