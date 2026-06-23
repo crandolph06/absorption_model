@@ -17,6 +17,7 @@ class PolicyDesign:
     max_manning_pct: float
     flug_quota_per_phase: int
     ipug_quota_per_phase: int
+    upgrade_sortie_fraction: float
     raw: dict[str, float]
     applied: dict[str, Any]
 
@@ -61,6 +62,7 @@ class PolicyDesign:
             "max_manning_pct": float(converted["max_manning_pct"]),
             "flug_quota_per_phase": int(converted["flug_quota_per_phase"]),
             "ipug_quota_per_phase": int(converted["ipug_quota_per_phase"]),
+            "upgrade_sortie_fraction": float(converted["upgrade_sortie_fraction"]),
         }
         return cls(
             annual_intake=applied["annual_intake"],
@@ -70,6 +72,7 @@ class PolicyDesign:
             max_manning_pct=applied["max_manning_pct"],
             flug_quota_per_phase=applied["flug_quota_per_phase"],
             ipug_quota_per_phase=applied["ipug_quota_per_phase"],
+            upgrade_sortie_fraction=applied["upgrade_sortie_fraction"],
             raw=raw,
             applied=applied,
         )
