@@ -31,7 +31,6 @@ model:
   simulation:
     phase_length_days: 120
     allocation_noise: 0.0
-    upgrade_sortie_fraction: null
     utc_wise_allocation: false
 
 requirements:
