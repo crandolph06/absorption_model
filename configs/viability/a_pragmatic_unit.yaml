@@ -126,8 +126,8 @@ doe:
       flug_quota_per_phase: 3
       ipug_quota_per_phase: 2
       upgrade_sortie_fraction: 0.5
-      flug_window_start: 200
-      ipug_window_start: 350
+      flug_window_start: 250
+      ipug_window_start: 400
 
 active_learning:
   candidate_method: sobol
