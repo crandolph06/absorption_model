@@ -15,6 +15,7 @@ STANDARD_POLICY_VARIABLES = frozenset(
         "max_manning_pct",
         "flug_quota_per_phase",
         "ipug_quota_per_phase",
+        "upgrade_sortie_fraction",
     }
 )
 
@@ -32,7 +33,11 @@ _MODEL_FIELDS = (
     "n_replications",
 )
 _MODEL_OPTIONAL_FIELDS = ("phase_backend", "brain_path", "expected_brain_outputs", "simulation")
-_SIMULATION_FIELDS = ("phase_length_days", "allocation_noise", "upgrade_sortie_fraction")
+_SIMULATION_FIELDS = (
+    "phase_length_days",
+    "allocation_noise",
+    "utc_wise_allocation",
+)
 _REQUIREMENTS_FIELDS = (
     "target_total_pilots",
     "target_line_pilots",
@@ -40,6 +45,10 @@ _REQUIREMENTS_FIELDS = (
     "allowed_wg_rap_shortfall",
     "allowed_fl_rap_shortfall",
     "allowed_ip_rap_shortfall",
+    "allowed_utc_1_wg_shortfall",
+    "allowed_utc_1_fl_shortfall",
+    "allowed_utc_2_wg_shortfall",
+    "allowed_utc_2_fl_shortfall",
     "target_staff_ips",
     "target_staff_fls",
 )
@@ -49,6 +58,10 @@ _CONSTRAINT_SCALE_FIELDS = (
     "wg_rap",
     "fl_rap",
     "ip_rap",
+    "utc_1_wg",
+    "utc_1_fl",
+    "utc_2_wg",
+    "utc_2_fl",
     "staff_ips",
     "staff_fls",
     "experience_ratio",
@@ -160,6 +173,10 @@ class RequirementsConfig:
     allowed_wg_rap_shortfall: float | None
     allowed_fl_rap_shortfall: float | None
     allowed_ip_rap_shortfall: float | None
+    allowed_utc_1_wg_shortfall: float | None
+    allowed_utc_1_fl_shortfall: float | None
+    allowed_utc_2_wg_shortfall: float | None
+    allowed_utc_2_fl_shortfall: float | None
     target_staff_ips: float | None
     target_staff_fls: float | None
 
@@ -171,6 +188,10 @@ class ConstraintScalesConfig:
     wg_rap: float
     fl_rap: float
     ip_rap: float
+    utc_1_wg: float
+    utc_1_fl: float
+    utc_2_wg: float
+    utc_2_fl: float
     staff_ips: float
     staff_fls: float
     experience_ratio: float
@@ -186,6 +207,14 @@ class ConstraintScalesConfig:
             return self.fl_rap
         if constraint_name == "ip_rap":
             return self.ip_rap
+        if constraint_name == "utc_1_wg":
+            return self.utc_1_wg
+        if constraint_name == "utc_1_fl":
+            return self.utc_1_fl
+        if constraint_name == "utc_2_wg":
+            return self.utc_2_wg
+        if constraint_name == "utc_2_fl":
+            return self.utc_2_fl
         if constraint_name == "staff_ips":
             return self.staff_ips
         if constraint_name == "staff_fls":
@@ -574,11 +603,6 @@ class ViabilityConfig:
             raise ValueError("model.simulation.phase_length_days must be positive")
         if self.model.simulation.allocation_noise < 0.0:
             raise ValueError("model.simulation.allocation_noise must be non-negative")
-        upgrade_fraction = self.model.simulation.upgrade_sortie_fraction
-        if upgrade_fraction is not None and not 0.0 <= float(upgrade_fraction) <= 1.0:
-            raise ValueError(
-                "model.simulation.upgrade_sortie_fraction must be null or between 0 and 1"
-            )
 
         horizon_end = self.model.start_year + self.model.years_to_run - 1
         if not (
@@ -626,6 +650,14 @@ class ViabilityConfig:
             enabled.append(("fl_rap", "fl_rap"))
         if req.allowed_ip_rap_shortfall is not None:
             enabled.append(("ip_rap", "ip_rap"))
+        if req.allowed_utc_1_wg_shortfall is not None:
+            enabled.append(("utc_1_wg", "utc_1_wg"))
+        if req.allowed_utc_1_fl_shortfall is not None:
+            enabled.append(("utc_1_fl", "utc_1_fl"))
+        if req.allowed_utc_2_wg_shortfall is not None:
+            enabled.append(("utc_2_wg", "utc_2_wg"))
+        if req.allowed_utc_2_fl_shortfall is not None:
+            enabled.append(("utc_2_fl", "utc_2_fl"))
         if req.target_staff_ips is not None:
             enabled.append(("staff_ips", "staff_ips"))
         if req.target_staff_fls is not None:
