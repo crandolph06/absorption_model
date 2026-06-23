@@ -60,6 +60,7 @@ class ViabilityMetricsTest(unittest.TestCase):
             allowed_utc_2_fl_shortfall=None,
             target_staff_ips=None,
             target_staff_fls=None,
+            allowed_unallocated_iron=None,
         )
 
         constraints = compute_constraints(metrics, requirements)
@@ -112,6 +113,7 @@ class ViabilityMetricsTest(unittest.TestCase):
             allowed_utc_2_fl_shortfall=None,
             target_staff_ips=10.0,
             target_staff_fls=3.0,
+            allowed_unallocated_iron=None,
         )
 
         constraints = compute_constraints(metrics, requirements)
@@ -148,6 +150,7 @@ class ViabilityMetricsTest(unittest.TestCase):
             allowed_utc_2_fl_shortfall=None,
             target_staff_ips=None,
             target_staff_fls=None,
+            allowed_unallocated_iron=None,
         )
 
         constraints = compute_constraints(raw_metrics, requirements)
@@ -164,6 +167,7 @@ class ViabilityMetricsTest(unittest.TestCase):
             staff_ips=10.0,
             staff_fls=10.0,
             experience_ratio=0.05,
+            unallocated_iron=50.0,
         )
         phi, active_constraint, active_value = aggregate_violation(constraints, scales)
 
@@ -220,6 +224,7 @@ class ViabilityMetricsTest(unittest.TestCase):
             allowed_utc_2_fl_shortfall=None,
             target_staff_ips=None,
             target_staff_fls=None,
+            allowed_unallocated_iron=None,
         )
 
         constraints = compute_constraints(metrics, requirements)
@@ -228,6 +233,38 @@ class ViabilityMetricsTest(unittest.TestCase):
         self.assertEqual(metrics["max_utc_1_fl_rap_shortfall_after_assessment_start"], 0.4)
         self.assertEqual(constraints["utc_1_wg"], 0.75)
         self.assertEqual(constraints["utc_1_fl"], 0.4)
+
+    def test_unallocated_iron_constraint_uses_caf_phase_sum_maximum(self):
+        history = pd.DataFrame(
+            [
+                _row(2040, 1, 1, total=100, line=90, ip=20, fl=30, wg_short=0.0, unallocated=10),
+                _row(2040, 1, 2, total=100, line=90, ip=20, fl=30, wg_short=0.0, unallocated=5),
+                _row(2040, 2, 1, total=100, line=90, ip=20, fl=30, wg_short=0.0, unallocated=40),
+                _row(2040, 2, 2, total=100, line=90, ip=20, fl=30, wg_short=0.0, unallocated=0),
+            ]
+        )
+
+        metrics = compute_raw_metrics(history, assessment_start_year=2040)
+        requirements = RequirementsConfig(
+            target_total_pilots=None,
+            target_line_pilots=None,
+            min_experience_ratio=None,
+            allowed_wg_rap_shortfall=None,
+            allowed_fl_rap_shortfall=None,
+            allowed_ip_rap_shortfall=None,
+            allowed_utc_1_wg_shortfall=None,
+            allowed_utc_1_fl_shortfall=None,
+            allowed_utc_2_wg_shortfall=None,
+            allowed_utc_2_fl_shortfall=None,
+            target_staff_ips=None,
+            target_staff_fls=None,
+            allowed_unallocated_iron=0.0,
+        )
+
+        constraints = compute_constraints(metrics, requirements)
+
+        self.assertEqual(metrics["max_caf_unallocated_iron_after_assessment_start"], 40.0)
+        self.assertEqual(constraints["unallocated_iron"], 40.0)
 
 
 def _row(
@@ -245,6 +282,7 @@ def _row(
     utc_1_fl_short=0.0,
     utc_2_wg_short=0.0,
     utc_2_fl_short=0.0,
+    unallocated=0,
 ):
     return {
         "year": year,
@@ -263,6 +301,7 @@ def _row(
         "utc_1_fl_rap_shortfall": utc_1_fl_short,
         "utc_2_wg_rap_shortfall": utc_2_wg_short,
         "utc_2_fl_rap_shortfall": utc_2_fl_short,
+        "unallocated_iron": unallocated,
     }
 
 

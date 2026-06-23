@@ -93,6 +93,8 @@ class ViabilityConfigTest(unittest.TestCase):
         config = load_config("configs/viability/a_current.yaml")
         self.assertIn("upgrade_sortie_fraction", config.policy.variables)
         self.assertIsNone(config.model.simulation.upgrade_sortie_fraction)
+        self.assertEqual(config.requirements.allowed_unallocated_iron, 0.0)
+        self.assertEqual(config.constraint_scales.unallocated_iron, 50.0)
         self.assertEqual(
             config.doe.baselines[0]["upgrade_sortie_fraction"],
             0.5,
