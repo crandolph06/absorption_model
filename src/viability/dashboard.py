@@ -16,6 +16,7 @@ from src.viability.evaluator import (
     simulate_policy_schedule_history,
 )
 from src.viability.metrics import (
+    UTC_CONSTRAINT_SPECS,
     aggregate_violation,
     compute_constraints,
     compute_raw_metrics,
@@ -686,15 +687,19 @@ def aggregate_history_trajectory(
 
     frame = history.copy()
     groups = frame.groupby(["year", "phase"], sort=True)
-    trajectory = groups.agg(
-        total_pilots=("total_pilots", "sum"),
-        line_pilots=("line_pilots", "sum"),
-        staff_ips=("staff_ips", "sum"),
-        staff_fls=("staff_fls", "sum"),
-        wg_rap_margin=("wg_rap_shortfall", "mean"),
-        fl_rap_margin=("fl_rap_shortfall", "mean"),
-        ip_rap_margin=("ip_rap_shortfall", "mean"),
-    ).reset_index()
+    agg_spec: dict[str, tuple[str, str]] = {
+        "total_pilots": ("total_pilots", "sum"),
+        "line_pilots": ("line_pilots", "sum"),
+        "staff_ips": ("staff_ips", "sum"),
+        "staff_fls": ("staff_fls", "sum"),
+        "wg_rap_margin": ("wg_rap_shortfall", "mean"),
+        "fl_rap_margin": ("fl_rap_shortfall", "mean"),
+        "ip_rap_margin": ("ip_rap_shortfall", "mean"),
+    }
+    for constraint_name, history_column, _requirement_field in UTC_CONSTRAINT_SPECS:
+        if history_column in frame.columns:
+            agg_spec[f"{constraint_name}_margin"] = (history_column, "mean")
+    trajectory = groups.agg(**agg_spec).reset_index()
 
     if {"fl_qty", "ip_qty"}.issubset(frame.columns):
         experienced = groups[["fl_qty", "ip_qty"]].sum().sum(axis=1).reset_index(drop=True)
@@ -757,6 +762,11 @@ def per_phase_constraints(row: pd.Series, config: ViabilityConfig) -> dict[str, 
         constraints["ip_rap"] = (
             float(row["ip_rap_margin"]) - requirements.allowed_ip_rap_shortfall
         )
+    for constraint_name, _history_column, requirement_field in UTC_CONSTRAINT_SPECS:
+        allowed = getattr(requirements, requirement_field)
+        margin_column = f"{constraint_name}_margin"
+        if allowed is not None:
+            constraints[constraint_name] = float(row[margin_column]) - allowed
     if requirements.target_staff_ips is not None:
         constraints["staff_ips"] = requirements.target_staff_ips - float(row["staff_ips"])
     if requirements.target_staff_fls is not None:
