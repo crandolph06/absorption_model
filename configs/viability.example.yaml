@@ -32,19 +32,19 @@ model:
   simulation:
     phase_length_days: 120
     allocation_noise: 0.0
-    utc_wise_allocation: false
+    utc_wise_allocation: false # True for RAP B, C
 
 requirements:
   target_total_pilots: 3500
   target_line_pilots: null
   min_experience_ratio: null
-  allowed_wg_rap_shortfall: 0.0
-  allowed_fl_rap_shortfall: 0.0
-  allowed_ip_rap_shortfall: 0.0
-  allowed_utc_1_wg_shortfall: null
-  allowed_utc_1_fl_shortfall: null
-  allowed_utc_2_wg_shortfall: null
-  allowed_utc_2_fl_shortfall: null
+  allowed_wg_rap_shortfall: 0.0 # null for RAP B, C
+  allowed_fl_rap_shortfall: 0.0 # null for RAP B, C
+  allowed_ip_rap_shortfall: 0.0 # null for RAP B, C
+  allowed_utc_1_wg_shortfall: null # 0.0 for RAP B, C
+  allowed_utc_1_fl_shortfall: null # 0.0 for RAP B, C
+  allowed_utc_2_wg_shortfall: null # 0.0 for RAP B, C
+  allowed_utc_2_fl_shortfall: null # 0.0 for RAP B, C
   target_staff_ips: null
   target_staff_fls: null
   allowed_unallocated_iron: null
@@ -71,15 +71,15 @@ policy:
       type: int
       low: 10
       high: 350
-    retention_rate:
+    retention_rate: # Pragmatic, Optimistic, Ideal
       type: float
       low: 0.10
       high: 0.65
-    ute:
+    ute: # Pragmatic, Optimistic, Ideal
       type: float
       low: 6
       high: 20
-    paa:
+    paa # Optimistic, Ideal
       type: int
       low: 18
       high: 30
@@ -99,11 +99,11 @@ policy:
       type: float
       low: 0.0
       high: 1.0
-    flug_window_start:
+    flug_window_start: # Unit Risk
       type: int
       low: 100
       high: 400
-    ipug_window_start:
+    ipug_window_start: # Unit Risk
       type: int
       low: 250
       high: 400
