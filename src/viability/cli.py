@@ -895,6 +895,8 @@ def main() -> int:
                     "summary_path": str(result.summary_path),
                     "anchor_design_id": result.anchor_design_id,
                     "anchor_phi": result.anchor_phi,
+                    "plots_skipped": result.plots_skipped,
+                    "plots_skipped_reason": result.plots_skipped_reason,
                     "plot_paths": {name: str(path) for name, path in result.plot_paths.items()},
                     "grid_paths": {name: str(path) for name, path in result.grid_paths.items()},
                     "de_comparison_paths": {
