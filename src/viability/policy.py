@@ -18,6 +18,8 @@ class PolicyDesign:
     flug_quota_per_phase: int
     ipug_quota_per_phase: int
     upgrade_sortie_fraction: float
+    flug_window_start: int
+    ipug_window_start: int
     raw: dict[str, float]
     applied: dict[str, Any]
 
@@ -63,6 +65,8 @@ class PolicyDesign:
             "flug_quota_per_phase": int(converted["flug_quota_per_phase"]),
             "ipug_quota_per_phase": int(converted["ipug_quota_per_phase"]),
             "upgrade_sortie_fraction": float(converted["upgrade_sortie_fraction"]),
+            "flug_window_start": int(converted["flug_window_start"]),
+            "ipug_window_start": int(converted["ipug_window_start"]),
         }
         return cls(
             annual_intake=applied["annual_intake"],
@@ -73,6 +77,8 @@ class PolicyDesign:
             flug_quota_per_phase=applied["flug_quota_per_phase"],
             ipug_quota_per_phase=applied["ipug_quota_per_phase"],
             upgrade_sortie_fraction=applied["upgrade_sortie_fraction"],
+            flug_window_start=applied["flug_window_start"],
+            ipug_window_start=applied["ipug_window_start"],
             raw=raw,
             applied=applied,
         )

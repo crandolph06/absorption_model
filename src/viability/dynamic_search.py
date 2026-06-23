@@ -1232,6 +1232,8 @@ def _epoch_policy(
     flug_quota_per_phase: float,
     ipug_quota_per_phase: float,
     upgrade_sortie_fraction: float,
+    flug_window_start: float,
+    ipug_window_start: float,
 ) -> dict[str, float]:
     return {
         "annual_intake": annual_intake,
@@ -1242,6 +1244,8 @@ def _epoch_policy(
         "flug_quota_per_phase": flug_quota_per_phase,
         "ipug_quota_per_phase": ipug_quota_per_phase,
         "upgrade_sortie_fraction": upgrade_sortie_fraction,
+        "flug_window_start": flug_window_start,
+        "ipug_window_start": ipug_window_start,
     }
 
 

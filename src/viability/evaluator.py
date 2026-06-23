@@ -512,6 +512,8 @@ def _make_simulation(config: ViabilityConfig, design: PolicyDesign) -> CAFSimula
         retention_rate=design.retention_rate,
         round_robin=config.model.round_robin,
         brain=brain,
+        flug_window_start=design.flug_window_start,
+        ipug_window_start=design.ipug_window_start,
         max_manning_pct=design.max_manning_pct,
         staff_priority_mode=_parse_priority_mode(config.model.staff_priority_mode),
         use_upgrade_quotas=config.model.use_upgrade_quotas,
@@ -536,6 +538,8 @@ def _apply_policy_to_simulation(sim: CAFSimulation, policy: PolicyDesign) -> Non
     sim.max_manning = policy.max_manning_pct / 100.0
     sim.sq_phase_flug_intake = policy.flug_quota_per_phase
     sim.sq_phase_ipug_intake = policy.ipug_quota_per_phase
+    sim.flug_window_start = policy.flug_window_start
+    sim.ipug_window_start = policy.ipug_window_start
     sim.sim_config = replace(
         sim.sim_config,
         upgrade_sortie_fraction=policy.upgrade_sortie_fraction,

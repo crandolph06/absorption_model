@@ -16,6 +16,8 @@ STANDARD_POLICY_VARIABLES = frozenset(
         "flug_quota_per_phase",
         "ipug_quota_per_phase",
         "upgrade_sortie_fraction",
+        "flug_window_start",
+        "ipug_window_start",
     }
 )
 
