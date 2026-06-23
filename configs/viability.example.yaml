@@ -79,7 +79,7 @@ policy:
       type: float
       low: 6
       high: 20
-    paa # Optimistic, Ideal
+    paa: # Optimistic, Ideal
       type: int
       low: 18
       high: 30
@@ -102,7 +102,7 @@ policy:
     flug_window_start: # Unit Risk
       type: int
       low: 100
-      high: 400
+      high: 250
     ipug_window_start: # Unit Risk
       type: int
       low: 250
