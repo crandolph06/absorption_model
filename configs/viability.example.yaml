@@ -1,3 +1,18 @@
+# Constant-policy GPR workflow:
+#   python -m src.viability.cli run-doe --config configs/viability/a_current_enterprise.yaml \
+#     --output-dir outputs/viability/rap_a_current_enterprise/doe_128 --workers 8
+#   python -m src.viability.cli select-holdout --config configs/viability/a_current_enterprise.yaml \
+#     --evaluations outputs/viability/rap_a_current_enterprise/doe_128/evaluations.parquet \
+#     --output outputs/viability/rap_a_current_enterprise/doe_128/holdout.parquet
+#   python -m src.viability.cli active-learn --config configs/viability/a_current_enterprise.yaml \
+#     --evaluations outputs/viability/rap_a_current_enterprise/doe_128/evaluations.parquet \
+#     --holdout-evaluations outputs/viability/rap_a_current_enterprise/doe_128/holdout.parquet \
+#     --output-dir outputs/viability/rap_a_current_enterprise/active_learn
+
+# RAP Scenario - A (all), B (1 12-ship UTC), C (1 12-ship UTC, 1 6-ship UTC)
+# Constraint Scenarios - Current, Pragmatic, Optimistic, Ideal
+# Risk Scenarios - Enterprise, Unit (affects FLUG/IPUG gates)
+
 run:
   name: viability_smoke
   random_seed: 42
@@ -10,11 +25,9 @@ model:
   start_year: 2026
   assessment_start_year: 2040
   target_year: 2040
-  brain_path: outputs/single_phase/brains/hpc_sortie_brain_multi_output_mlp.pkl
-  expected_brain_outputs: 16
-  round_robin: true
+  round_robin: false
   use_upgrade_quotas: true
-  staff_priority_mode: random
+  staff_priority_mode: fl_first
   n_replications: 1
   simulation:
     phase_length_days: 120
@@ -86,6 +99,14 @@ policy:
       type: float
       low: 0.0
       high: 1.0
+    flug_window_start:
+      type: int
+      low: 100
+      high: 400
+    ipug_window_start:
+      type: int
+      low: 250
+      high: 400
 
 doe:
   method: sobol
@@ -105,6 +126,8 @@ doe:
       flug_quota_per_phase: 3
       ipug_quota_per_phase: 2
       upgrade_sortie_fraction: 0.5
+      flug_window_start: 250
+      ipug_window_start: 400
 
 active_learning:
   candidate_method: sobol
