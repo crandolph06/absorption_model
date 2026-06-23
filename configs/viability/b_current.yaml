@@ -46,6 +46,7 @@ requirements:
   allowed_utc_2_wg_shortfall: null
   target_staff_ips: null
   target_staff_fls: null
+  allowed_unallocated_iron: null
 
 constraint_scales:
   total_pilots: 400.0
@@ -60,6 +61,7 @@ constraint_scales:
   staff_ips: 10.0
   staff_fls: 10.0
   experience_ratio: 0.05
+  unallocated_iron: 100.0
 
 policy:
   parameterization: constant

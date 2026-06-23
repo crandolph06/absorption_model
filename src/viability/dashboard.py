@@ -699,6 +699,8 @@ def aggregate_history_trajectory(
     for constraint_name, history_column, _requirement_field in UTC_CONSTRAINT_SPECS:
         if history_column in frame.columns:
             agg_spec[f"{constraint_name}_margin"] = (history_column, "mean")
+    if "unallocated_iron" in frame.columns:
+        agg_spec["caf_unallocated_iron"] = ("unallocated_iron", "sum")
     trajectory = groups.agg(**agg_spec).reset_index()
 
     if {"fl_qty", "ip_qty"}.issubset(frame.columns):
@@ -774,6 +776,10 @@ def per_phase_constraints(row: pd.Series, config: ViabilityConfig) -> dict[str, 
     if requirements.min_experience_ratio is not None:
         constraints["experience_ratio"] = (
             requirements.min_experience_ratio - float(row["experience_ratio"])
+        )
+    if requirements.allowed_unallocated_iron is not None:
+        constraints["unallocated_iron"] = (
+            float(row["caf_unallocated_iron"]) - requirements.allowed_unallocated_iron
         )
     return constraints
 

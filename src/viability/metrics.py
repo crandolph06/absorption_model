@@ -56,6 +56,8 @@ def compute_raw_metrics(history: pd.DataFrame, assessment_start_year: int) -> di
     for column in UTC_RAP_SHORTFALL_COLUMNS:
         if column in frame.columns:
             agg_spec[column] = (column, "mean")
+    if "unallocated_iron" in frame.columns:
+        agg_spec["caf_unallocated_iron"] = ("unallocated_iron", "sum")
     per_phase = phase_groups.agg(**agg_spec)
 
     if {"fl_qty", "ip_qty"}.issubset(frame.columns):
@@ -101,6 +103,10 @@ def compute_raw_metrics(history: pd.DataFrame, assessment_start_year: int) -> di
         if history_column in per_phase.columns:
             metric_key = f"max_{history_column}_after_assessment_start"
             metrics[metric_key] = float(assessed[history_column].max())
+    if "caf_unallocated_iron" in per_phase.columns:
+        metrics["max_caf_unallocated_iron_after_assessment_start"] = float(
+            assessed["caf_unallocated_iron"].max()
+        )
     return metrics
 
 
@@ -166,6 +172,17 @@ def compute_constraints(
         constraints["experience_ratio"] = (
             requirements.min_experience_ratio
             - raw_metrics["min_experience_ratio_after_assessment_start"]
+        )
+
+    if requirements.allowed_unallocated_iron is not None:
+        metric_key = "max_caf_unallocated_iron_after_assessment_start"
+        if metric_key not in raw_metrics:
+            raise ValueError(
+                "Requirement allowed_unallocated_iron is enabled but history is missing "
+                "unallocated_iron; use model.phase_backend='physics' or disable the constraint"
+            )
+        constraints["unallocated_iron"] = (
+            raw_metrics[metric_key] - requirements.allowed_unallocated_iron
         )
 
     if not constraints:

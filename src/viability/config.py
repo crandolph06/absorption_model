@@ -51,6 +51,7 @@ _REQUIREMENTS_FIELDS = (
     "allowed_utc_2_fl_shortfall",
     "target_staff_ips",
     "target_staff_fls",
+    "allowed_unallocated_iron",
 )
 _CONSTRAINT_SCALE_FIELDS = (
     "total_pilots",
@@ -65,6 +66,7 @@ _CONSTRAINT_SCALE_FIELDS = (
     "staff_ips",
     "staff_fls",
     "experience_ratio",
+    "unallocated_iron",
 )
 _POLICY_FIELDS = ("parameterization", "variables")
 _DOE_FIELDS = (
@@ -179,6 +181,7 @@ class RequirementsConfig:
     allowed_utc_2_fl_shortfall: float | None
     target_staff_ips: float | None
     target_staff_fls: float | None
+    allowed_unallocated_iron: float | None
 
 
 @dataclass(frozen=True)
@@ -195,6 +198,7 @@ class ConstraintScalesConfig:
     staff_ips: float
     staff_fls: float
     experience_ratio: float
+    unallocated_iron: float
 
     def scale_for(self, constraint_name: str) -> float:
         if constraint_name.startswith("total_pilots"):
@@ -221,6 +225,8 @@ class ConstraintScalesConfig:
             return self.staff_fls
         if constraint_name == "experience_ratio":
             return self.experience_ratio
+        if constraint_name == "unallocated_iron":
+            return self.unallocated_iron
         raise KeyError(f"No constraint scale configured for {constraint_name!r}")
 
 
@@ -664,6 +670,8 @@ class ViabilityConfig:
             enabled.append(("staff_fls", "staff_fls"))
         if req.min_experience_ratio is not None:
             enabled.append(("experience_ratio", "experience_ratio"))
+        if req.allowed_unallocated_iron is not None:
+            enabled.append(("unallocated_iron", "unallocated_iron"))
 
         if not enabled:
             raise ValueError("At least one requirement constraint must be enabled (non-null)")

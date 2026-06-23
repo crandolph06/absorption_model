@@ -19,7 +19,7 @@ model:
   simulation:
     phase_length_days: 120
     allocation_noise: 0.0
-    upgrade_sortie_fraction: null
+    utc_wise_allocation: false
 
 requirements:
   target_total_pilots: 3500
@@ -28,8 +28,13 @@ requirements:
   allowed_wg_rap_shortfall: 0.0
   allowed_fl_rap_shortfall: 0.0
   allowed_ip_rap_shortfall: 0.0
+  allowed_utc_1_wg_shortfall: null
+  allowed_utc_1_fl_shortfall: null
+  allowed_utc_2_wg_shortfall: null
+  allowed_utc_2_fl_shortfall: null
   target_staff_ips: null
   target_staff_fls: null
+  allowed_unallocated_iron: null
 
 constraint_scales:
   total_pilots: 100.0
@@ -37,9 +42,14 @@ constraint_scales:
   wg_rap: 1.0
   fl_rap: 1.0
   ip_rap: 1.0
+  utc_1_wg: 1.0
+  utc_1_fl: 1.0
+  utc_2_wg: 1.0
+  utc_2_fl: 1.0
   staff_ips: 10.0
   staff_fls: 10.0
   experience_ratio: 0.05
+  unallocated_iron: 100.0
 
 policy:
   parameterization: constant
@@ -72,6 +82,10 @@ policy:
       type: int
       low: 0
       high: 10
+    upgrade_sortie_fraction:
+      type: float
+      low: 0.0
+      high: 1.0
 
 doe:
   method: sobol
@@ -90,6 +104,7 @@ doe:
       max_manning_pct: 150
       flug_quota_per_phase: 3
       ipug_quota_per_phase: 2
+      upgrade_sortie_fraction: 0.5
 
 active_learning:
   candidate_method: sobol
