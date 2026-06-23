@@ -314,6 +314,8 @@ def _policy_values(**overrides):
         "flug_quota_per_phase": 5,
         "ipug_quota_per_phase": 5,
         "upgrade_sortie_fraction": 0.5,
+        "flug_window_start": 250,
+        "ipug_window_start": 400,
     }
     values.update(overrides)
     return values

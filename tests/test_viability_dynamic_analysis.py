@@ -178,6 +178,10 @@ def _evaluations(config):
                 value = 0
             elif feature_name.endswith("upgrade_sortie_fraction"):
                 value = 0.5
+            elif feature_name.endswith("flug_window_start"):
+                value = 250
+            elif feature_name.endswith("ipug_window_start"):
+                value = 400
             else:
                 raise AssertionError(feature_name)
             row[feature_name] = value

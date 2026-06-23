@@ -48,6 +48,8 @@ def _fake_constraint_bundle(mu_by_constraint, sigma_by_constraint):
             "flug_quota_per_phase",
             "ipug_quota_per_phase",
             "upgrade_sortie_fraction",
+            "flug_window_start",
+            "ipug_window_start",
         ],
     }
 
@@ -288,6 +290,8 @@ def _manual_design_row(config, design_id: str, *, annual_intake: int) -> dict:
         "flug_quota_per_phase": 3,
         "ipug_quota_per_phase": 2,
         "upgrade_sortie_fraction": 0.5,
+        "flug_window_start": 250,
+        "ipug_window_start": 400,
     }
     for name in config.policy.variables:
         row[f"raw_{name}"] = float(row[name])

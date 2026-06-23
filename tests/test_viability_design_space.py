@@ -37,6 +37,8 @@ class ViabilityDesignSpaceTest(unittest.TestCase):
             "flug_quota_per_phase": 3,
             "ipug_quota_per_phase": 2,
             "upgrade_sortie_fraction": 0.5,
+            "flug_window_start": 250,
+            "ipug_window_start": 400,
         }
 
         with self.assertRaisesRegex(ValueError, "annual_intake"):

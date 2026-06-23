@@ -84,21 +84,31 @@ class ViabilityConfigTest(unittest.TestCase):
             reloaded = load_config(resolved)
             self.assertEqual(config.to_dict(), reloaded.to_dict())
 
-    def test_physics_current_config_loads_utc_requirements(self):
-        config = load_config("configs/viability/physics_current.yaml")
-        self.assertIsNone(config.requirements.allowed_utc_1_fl_shortfall)
-        self.assertEqual(config.constraint_scales.utc_1_fl, 1.0)
-
-    def test_a_current_config_loads_with_upgrade_policy_lever(self):
-        config = load_config("configs/viability/a_current.yaml")
+    def test_a_current_unit_config_loads_with_policy_levers(self):
+        config = load_config("configs/viability/a_current_unit.yaml")
         self.assertIn("upgrade_sortie_fraction", config.policy.variables)
+        self.assertIn("flug_window_start", config.policy.variables)
+        self.assertIn("ipug_window_start", config.policy.variables)
         self.assertIsNone(config.model.simulation.upgrade_sortie_fraction)
         self.assertEqual(config.requirements.allowed_unallocated_iron, 0.0)
-        self.assertEqual(config.constraint_scales.unallocated_iron, 50.0)
+        self.assertEqual(config.constraint_scales.unallocated_iron, 100.0)
         self.assertEqual(
             config.doe.baselines[0]["upgrade_sortie_fraction"],
             0.5,
         )
+        self.assertEqual(config.doe.baselines[0]["flug_window_start"], 250)
+        self.assertEqual(config.doe.baselines[0]["ipug_window_start"], 400)
+
+    def test_a_current_enterprise_config_fixes_upgrade_gates(self):
+        config = load_config("configs/viability/a_current_enterprise.yaml")
+        flug = config.policy.variables["flug_window_start"]
+        ipug = config.policy.variables["ipug_window_start"]
+        self.assertEqual(flug.low, 250)
+        self.assertEqual(flug.high, 250)
+        self.assertEqual(ipug.low, 400)
+        self.assertEqual(ipug.high, 400)
+        self.assertEqual(config.doe.baselines[0]["flug_window_start"], 250)
+        self.assertEqual(config.doe.baselines[0]["ipug_window_start"], 400)
 
 
 if __name__ == "__main__":

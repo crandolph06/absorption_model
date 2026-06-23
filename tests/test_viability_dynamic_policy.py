@@ -65,6 +65,10 @@ class ViabilityDynamicPolicyTest(unittest.TestCase):
                 values[name] = 2
             elif name.endswith("upgrade_sortie_fraction"):
                 values[name] = 0.5
+            elif name.endswith("flug_window_start"):
+                values[name] = 250
+            elif name.endswith("ipug_window_start"):
+                values[name] = 400
 
         schedule = EpochPolicySchedule.from_flat_mapping(
             values,
@@ -147,6 +151,8 @@ class ViabilityDynamicPolicyTest(unittest.TestCase):
             values[f"epoch{epoch}_flug_quota_per_phase"] = epoch
             values[f"epoch{epoch}_ipug_quota_per_phase"] = 0
             values[f"epoch{epoch}_upgrade_sortie_fraction"] = 0.5
+            values[f"epoch{epoch}_flug_window_start"] = 250
+            values[f"epoch{epoch}_ipug_window_start"] = 400
         schedule = EpochPolicySchedule.from_flat_mapping(
             values,
             physics_config.policy,
@@ -186,6 +192,8 @@ class ViabilityDynamicPolicyTest(unittest.TestCase):
             "flug_quota_per_phase": 2,
             "ipug_quota_per_phase": 0,
             "upgrade_sortie_fraction": 0.5,
+            "flug_window_start": 250,
+            "ipug_window_start": 400,
         }
         design = PolicyDesign.from_mapping(values, physics_config.policy)
         schedule_values = {}

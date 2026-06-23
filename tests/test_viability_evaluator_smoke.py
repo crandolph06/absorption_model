@@ -47,6 +47,8 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
                 "flug_quota_per_phase": 3,
                 "ipug_quota_per_phase": 2,
                 "upgrade_sortie_fraction": 0.5,
+                "flug_window_start": 250,
+                "ipug_window_start": 400,
             },
             self.config.policy,
             raw_values={
@@ -58,6 +60,8 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
                 "flug_quota_per_phase": 3.1,
                 "ipug_quota_per_phase": 2.1,
                 "upgrade_sortie_fraction": 0.55,
+                "flug_window_start": 251.0,
+                "ipug_window_start": 401.0,
             },
         )
         result = evaluate_design(design, self.config)
@@ -141,6 +145,8 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
                 "flug_quota_per_phase": 3,
                 "ipug_quota_per_phase": 2,
                 "upgrade_sortie_fraction": 0.6,
+                "flug_window_start": 200,
+                "ipug_window_start": 350,
             },
             physics_config.policy,
         )
@@ -156,6 +162,8 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
         self.assertIsNone(captured["brain"])
         self.assertTrue(captured["use_physics_allocator"])
         self.assertEqual(captured["sim_config"].upgrade_sortie_fraction, 0.6)
+        self.assertEqual(captured["flug_window_start"], 200)
+        self.assertEqual(captured["ipug_window_start"], 350)
 
     def test_parallel_evaluation_keeps_doe_metadata_and_sample_seed(self):
         values = {
@@ -167,6 +175,8 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
             "flug_quota_per_phase": 3,
             "ipug_quota_per_phase": 2,
             "upgrade_sortie_fraction": 0.5,
+            "flug_window_start": 250,
+            "ipug_window_start": 400,
         }
         designs = pd.DataFrame(
             [
@@ -241,6 +251,8 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
                 "flug_quota_per_phase": 3,
                 "ipug_quota_per_phase": 2,
                 "upgrade_sortie_fraction": 0.5,
+                "flug_window_start": 250,
+                "ipug_window_start": 400,
             },
             smoke_config.policy,
         )
