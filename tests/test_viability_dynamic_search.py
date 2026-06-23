@@ -287,6 +287,7 @@ def _seed_best_row(config):
         row[f"raw_epoch{epoch}_max_manning_pct"] = 180
         row[f"raw_epoch{epoch}_flug_quota_per_phase"] = 2
         row[f"raw_epoch{epoch}_ipug_quota_per_phase"] = 0
+        row[f"raw_epoch{epoch}_upgrade_sortie_fraction"] = 0.5
         row[f"epoch{epoch}_annual_intake"] = 150
         row[f"epoch{epoch}_retention_rate"] = 0.5
         row[f"epoch{epoch}_ute"] = 18
@@ -294,6 +295,7 @@ def _seed_best_row(config):
         row[f"epoch{epoch}_max_manning_pct"] = 180
         row[f"epoch{epoch}_flug_quota_per_phase"] = 2
         row[f"epoch{epoch}_ipug_quota_per_phase"] = 0
+        row[f"epoch{epoch}_upgrade_sortie_fraction"] = 0.5
     return pd.Series(row)
 
 

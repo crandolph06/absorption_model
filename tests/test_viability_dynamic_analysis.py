@@ -176,6 +176,8 @@ def _evaluations(config):
                 value = 2
             elif feature_name.endswith("ipug_quota_per_phase"):
                 value = 0
+            elif feature_name.endswith("upgrade_sortie_fraction"):
+                value = 0.5
             else:
                 raise AssertionError(feature_name)
             row[feature_name] = value

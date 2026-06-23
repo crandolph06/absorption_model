@@ -36,6 +36,7 @@ class ViabilityDesignSpaceTest(unittest.TestCase):
             "max_manning_pct": 150,
             "flug_quota_per_phase": 3,
             "ipug_quota_per_phase": 2,
+            "upgrade_sortie_fraction": 0.5,
         }
 
         with self.assertRaisesRegex(ValueError, "annual_intake"):

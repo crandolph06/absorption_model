@@ -46,6 +46,7 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
                 "max_manning_pct": 150,
                 "flug_quota_per_phase": 3,
                 "ipug_quota_per_phase": 2,
+                "upgrade_sortie_fraction": 0.5,
             },
             self.config.policy,
             raw_values={
@@ -56,6 +57,7 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
                 "max_manning_pct": 150.0,
                 "flug_quota_per_phase": 3.1,
                 "ipug_quota_per_phase": 2.1,
+                "upgrade_sortie_fraction": 0.55,
             },
         )
         result = evaluate_design(design, self.config)
@@ -138,6 +140,7 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
                 "max_manning_pct": 150,
                 "flug_quota_per_phase": 3,
                 "ipug_quota_per_phase": 2,
+                "upgrade_sortie_fraction": 0.6,
             },
             physics_config.policy,
         )
@@ -152,7 +155,7 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
         self.assertFalse(history.empty)
         self.assertIsNone(captured["brain"])
         self.assertTrue(captured["use_physics_allocator"])
-        self.assertIs(captured["sim_config"], physics_config.model.simulation)
+        self.assertEqual(captured["sim_config"].upgrade_sortie_fraction, 0.6)
 
     def test_parallel_evaluation_keeps_doe_metadata_and_sample_seed(self):
         values = {
@@ -163,6 +166,7 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
             "max_manning_pct": 150,
             "flug_quota_per_phase": 3,
             "ipug_quota_per_phase": 2,
+            "upgrade_sortie_fraction": 0.5,
         }
         designs = pd.DataFrame(
             [
@@ -236,6 +240,7 @@ class ViabilityEvaluatorSmokeTest(unittest.TestCase):
                 "max_manning_pct": 150,
                 "flug_quota_per_phase": 3,
                 "ipug_quota_per_phase": 2,
+                "upgrade_sortie_fraction": 0.5,
             },
             smoke_config.policy,
         )

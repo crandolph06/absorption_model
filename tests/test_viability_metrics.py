@@ -54,6 +54,10 @@ class ViabilityMetricsTest(unittest.TestCase):
             allowed_wg_rap_shortfall=0.0,
             allowed_fl_rap_shortfall=None,
             allowed_ip_rap_shortfall=None,
+            allowed_utc_1_wg_shortfall=None,
+            allowed_utc_1_fl_shortfall=None,
+            allowed_utc_2_wg_shortfall=None,
+            allowed_utc_2_fl_shortfall=None,
             target_staff_ips=None,
             target_staff_fls=None,
         )
@@ -102,6 +106,10 @@ class ViabilityMetricsTest(unittest.TestCase):
             allowed_wg_rap_shortfall=None,
             allowed_fl_rap_shortfall=None,
             allowed_ip_rap_shortfall=None,
+            allowed_utc_1_wg_shortfall=None,
+            allowed_utc_1_fl_shortfall=None,
+            allowed_utc_2_wg_shortfall=None,
+            allowed_utc_2_fl_shortfall=None,
             target_staff_ips=10.0,
             target_staff_fls=3.0,
         )
@@ -134,6 +142,10 @@ class ViabilityMetricsTest(unittest.TestCase):
             allowed_wg_rap_shortfall=0.5,
             allowed_fl_rap_shortfall=0.0,
             allowed_ip_rap_shortfall=0.0,
+            allowed_utc_1_wg_shortfall=None,
+            allowed_utc_1_fl_shortfall=None,
+            allowed_utc_2_wg_shortfall=None,
+            allowed_utc_2_fl_shortfall=None,
             target_staff_ips=None,
             target_staff_fls=None,
         )
@@ -145,6 +157,10 @@ class ViabilityMetricsTest(unittest.TestCase):
             wg_rap=1.0,
             fl_rap=1.0,
             ip_rap=1.0,
+            utc_1_wg=1.0,
+            utc_1_fl=1.0,
+            utc_2_wg=1.0,
+            utc_2_fl=1.0,
             staff_ips=10.0,
             staff_fls=10.0,
             experience_ratio=0.05,
@@ -160,6 +176,59 @@ class ViabilityMetricsTest(unittest.TestCase):
         self.assertEqual(active_constraint, "ip_rap")
         self.assertEqual(active_value, 1.5)
 
+    def test_utc_rap_constraints_use_assessment_window_maxima(self):
+        history = pd.DataFrame(
+            [
+                _row(
+                    2040,
+                    1,
+                    1,
+                    total=100,
+                    line=90,
+                    ip=20,
+                    fl=30,
+                    wg_short=0.0,
+                    utc_1_wg_short=0.5,
+                    utc_1_fl_short=0.2,
+                ),
+                _row(
+                    2040,
+                    2,
+                    1,
+                    total=100,
+                    line=90,
+                    ip=20,
+                    fl=30,
+                    wg_short=0.0,
+                    utc_1_wg_short=1.0,
+                    utc_1_fl_short=0.4,
+                ),
+            ]
+        )
+
+        metrics = compute_raw_metrics(history, assessment_start_year=2040)
+        requirements = RequirementsConfig(
+            target_total_pilots=None,
+            target_line_pilots=None,
+            min_experience_ratio=None,
+            allowed_wg_rap_shortfall=None,
+            allowed_fl_rap_shortfall=None,
+            allowed_ip_rap_shortfall=None,
+            allowed_utc_1_wg_shortfall=0.25,
+            allowed_utc_1_fl_shortfall=0.0,
+            allowed_utc_2_wg_shortfall=None,
+            allowed_utc_2_fl_shortfall=None,
+            target_staff_ips=None,
+            target_staff_fls=None,
+        )
+
+        constraints = compute_constraints(metrics, requirements)
+
+        self.assertEqual(metrics["max_utc_1_wg_rap_shortfall_after_assessment_start"], 1.0)
+        self.assertEqual(metrics["max_utc_1_fl_rap_shortfall_after_assessment_start"], 0.4)
+        self.assertEqual(constraints["utc_1_wg"], 0.75)
+        self.assertEqual(constraints["utc_1_fl"], 0.4)
+
 
 def _row(
     year,
@@ -172,6 +241,10 @@ def _row(
     wg_short,
     staff_ips=0,
     staff_fls=0,
+    utc_1_wg_short=0.0,
+    utc_1_fl_short=0.0,
+    utc_2_wg_short=0.0,
+    utc_2_fl_short=0.0,
 ):
     return {
         "year": year,
@@ -186,6 +259,10 @@ def _row(
         "wg_rap_shortfall": wg_short,
         "fl_rap_shortfall": 0.0,
         "ip_rap_shortfall": 0.0,
+        "utc_1_wg_rap_shortfall": utc_1_wg_short,
+        "utc_1_fl_rap_shortfall": utc_1_fl_short,
+        "utc_2_wg_rap_shortfall": utc_2_wg_short,
+        "utc_2_fl_rap_shortfall": utc_2_fl_short,
     }
 
 

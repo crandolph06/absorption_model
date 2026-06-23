@@ -47,6 +47,7 @@ def _fake_constraint_bundle(mu_by_constraint, sigma_by_constraint):
             "max_manning_pct",
             "flug_quota_per_phase",
             "ipug_quota_per_phase",
+            "upgrade_sortie_fraction",
         ],
     }
 
@@ -286,6 +287,7 @@ def _manual_design_row(config, design_id: str, *, annual_intake: int) -> dict:
         "max_manning_pct": 150.0,
         "flug_quota_per_phase": 3,
         "ipug_quota_per_phase": 2,
+        "upgrade_sortie_fraction": 0.5,
     }
     for name in config.policy.variables:
         row[f"raw_{name}"] = float(row[name])

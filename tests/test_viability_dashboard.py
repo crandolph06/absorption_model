@@ -244,7 +244,7 @@ class ViabilityDashboardTest(unittest.TestCase):
             self.assertIsNotNone(artifacts.relaxation_pareto)
             self.assertIsNotNone(artifacts.relaxation_sets)
             self.assertEqual(selected["schedule_id"], "schedule_best")
-            self.assertEqual(epoch_table.shape, (3, 8))
+            self.assertEqual(epoch_table.shape, (3, 9))
             self.assertEqual(relaxations.iloc[0]["constraint"], "wg_rap")
             self.assertEqual(misses.iloc[0]["schedule_id"], "schedule_best")
 
@@ -313,6 +313,7 @@ def _policy_values(**overrides):
         "max_manning_pct": 150.0,
         "flug_quota_per_phase": 5,
         "ipug_quota_per_phase": 5,
+        "upgrade_sortie_fraction": 0.5,
     }
     values.update(overrides)
     return values

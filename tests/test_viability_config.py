@@ -84,6 +84,20 @@ class ViabilityConfigTest(unittest.TestCase):
             reloaded = load_config(resolved)
             self.assertEqual(config.to_dict(), reloaded.to_dict())
 
+    def test_physics_current_config_loads_utc_requirements(self):
+        config = load_config("configs/viability/physics_current.yaml")
+        self.assertIsNone(config.requirements.allowed_utc_1_fl_shortfall)
+        self.assertEqual(config.constraint_scales.utc_1_fl, 1.0)
+
+    def test_a_current_config_loads_with_upgrade_policy_lever(self):
+        config = load_config("configs/viability/a_current.yaml")
+        self.assertIn("upgrade_sortie_fraction", config.policy.variables)
+        self.assertIsNone(config.model.simulation.upgrade_sortie_fraction)
+        self.assertEqual(
+            config.doe.baselines[0]["upgrade_sortie_fraction"],
+            0.5,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

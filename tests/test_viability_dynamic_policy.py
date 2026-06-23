@@ -63,6 +63,8 @@ class ViabilityDynamicPolicyTest(unittest.TestCase):
                 values[name] = 3
             elif name.endswith("ipug_quota_per_phase"):
                 values[name] = 2
+            elif name.endswith("upgrade_sortie_fraction"):
+                values[name] = 0.5
 
         schedule = EpochPolicySchedule.from_flat_mapping(
             values,
@@ -88,6 +90,7 @@ class ViabilityDynamicPolicyTest(unittest.TestCase):
                 self.max_manning = kwargs["max_manning_pct"] / 100
                 self.sq_phase_flug_intake = None
                 self.sq_phase_ipug_intake = None
+                self.sim_config = kwargs["sim_config"]
 
             def run_phase(self, phase_num, year):
                 captured.append(
@@ -143,6 +146,7 @@ class ViabilityDynamicPolicyTest(unittest.TestCase):
             values[f"epoch{epoch}_max_manning_pct"] = 150
             values[f"epoch{epoch}_flug_quota_per_phase"] = epoch
             values[f"epoch{epoch}_ipug_quota_per_phase"] = 0
+            values[f"epoch{epoch}_upgrade_sortie_fraction"] = 0.5
         schedule = EpochPolicySchedule.from_flat_mapping(
             values,
             physics_config.policy,
@@ -181,6 +185,7 @@ class ViabilityDynamicPolicyTest(unittest.TestCase):
             "max_manning_pct": 180,
             "flug_quota_per_phase": 2,
             "ipug_quota_per_phase": 0,
+            "upgrade_sortie_fraction": 0.5,
         }
         design = PolicyDesign.from_mapping(values, physics_config.policy)
         schedule_values = {}

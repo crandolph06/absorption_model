@@ -359,6 +359,7 @@ def _policy_row(
         "max_manning_pct": 150.0,
         "flug_quota_per_phase": 5,
         "ipug_quota_per_phase": 5,
+        "upgrade_sortie_fraction": 0.5,
     }
     for name in config.policy.variables:
         row[f"raw_{name}"] = float(row[name])
