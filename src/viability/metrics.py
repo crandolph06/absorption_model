@@ -5,7 +5,15 @@ from typing import Mapping
 
 import pandas as pd
 
+from src.rap_state import UTC_RAP_SHORTFALL_COLUMNS
 from src.viability.config import ConstraintScalesConfig, RequirementsConfig
+
+UTC_CONSTRAINT_SPECS = (
+    ("utc_1_wg", "utc_1_wg_rap_shortfall", "allowed_utc_1_wg_shortfall"),
+    ("utc_1_fl", "utc_1_fl_rap_shortfall", "allowed_utc_1_fl_shortfall"),
+    ("utc_2_wg", "utc_2_wg_rap_shortfall", "allowed_utc_2_wg_shortfall"),
+    ("utc_2_fl", "utc_2_fl_rap_shortfall", "allowed_utc_2_fl_shortfall"),
+)
 
 
 def compute_raw_metrics(history: pd.DataFrame, assessment_start_year: int) -> dict[str, float]:
@@ -36,15 +44,19 @@ def compute_raw_metrics(history: pd.DataFrame, assessment_start_year: int) -> di
     frame = history.copy()
 
     phase_groups = frame.groupby(["year", "phase"], sort=True)
-    per_phase = phase_groups.agg(
-        total_pilots=("total_pilots", "sum"),
-        line_pilots=("line_pilots", "sum"),
-        staff_ips=("staff_ips", "sum"),
-        staff_fls=("staff_fls", "sum"),
-        wg_rap_shortfall=("wg_rap_shortfall", "mean"),
-        fl_rap_shortfall=("fl_rap_shortfall", "mean"),
-        ip_rap_shortfall=("ip_rap_shortfall", "mean"),
-    )
+    agg_spec: dict[str, tuple[str, str]] = {
+        "total_pilots": ("total_pilots", "sum"),
+        "line_pilots": ("line_pilots", "sum"),
+        "staff_ips": ("staff_ips", "sum"),
+        "staff_fls": ("staff_fls", "sum"),
+        "wg_rap_shortfall": ("wg_rap_shortfall", "mean"),
+        "fl_rap_shortfall": ("fl_rap_shortfall", "mean"),
+        "ip_rap_shortfall": ("ip_rap_shortfall", "mean"),
+    }
+    for column in UTC_RAP_SHORTFALL_COLUMNS:
+        if column in frame.columns:
+            agg_spec[column] = (column, "mean")
+    per_phase = phase_groups.agg(**agg_spec)
 
     if {"fl_qty", "ip_qty"}.issubset(frame.columns):
         experienced = phase_groups[["fl_qty", "ip_qty"]].sum().sum(axis=1)
@@ -68,7 +80,7 @@ def compute_raw_metrics(history: pd.DataFrame, assessment_start_year: int) -> di
         )
 
     final = per_phase.iloc[-1]
-    return {
+    metrics = {
         "final_total_pilots": float(final["total_pilots"]),
         "final_line_pilots": float(final["line_pilots"]),
         "final_staff_ips": float(final["staff_ips"]),
@@ -85,6 +97,11 @@ def compute_raw_metrics(history: pd.DataFrame, assessment_start_year: int) -> di
         "mean_fl_rap_shortfall_after_assessment_start": float(assessed["fl_rap_shortfall"].mean()),
         "mean_ip_rap_shortfall_after_assessment_start": float(assessed["ip_rap_shortfall"].mean()),
     }
+    for _constraint_name, history_column, _requirement_field in UTC_CONSTRAINT_SPECS:
+        if history_column in per_phase.columns:
+            metric_key = f"max_{history_column}_after_assessment_start"
+            metrics[metric_key] = float(assessed[history_column].max())
+    return metrics
 
 
 def compute_constraints(
@@ -123,6 +140,17 @@ def compute_constraints(
             raw_metrics["max_ip_rap_shortfall_after_assessment_start"]
             - requirements.allowed_ip_rap_shortfall
         )
+
+    for constraint_name, metric_suffix, requirement_field in UTC_CONSTRAINT_SPECS:
+        allowed = getattr(requirements, requirement_field)
+        metric_key = f"max_{metric_suffix}_after_assessment_start"
+        if allowed is not None:
+            if metric_key not in raw_metrics:
+                raise ValueError(
+                    f"Requirement {requirement_field!r} is enabled but history is missing "
+                    f"UTC RAP shortfall metric {metric_key!r}"
+                )
+            constraints[constraint_name] = raw_metrics[metric_key] - allowed
 
     if requirements.target_staff_ips is not None:
         constraints["staff_ips"] = (
