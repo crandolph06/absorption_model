@@ -12,8 +12,9 @@ class ViabilityConfigTest(unittest.TestCase):
         config = load_config("configs/viability.example.yaml")
         self.assertEqual(config.run.name, "viability_smoke")
         self.assertEqual(config.run.workers, 4)
-        self.assertEqual(config.model.phase_backend, "brain")
-        self.assertEqual(config.model.expected_brain_outputs, 16)
+        self.assertEqual(config.model.phase_backend, "physics")
+        self.assertIsNone(config.model.brain_path)
+        self.assertIsNone(config.model.expected_brain_outputs)
         self.assertEqual(config.model.simulation.phase_length_days, 120)
 
     def test_empty_config_file_fails(self):
@@ -34,6 +35,9 @@ class ViabilityConfigTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "missing_field.yaml"
             data = yaml.safe_load(Path("configs/viability.example.yaml").read_text(encoding="utf-8"))
+            data["model"]["phase_backend"] = "brain"
+            data["model"]["brain_path"] = "outputs/single_phase/brains/example.pkl"
+            data["model"]["expected_brain_outputs"] = 16
             del data["model"]["brain_path"]
             path.write_text(yaml.safe_dump(data), encoding="utf-8")
             with self.assertRaisesRegex(
@@ -43,19 +47,11 @@ class ViabilityConfigTest(unittest.TestCase):
                 load_config(path)
 
     def test_physics_backend_does_not_require_brain_artifact_fields(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "physics.yaml"
-            data = yaml.safe_load(Path("configs/viability.example.yaml").read_text(encoding="utf-8"))
-            data["model"]["phase_backend"] = "physics"
-            del data["model"]["brain_path"]
-            del data["model"]["expected_brain_outputs"]
-            path.write_text(yaml.safe_dump(data), encoding="utf-8")
+        config = load_config("configs/viability.example.yaml")
 
-            config = load_config(path)
-
-            self.assertEqual(config.model.phase_backend, "physics")
-            self.assertIsNone(config.model.brain_path)
-            self.assertIsNone(config.model.expected_brain_outputs)
+        self.assertEqual(config.model.phase_backend, "physics")
+        self.assertIsNone(config.model.brain_path)
+        self.assertIsNone(config.model.expected_brain_outputs)
 
     def test_invalid_phase_backend_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
