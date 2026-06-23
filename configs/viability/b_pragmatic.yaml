@@ -1,0 +1,165 @@
+# Constant-policy GPR workflow:
+#   python -m src.viability.cli run-doe --config configs/viability/physics_current.yaml \
+#     --output-dir outputs/viability/physics_current/doe_128 --workers 8
+#   python -m src.viability.cli select-holdout --config configs/viability/physics_current.yaml \
+#     --evaluations outputs/viability/physics_current/doe_128/evaluations.parquet \
+#     --output outputs/viability/physics_current/doe_128/holdout.parquet
+#   python -m src.viability.cli active-learn --config configs/viability/physics_current.yaml \
+#     --evaluations outputs/viability/physics_current/doe_128/evaluations.parquet \
+#     --holdout-evaluations outputs/viability/physics_current/doe_128/holdout.parquet \
+#     --output-dir outputs/viability/physics_current/active_learn
+
+# RAP Scenario - RAP A (attempt to meet RAP requirements for all pilots) [UTC-wise allocation False]
+# Constraint Scenario - Current (no changes allowed to PAA, UTE, Retention)
+
+run:
+  name: physics_current
+  random_seed: 42
+  output_dir: outputs/viability/rap_a_current
+  workers: 4
+
+model:
+  phase_backend: physics
+  years_to_run: 20
+  start_year: 2026
+  assessment_start_year: 2040
+  target_year: 2040
+  round_robin: false
+  use_upgrade_quotas: true
+  staff_priority_mode: fl_first
+  n_replications: 1
+  simulation:
+    phase_length_days: 120
+    allocation_noise: 0.0
+    utc_wise_allocation: true # Change from A
+
+requirements:
+  target_total_pilots: 3500
+  target_line_pilots: null
+  min_experience_ratio: null
+  allowed_wg_rap_shortfall: null # Change from A
+  allowed_fl_rap_shortfall: null # Change from A
+  allowed_ip_rap_shortfall: null # Change from A
+  allowed_utc_1_fl_shortfall: 0.0 # Change from A
+  allowed_utc_1_wg_shortfall: 0.0 # Change from A
+  allowed_utc_2_fl_shortfall: null
+  allowed_utc_2_wg_shortfall: null
+  target_staff_ips: null
+  target_staff_fls: null
+  allowed_unallocated_iron: null
+
+constraint_scales:
+  total_pilots: 400.0
+  line_pilots: 100.0
+  wg_rap: 1.0
+  fl_rap: 1.0
+  ip_rap: 1.0
+  utc_1_wg: 1.0
+  utc_1_fl: 1.0
+  utc_2_wg: 1.0
+  utc_2_fl: 1.0
+  staff_ips: 10.0
+  staff_fls: 10.0
+  experience_ratio: 0.05
+  unallocated_iron: 100.0
+
+policy:
+  parameterization: constant
+  variables:
+    annual_intake:
+      type: int
+      low: 10
+      high: 350
+    retention_rate:
+      type: float
+      low: 0.40
+      high: 0.55 # Changed from Current
+    ute:
+      type: float
+      low: 12 # TODO ASSUMPTION
+      high: 14 # Changed from Current
+    paa:
+      type: int
+      low: 21
+      high: 21
+    max_manning_pct:
+      type: float
+      low: 55
+      high: 200
+    flug_quota_per_phase:
+      type: int
+      low: 0
+      high: 10
+    ipug_quota_per_phase:
+      type: int
+      low: 0
+      high: 10
+    upgrade_sortie_fraction:
+      type: float
+      low: 0.0
+      high: 1.0
+
+doe:
+  method: sobol
+  n_initial: 128
+  start_index: 0
+  scramble: true
+  include_corners: true
+  include_baselines: true
+  include_corners_on_resume: false
+  include_baselines_on_resume: false
+  baselines:
+    - annual_intake: 250
+      retention_rate: 0.4
+      ute: 12
+      paa: 21
+      max_manning_pct: 100
+      flug_quota_per_phase: 3
+      ipug_quota_per_phase: 2
+      upgrade_sortie_fraction: 0.5
+
+active_learning:
+  candidate_method: sobol
+  candidate_start_index: 2048
+  candidate_pool_size: 8192
+  iterations: 3
+  batch_size: 64
+  acquisition: boundary_stratified_uncertainty
+  boundary_batch_fraction: 0.75
+  min_normalized_distance: 0.05
+  candidate_report_rows: 500
+
+search:
+  candidate_method: sobol
+  candidate_start_index: 51200
+  candidate_pool_size: 65536
+  n_candidates_to_verify: 50
+  conservative_sigma: 1.0
+  min_normalized_distance: 0.02
+  candidate_report_rows: 1000
+
+envelope:
+  anchor: near_boundary_feasible
+  conservative_sigma: 1.0
+  grid_size: 45
+  prediction_chunk_size: 20000
+  sobol_hidden_samples: 256
+  sobol_hidden_start_index: 0
+  de_compare_enabled: true
+  de_compare_points_per_slice: 12
+  de_maxiter: 25
+  de_popsize: 8
+  de_polish: false
+  slices:
+    - x: annual_intake
+      y: retention_rate
+    - x: annual_intake
+      y: ute
+    - x: paa
+      y: ute
+    - x: retention_rate
+      y: paa
+
+report:
+  top_candidate_count: 10
+  near_boundary_count: 10
