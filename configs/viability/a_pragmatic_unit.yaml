@@ -1,21 +1,22 @@
 # Constant-policy GPR workflow:
-#   python -m src.viability.cli run-doe --config configs/viability/physics_current.yaml \
-#     --output-dir outputs/viability/physics_current/doe_128 --workers 8
-#   python -m src.viability.cli select-holdout --config configs/viability/physics_current.yaml \
-#     --evaluations outputs/viability/physics_current/doe_128/evaluations.parquet \
-#     --output outputs/viability/physics_current/doe_128/holdout.parquet
-#   python -m src.viability.cli active-learn --config configs/viability/physics_current.yaml \
-#     --evaluations outputs/viability/physics_current/doe_128/evaluations.parquet \
-#     --holdout-evaluations outputs/viability/physics_current/doe_128/holdout.parquet \
-#     --output-dir outputs/viability/physics_current/active_learn
+#   python -m src.viability.cli run-doe --config configs/viability/a_pragmatic_unit.yaml \
+#     --output-dir outputs/viability/rap_a_pragmatic_unit/doe_128 --workers 8
+#   python -m src.viability.cli select-holdout --config configs/viability/a_pragmatic_unit.yaml \
+#     --evaluations outputs/viability/rap_a_pragmatic_unit/doe_128/evaluations.parquet \
+#     --output outputs/viability/rap_a_pragmatic_unit/doe_128/holdout.parquet
+#   python -m src.viability.cli active-learn --config configs/viability/a_pragmatic_unit.yaml \
+#     --evaluations outputs/viability/rap_a_pragmatic_unit/doe_128/evaluations.parquet \
+#     --holdout-evaluations outputs/viability/rap_a_pragmatic_unit/doe_128/holdout.parquet \
+#     --output-dir outputs/viability/rap_a_pragmatic_unit/active_learn
 
 # RAP Scenario - RAP A (attempt to meet RAP requirements for all pilots) [UTC-wise allocation False]
-# Constraint Scenario - Current (no changes allowed to PAA, UTE, Retention)
+# Constraint Scenario - Pragmatic (Small changes in UTE, Retention)
+# Risk Scenario - Accept risk in the unit (allow relief valve of upgrade gates shifting left)
 
 run:
-  name: physics_current
+  name: rap_a_pragmatic_unit
   random_seed: 42
-  output_dir: outputs/viability/rap_a_current
+  output_dir: outputs/viability/rap_a_pragmatic_unit
   workers: 4
 
 model:
@@ -31,22 +32,22 @@ model:
   simulation:
     phase_length_days: 120
     allocation_noise: 0.0
-    utc_wise_allocation: true # Change from A
+    utc_wise_allocation: false
 
 requirements:
   target_total_pilots: 3500
   target_line_pilots: null
   min_experience_ratio: null
-  allowed_wg_rap_shortfall: null # Change from A
-  allowed_fl_rap_shortfall: null # Change from A
-  allowed_ip_rap_shortfall: null # Change from A
-  allowed_utc_1_fl_shortfall: 0.0 # Change from A
-  allowed_utc_1_wg_shortfall: 0.0 # Change from A
+  allowed_wg_rap_shortfall: 0.0
+  allowed_fl_rap_shortfall: 0.0
+  allowed_ip_rap_shortfall: 0.0
+  allowed_utc_1_fl_shortfall: null
+  allowed_utc_1_wg_shortfall: null
   allowed_utc_2_fl_shortfall: null
   allowed_utc_2_wg_shortfall: null
   target_staff_ips: null
   target_staff_fls: null
-  allowed_unallocated_iron: null
+  allowed_unallocated_iron: 0.0
 
 constraint_scales:
   total_pilots: 400.0
@@ -98,6 +99,14 @@ policy:
       type: float
       low: 0.0
       high: 1.0
+    flug_window_start:
+      type: int
+      low: 100
+      high: 250
+    ipug_window_start:
+      type: int
+      low: 250
+      high: 400
 
 doe:
   method: sobol
@@ -117,6 +126,8 @@ doe:
       flug_quota_per_phase: 3
       ipug_quota_per_phase: 2
       upgrade_sortie_fraction: 0.5
+      flug_window_start: 200
+      ipug_window_start: 350
 
 active_learning:
   candidate_method: sobol

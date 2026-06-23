@@ -1,21 +1,22 @@
 # Constant-policy GPR workflow:
-#   python -m src.viability.cli run-doe --config configs/viability/physics_current.yaml \
-#     --output-dir outputs/viability/physics_current/doe_128 --workers 8
-#   python -m src.viability.cli select-holdout --config configs/viability/physics_current.yaml \
-#     --evaluations outputs/viability/physics_current/doe_128/evaluations.parquet \
-#     --output outputs/viability/physics_current/doe_128/holdout.parquet
-#   python -m src.viability.cli active-learn --config configs/viability/physics_current.yaml \
-#     --evaluations outputs/viability/physics_current/doe_128/evaluations.parquet \
-#     --holdout-evaluations outputs/viability/physics_current/doe_128/holdout.parquet \
-#     --output-dir outputs/viability/physics_current/active_learn
+#   python -m src.viability.cli run-doe --config configs/viability/c_pragmatic_unit.yaml \
+#     --output-dir outputs/viability/rap_c_pragmatic_unit/doe_128 --workers 8
+#   python -m src.viability.cli select-holdout --config configs/viability/c_pragmatic_unit.yaml \
+#     --evaluations outputs/viability/rap_c_pragmatic_unit/doe_128/evaluations.parquet \
+#     --output outputs/viability/rap_c_pragmatic_unit/doe_128/holdout.parquet
+#   python -m src.viability.cli active-learn --config configs/viability/c_pragmatic_unit.yaml \
+#     --evaluations outputs/viability/rap_c_pragmatic_unit/doe_128/evaluations.parquet \
+#     --holdout-evaluations outputs/viability/rap_c_pragmatic_unit/doe_128/holdout.parquet \
+#     --output-dir outputs/viability/rap_c_pragmatic_unit/active_learn
 
 # RAP Scenario - RAP A (attempt to meet RAP requirements for all pilots) [UTC-wise allocation False]
-# Constraint Scenario - Current (no changes allowed to PAA, UTE, Retention)
+# Constraint Scenario - Pragmatic (Small changes in UTE, Retention)
+# Risk Scenario - Accept risk in the unit (allow relief valve of upgrade gates shifting left) - Current (no changes allowed to PAA, UTE, Retention)
 
 run:
-  name: physics_current
+  name: rap_c_pragmatic_unit
   random_seed: 42
-  output_dir: outputs/viability/rap_a_current
+  output_dir: outputs/viability/rap_c_pragmatic_unit
   workers: 4
 
 model:
@@ -73,15 +74,15 @@ policy:
     retention_rate:
       type: float
       low: 0.40
-      high: 0.65 # Changed from Pragmatic
+      high: 0.55 # Changed from Current
     ute:
       type: float
       low: 12 # TODO ASSUMPTION
-      high: 18 # Changed from Pragmatic
+      high: 14 # Changed from Current
     paa:
       type: int
       low: 21
-      high: 25 # Changed from Pragmatic
+      high: 21
     max_manning_pct:
       type: float
       low: 55
@@ -98,6 +99,14 @@ policy:
       type: float
       low: 0.0
       high: 1.0
+    flug_window_start:
+      type: int
+      low: 100
+      high: 250
+    ipug_window_start:
+      type: int
+      low: 250
+      high: 400
 
 doe:
   method: sobol
@@ -117,6 +126,8 @@ doe:
       flug_quota_per_phase: 3
       ipug_quota_per_phase: 2
       upgrade_sortie_fraction: 0.5
+      flug_window_start: 200
+      ipug_window_start: 350
 
 active_learning:
   candidate_method: sobol
