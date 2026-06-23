@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from concurrent.futures import ProcessPoolExecutor
@@ -12,6 +12,7 @@ import pandas as pd
 from src.manning_config import SQUADRON_DATA, get_initial_squadrons
 from src.manning_engine import CAFSimulation
 from src.models import PriorityMode
+from src.simulation_config import SimulationConfig
 from src.viability.config import ViabilityConfig
 from src.viability.io import write_evaluation_batch
 from src.viability.metrics import (
@@ -514,8 +515,17 @@ def _make_simulation(config: ViabilityConfig, design: PolicyDesign) -> CAFSimula
         max_manning_pct=design.max_manning_pct,
         staff_priority_mode=_parse_priority_mode(config.model.staff_priority_mode),
         use_upgrade_quotas=config.model.use_upgrade_quotas,
-        sim_config=config.model.simulation,
+        sim_config=_simulation_config_for_design(config.model.simulation, design),
         use_physics_allocator=use_physics_allocator,
+    )
+
+
+def _simulation_config_for_design(
+    base_config: SimulationConfig, design: PolicyDesign
+) -> SimulationConfig:
+    return replace(
+        base_config,
+        upgrade_sortie_fraction=design.upgrade_sortie_fraction,
     )
 
 
@@ -526,6 +536,10 @@ def _apply_policy_to_simulation(sim: CAFSimulation, policy: PolicyDesign) -> Non
     sim.max_manning = policy.max_manning_pct / 100.0
     sim.sq_phase_flug_intake = policy.flug_quota_per_phase
     sim.sq_phase_ipug_intake = policy.ipug_quota_per_phase
+    sim.sim_config = replace(
+        sim.sim_config,
+        upgrade_sortie_fraction=policy.upgrade_sortie_fraction,
+    )
 
 
 def _validate_brain_output(brain: Any, expected_outputs: int) -> None:
