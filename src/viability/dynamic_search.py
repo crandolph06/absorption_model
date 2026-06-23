@@ -905,7 +905,7 @@ def render_dynamic_control_report(
             "This artifact frames the viability search as open-loop finite-horizon nonlinear optimal control over structured epoch controls.",
             "",
             f"- State `x_k`: compressed force/training state at phase `k`, represented by the simulator history: total/line pilots, qual mix, staff counts, upgrade/carryover burden, and RAP shortfalls.",
-            f"- Control `u_k`: seven policy levers held constant within each of {epoch_count} epochs: annual intake, retention, UTE, PAA, max manning, FLUG quota, and IPUG quota.",
+            f"- Control `u_k`: eight policy levers held constant within each of {epoch_count} epochs: annual intake, retention, UTE, PAA, max manning, FLUG quota, IPUG quota, and upgrade sortie fraction.",
             "- Dynamics: `x_{k+1} = f_k(x_k, u_k)` through the existing physics-backed simulator.",
             "- Constraints: enabled viability constraints from the config, using `g(x) <= 0`.",
             "- Objective: minimize the maximum normalized constraint violation `phi`; direct physics remains the source of truth.",
@@ -1231,6 +1231,7 @@ def _epoch_policy(
     max_manning_pct: float,
     flug_quota_per_phase: float,
     ipug_quota_per_phase: float,
+    upgrade_sortie_fraction: float,
 ) -> dict[str, float]:
     return {
         "annual_intake": annual_intake,
@@ -1240,6 +1241,7 @@ def _epoch_policy(
         "max_manning_pct": max_manning_pct,
         "flug_quota_per_phase": flug_quota_per_phase,
         "ipug_quota_per_phase": ipug_quota_per_phase,
+        "upgrade_sortie_fraction": upgrade_sortie_fraction,
     }
 
 
