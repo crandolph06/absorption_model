@@ -27,6 +27,8 @@ class EnvelopeResult:
     de_comparison_paths: dict[str, Path]
     anchor_design_id: str
     anchor_phi: float
+    plots_skipped: bool = False
+    plots_skipped_reason: str | None = None
 
 
 def run_envelope_plots_from_files(
@@ -63,6 +65,40 @@ def run_envelope_plots(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     write_config_resolved(config, output_path)
+
+    feasible_count = _verified_feasible_count(verified_candidates)
+    if feasible_count == 0:
+        best = select_best_verified_policy(verified_candidates)
+        plots_skipped_reason = (
+            "No verified feasible candidates; near-boundary feasible "
+            "envelope anchor is unavailable."
+        )
+        summary = _envelope_summary(
+            surrogate_path=surrogate_path,
+            output_path=output_path,
+            envelope_config=envelope_config,
+            anchor=best,
+            slice_summaries=[],
+            plots_skipped=True,
+            plots_skipped_reason=plots_skipped_reason,
+            verified_feasible_count=0,
+        )
+        summary_path = output_path / "envelope_summary.json"
+        summary_path.write_text(
+            json.dumps(_json_ready(summary), indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        return EnvelopeResult(
+            output_dir=output_path.resolve(),
+            summary_path=summary_path.resolve(),
+            plot_paths={},
+            grid_paths={},
+            de_comparison_paths={},
+            anchor_design_id=str(best["design_id"]),
+            anchor_phi=float(best["phi"]),
+            plots_skipped=True,
+            plots_skipped_reason=plots_skipped_reason,
+        )
 
     anchor = select_anchor_policy(verified_candidates, envelope_config)
     plot_paths: dict[str, Path] = {}
@@ -153,6 +189,7 @@ def run_envelope_plots(
         envelope_config=envelope_config,
         anchor=anchor,
         slice_summaries=slice_summaries,
+        verified_feasible_count=feasible_count,
     )
     summary_path = output_path / "envelope_summary.json"
     summary_path.write_text(
@@ -167,6 +204,8 @@ def run_envelope_plots(
         de_comparison_paths={name: path.resolve() for name, path in de_paths.items()},
         anchor_design_id=str(anchor["design_id"]),
         anchor_phi=float(anchor["phi"]),
+        plots_skipped=False,
+        plots_skipped_reason=None,
     )
 
 
@@ -194,6 +233,25 @@ def select_anchor_policy(
         )
     feasible.loc[:, "_abs_phi"] = feasible["phi"].astype(float).abs()
     return feasible.sort_values(["_abs_phi", "phi", "design_id"]).iloc[0].drop(labels=["_abs_phi"])
+
+
+def select_best_verified_policy(verified_candidates: pd.DataFrame) -> pd.Series:
+    required = ("phi", "design_id")
+    missing = [column for column in required if column not in verified_candidates.columns]
+    if missing:
+        raise ValueError(f"Verified candidates table is missing required columns: {missing}")
+    if verified_candidates.empty:
+        raise ValueError("Verified candidates table is empty")
+    sort_keys = ["phi", "design_id"]
+    if "candidate_id" in verified_candidates.columns:
+        sort_keys = ["phi", "candidate_id", "design_id"]
+    return verified_candidates.sort_values(sort_keys).iloc[0]
+
+
+def _verified_feasible_count(verified_candidates: pd.DataFrame) -> int:
+    if "feasible" not in verified_candidates.columns:
+        return 0
+    return int(verified_candidates["feasible"].astype(bool).sum())
 
 
 def fixed_slice_grid(
@@ -728,19 +786,42 @@ def _envelope_summary(
     envelope_config: EnvelopeConfig,
     anchor: pd.Series,
     slice_summaries: list[dict[str, Any]],
+    plots_skipped: bool = False,
+    plots_skipped_reason: str | None = None,
+    verified_feasible_count: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    summary: dict[str, Any] = {
         "surrogate_path": str(Path(surrogate_path).resolve()),
         "output_dir": str(output_path.resolve()),
         "anchor": envelope_config.anchor,
-        "anchor_design_id": str(anchor["design_id"]),
-        "anchor_phi": float(anchor["phi"]),
         "conservative_sigma": float(envelope_config.conservative_sigma),
         "grid_size": int(envelope_config.grid_size),
         "sobol_hidden_samples": int(envelope_config.sobol_hidden_samples),
         "de_compare_enabled": bool(envelope_config.de_compare_enabled),
+        "plots_skipped": bool(plots_skipped),
         "slices": slice_summaries,
     }
+    if plots_skipped:
+        summary["plots_skipped_reason"] = plots_skipped_reason
+        summary["verified_feasible_count"] = int(
+            0 if verified_feasible_count is None else verified_feasible_count
+        )
+        summary["best_verified_candidate_id"] = (
+            str(anchor["candidate_id"])
+            if "candidate_id" in anchor.index
+            else str(anchor["design_id"])
+        )
+        summary["best_verified_design_id"] = str(anchor["design_id"])
+        summary["best_verified_phi"] = float(anchor["phi"])
+        summary["anchor_design_id"] = None
+        summary["anchor_phi"] = None
+        return summary
+
+    summary["anchor_design_id"] = str(anchor["design_id"])
+    summary["anchor_phi"] = float(anchor["phi"])
+    if verified_feasible_count is not None:
+        summary["verified_feasible_count"] = int(verified_feasible_count)
+    return summary
 
 
 def _json_ready(value: Any) -> Any:

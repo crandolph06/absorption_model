@@ -111,8 +111,23 @@ def write_viability_report(
         "",
         "## Near-Boundary Feasible Policies",
         "",
-        _markdown_table(_candidate_rows(near_boundary), _candidate_headers()),
-        "",
+    ]
+    if near_boundary.empty:
+        lines.extend(
+            [
+                "_No verified feasible policies were found._",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                _markdown_table(_candidate_rows(near_boundary), _candidate_headers()),
+                "",
+            ]
+        )
+    lines.extend(
+        [
         "## Binding Constraints",
         "",
         _markdown_table(
@@ -137,7 +152,8 @@ def write_viability_report(
             "one verified-candidates table."
         ),
         "",
-    ]
+        ]
+    )
     output_file.write_text("\n".join(lines), encoding="utf-8")
     return ReportResult(
         report_path=output_file.resolve(),
@@ -271,6 +287,21 @@ def _active_constraint_rows(verified_candidates: pd.DataFrame) -> list[list[str]
 def _plot_lines(envelope_summary: dict[str, Any], report_dir: Path) -> list[str]:
     if "slices" not in envelope_summary:
         raise ValueError("Envelope summary is missing required key 'slices'")
+    if envelope_summary.get("plots_skipped"):
+        reason = envelope_summary.get(
+            "plots_skipped_reason",
+            "Envelope plots were skipped because no verified feasible candidates were available.",
+        )
+        lines = [f"_{reason}_", ""]
+        best_candidate_id = envelope_summary.get("best_verified_candidate_id")
+        best_verified_phi = envelope_summary.get("best_verified_phi")
+        if best_candidate_id is not None:
+            lines.append(f"- Best verified candidate: `{best_candidate_id}`")
+        if best_verified_phi is not None:
+            lines.append(f"- Best verified `phi`: `{float(best_verified_phi):.6g}`")
+        if len(lines) > 2:
+            lines.append("")
+        return lines
     lines = []
     for item in envelope_summary["slices"]:
         x_name = item["x"]
