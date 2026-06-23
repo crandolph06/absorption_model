@@ -20,7 +20,7 @@ run:
   workers: 4
 
 model:
-  phase_backend: brain
+  phase_backend: physics
   years_to_run: 20
   start_year: 2026
   assessment_start_year: 2040
