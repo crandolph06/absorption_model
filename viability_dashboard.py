@@ -7,26 +7,35 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.viability.dashboard import (
+    DashboardArtifactPaths,
     DynamicDashboardArtifactPaths,
     POLICY_LABELS,
-    DashboardArtifactPaths,
+    STATIC_CONSTRAINT_LABELS,
+    STATIC_CONSTRAINT_OPTIONS,
+    STATIC_RAP_OPTIONS,
+    STATIC_SCOPE_OPTIONS,
     constraint_relaxation_table,
-    default_artifact_paths,
     default_dynamic_artifact_paths,
     direct_verification_caveat,
     direct_verification_label,
     dynamic_epoch_table,
     envelope_plot_paths,
+    expected_active_learn_surrogate_path,
     load_dynamic_dashboard_artifacts,
     load_dashboard_artifacts,
     local_feasible_sweep,
     nearest_dynamic_misses,
     policy_values_from_row,
+    policy_variable_is_fixed,
     run_direct_dynamic_schedule,
     run_direct_policy,
     score_policy_values,
     select_dashboard_candidate,
     select_dynamic_schedule,
+    static_artifact_path_status,
+    static_artifact_paths_for_scenario,
+    static_scenario_output_dir,
+    static_scenario_slug,
 )
 
 
@@ -85,9 +94,8 @@ def _load_dynamic_artifacts(
     )
 
 
-def _path_input(label: str, path: Path | None, *, container=None) -> str:
-    target = st.sidebar if container is None else container
-    return target.text_input(label, value="" if path is None else str(path))
+def _path_input(label: str, path: Path | None) -> str:
+    return st.text_input(label, value="" if path is None else str(path))
 
 
 def _current_policy_key(row: pd.Series) -> str:
@@ -132,8 +140,32 @@ def _format_slider_option(name: str, step: float):
     return lambda value: f"{float(value):.{decimals}f}"
 
 
+def _variable_is_fixed(variable) -> bool:
+    return policy_variable_is_fixed(variable)
+
+
+def _format_fixed_value(name: str, variable, value) -> str:
+    if variable.type == "int":
+        return str(int(round(float(value))))
+    if name == "retention_rate":
+        return f"{float(value):.3f}"
+    return f"{float(value):.3g}"
+
+
 def _policy_slider(name: str, variable, stored_value):
     label = POLICY_LABELS.get(name, name)
+    if _variable_is_fixed(variable):
+        fixed_value = (
+            int(round(float(stored_value)))
+            if variable.type == "int"
+            else float(stored_value)
+        )
+        st.text_input(
+            label,
+            value=_format_fixed_value(name, variable, fixed_value),
+            disabled=True,
+        )
+        return fixed_value
     if variable.type == "int":
         return st.slider(
             label,
@@ -172,6 +204,13 @@ def _interval_figure(name: str, value: float, variable, intervals) -> go.Figure:
     fig = go.Figure()
     low = float(variable.low)
     high = float(variable.high)
+    if abs(high - low) <= 1e-12:
+        padding = 1.0 if variable.type == "int" else max(abs(low) * 0.05, 0.05)
+        axis_low = low - padding
+        axis_high = high + padding
+    else:
+        axis_low = low
+        axis_high = high
     fig.add_trace(
         go.Scatter(
             x=[low, high],
@@ -205,7 +244,7 @@ def _interval_figure(name: str, value: float, variable, intervals) -> go.Figure:
             showlegend=False,
         )
     )
-    fig.update_xaxes(range=[low, high], title_text=name, fixedrange=True)
+    fig.update_xaxes(range=[axis_low, axis_high], title_text=name, fixedrange=True)
     fig.update_yaxes(visible=False, range=[-1, 1], fixedrange=True)
     fig.update_layout(
         height=86,
@@ -328,10 +367,10 @@ def _display_columns(frame: pd.DataFrame, columns: list[str]) -> list[str]:
 
 def _render_dynamic_dashboard():
     defaults = default_dynamic_artifact_paths()
-    with st.sidebar.expander("Dynamic artifacts", expanded=False) as artifact_box:
-        config_path = _path_input("Config", defaults.config, container=artifact_box)
-        evaluations_path = _path_input("Dynamic evaluations", defaults.evaluations, container=artifact_box)
-        summary_path = _path_input("Dynamic search summary", defaults.summary, container=artifact_box)
+    with st.sidebar.expander("Dynamic artifacts", expanded=False):
+        config_path = _path_input("Config", defaults.config)
+        evaluations_path = _path_input("Dynamic evaluations", defaults.evaluations)
+        summary_path = _path_input("Dynamic search summary", defaults.summary)
         sensitivity_default = (
             defaults.sensitivity
             if defaults.sensitivity is not None and defaults.sensitivity.exists()
@@ -362,12 +401,12 @@ def _render_dynamic_dashboard():
             if defaults.paper_artifacts_dir is not None and defaults.paper_artifacts_dir.exists()
             else None
         )
-        sensitivity_path = _path_input("Local sensitivity", sensitivity_default, container=artifact_box)
-        report_path = _path_input("Dynamic report", report_default, container=artifact_box)
-        relaxation_dir = _path_input("Relaxation study directory", relaxation_default, container=artifact_box)
-        bound_relaxation_dir = _path_input("Bound relaxation directory", bound_default, container=artifact_box)
-        ipug_diagnostic_dir = _path_input("IPUG diagnostic directory", ipug_default, container=artifact_box)
-        paper_artifacts_dir = _path_input("Paper artifacts directory", paper_default, container=artifact_box)
+        sensitivity_path = _path_input("Local sensitivity", sensitivity_default)
+        report_path = _path_input("Dynamic report", report_default)
+        relaxation_dir = _path_input("Relaxation study directory", relaxation_default)
+        bound_relaxation_dir = _path_input("Bound relaxation directory", bound_default)
+        ipug_diagnostic_dir = _path_input("IPUG diagnostic directory", ipug_default)
+        paper_artifacts_dir = _path_input("Paper artifacts directory", paper_default)
 
     try:
         artifacts = _load_dynamic_artifacts(
@@ -666,28 +705,59 @@ if dashboard_mode == "dynamic":
     _render_dynamic_dashboard()
     st.stop()
 
-defaults = default_artifact_paths()
 st.warning(
     "Legacy static sliders use the old constant-policy signed surrogate. "
     "They are screening guidance only and are not the default workflow for this branch."
 )
-with st.sidebar.expander("Legacy static artifacts", expanded=False) as static_artifact_box:
-    config_path = _path_input("Config", defaults.config, container=static_artifact_box)
-    surrogate_path = _path_input("Signed surrogate", defaults.surrogate, container=static_artifact_box)
-    evaluations_path = _path_input("Direct evaluations", defaults.evaluations, container=static_artifact_box)
-    verified_path = _path_input("Verified candidates", defaults.verified_candidates, container=static_artifact_box)
-    search_summary_path = _path_input("Search summary", defaults.search_summary, container=static_artifact_box)
+with st.sidebar.expander("Scenario", expanded=True):
+    rap = st.selectbox(
+        "RAP",
+        STATIC_RAP_OPTIONS,
+        format_func=str.upper,
+    )
+    constraint = st.selectbox(
+        "Constraint",
+        STATIC_CONSTRAINT_OPTIONS,
+        format_func=lambda value: STATIC_CONSTRAINT_LABELS[value],
+    )
+    scope = st.selectbox(
+        "Scope",
+        STATIC_SCOPE_OPTIONS,
+        format_func=str.title,
+    )
+    scenario_slug = static_scenario_slug(rap=rap, constraint=constraint, scope=scope)
+    scenario_paths = static_artifact_paths_for_scenario(
+        rap=rap,
+        constraint=constraint,
+        scope=scope,
+    )
+    st.caption(f"Scenario: `rap_{scenario_slug}`")
+    missing_artifacts = [
+        name for name, _path, exists in static_artifact_path_status(scenario_paths) if not exists
+    ]
+    if missing_artifacts:
+        st.warning("Missing artifacts: " + ", ".join(missing_artifacts))
+    else:
+        st.success("All expected artifacts found.")
+
+with st.sidebar.expander("Legacy static artifacts", expanded=False):
+    config_path = _path_input("Config", scenario_paths.config)
+    surrogate_path = _path_input("Signed surrogate", scenario_paths.surrogate)
+    evaluations_path = _path_input("Direct evaluations", scenario_paths.evaluations)
+    verified_path = _path_input("Verified candidates", scenario_paths.verified_candidates)
+    search_summary_path = _path_input("Search summary", scenario_paths.search_summary)
     verification_summary_path = _path_input(
         "Verification summary",
-        defaults.verification_summary,
-        container=static_artifact_box,
+        scenario_paths.verification_summary,
     )
     envelope_summary_path = _path_input(
         "Envelope summary",
-        defaults.envelope_summary,
-        container=static_artifact_box,
+        scenario_paths.envelope_summary,
     )
-    report_path = _path_input("Report", defaults.report, container=static_artifact_box)
+    report_path = _path_input(
+        "Report",
+        static_scenario_output_dir(".", rap=rap, constraint=constraint, scope=scope) / "report.md",
+    )
 sweep_points = st.sidebar.slider("Legacy slider sweep points", 25, 201, 121, 8)
 
 try:
@@ -699,7 +769,7 @@ try:
         search_summary_path,
         verification_summary_path,
         envelope_summary_path,
-        report_path,
+        report_path if Path(report_path).exists() else "",
     )
 except Exception as exc:
     st.error(str(exc))
@@ -723,8 +793,9 @@ with control_col:
     st.subheader("Policy Controls")
     selection_mode = st.radio(
         "Start from",
-        ["near_boundary_feasible", "best_margin_feasible", "candidate_id"],
+        ["best_verified", "near_boundary_feasible", "best_margin_feasible", "candidate_id"],
         format_func=lambda value: {
+            "best_verified": "Best verified (lowest phi)",
             "near_boundary_feasible": "Near-boundary feasible",
             "best_margin_feasible": "Best-margin feasible",
             "candidate_id": "Specific verified candidate",
@@ -779,6 +850,7 @@ with st.spinner("Scoring current sliders with signed surrogate..."):
             max_points=sweep_points,
         )
         for lever in config.policy.variables
+        if not policy_variable_is_fixed(config.policy.variables[lever])
     ]
 
 with main_col:
@@ -852,6 +924,10 @@ with main_col:
 
 with control_col:
     st.subheader("Local Feasible Ranges")
+    for name, variable in config.policy.variables.items():
+        if policy_variable_is_fixed(variable):
+            st.caption(POLICY_LABELS.get(name, name))
+            st.write(f"Fixed at {_format_fixed_value(name, variable, current_values[name])}.")
     for sweep in sweeps:
         variable = config.policy.variables[sweep.lever]
         current_value = float(current_values[sweep.lever])
@@ -882,7 +958,17 @@ with candidate_tab:
     )
 
 with envelope_tab:
-    for label, fixed_path, projected_path in envelope_plot_paths(artifacts.envelope_summary):
+    if artifacts.envelope_summary.get("plots_skipped"):
+        st.info(
+            artifacts.envelope_summary.get(
+                "plots_skipped_reason",
+                "Envelope plots were skipped because no verified feasible candidates were available.",
+            )
+        )
+    plot_items = envelope_plot_paths(artifacts.envelope_summary)
+    if not plot_items and not artifacts.envelope_summary.get("plots_skipped"):
+        st.write("No envelope slices were generated.")
+    for label, fixed_path, projected_path in plot_items:
         st.subheader(label)
         cols = st.columns(2)
         cols[0].image(str(fixed_path), caption="Fixed slice")

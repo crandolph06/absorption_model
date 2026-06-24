@@ -1,4 +1,5 @@
 from dataclasses import replace
+import json
 import tempfile
 import unittest
 
@@ -82,6 +83,87 @@ class ViabilityPlotsReportTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "no verified candidates are feasible"):
             select_anchor_policy(verified, envelope_config)
+
+    def test_run_envelope_plots_skips_slices_without_verified_feasible_rows(self):
+        config = _small_envelope_config(
+            self.config,
+            slices=[EnvelopeSliceConfig(x="annual_intake", y="retention_rate")],
+            grid_size=3,
+            sobol_hidden_samples=4,
+            de_points=1,
+            de_maxiter=1,
+            de_popsize=2,
+        )
+        weights = np.zeros(len(config.policy.variables))
+        bundle = _linear_bundle(config, weights, bias=0.4)
+        verified = _verified_candidates(config)
+        verified["feasible"] = False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = run_envelope_plots(
+                surrogate=bundle,
+                surrogate_path=f"{tmp}/surrogate_constraints_gpr.joblib",
+                evaluations=_evaluations(config),
+                verified_candidates=verified,
+                config=config,
+                output_dir=tmp,
+            )
+
+            summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+            self.assertTrue(result.plots_skipped)
+            self.assertEqual(result.plot_paths, {})
+            self.assertEqual(summary["slices"], [])
+            self.assertEqual(summary["best_verified_candidate_id"], "candidate_best")
+            self.assertIsNone(summary["anchor_design_id"])
+
+    def test_report_generation_notes_skipped_envelope_plots(self):
+        config = replace(
+            self.config,
+            report=replace(
+                require_report_config(self.config),
+                top_candidate_count=2,
+                near_boundary_count=2,
+            ),
+        )
+        verified = _verified_candidates(config)
+        verified["feasible"] = False
+        envelope_summary = {
+            "plots_skipped": True,
+            "plots_skipped_reason": "No verified feasible candidates.",
+            "best_verified_candidate_id": "candidate_best",
+            "best_verified_phi": 0.5,
+            "slices": [],
+        }
+        search_summary = {
+            "scored_count": 16,
+            "selected_count": 2,
+        }
+        verification_summary = {
+            "verified_count": 3,
+            "verified_feasible_count": 0,
+            "predicted_feasible_count": 0,
+            "conservative_predicted_feasible_count": 0,
+            "false_feasible_count": 0,
+            "false_conservative_feasible_count": 0,
+            "best_verified_phi": 0.5,
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = write_viability_report(
+                config=config,
+                evaluations=_evaluations(config),
+                verified_candidates=verified,
+                search_summary=search_summary,
+                verification_summary=verification_summary,
+                envelope_summary=envelope_summary,
+                output_path=f"{tmp}/report.md",
+            )
+
+            text = result.report_path.read_text(encoding="utf-8")
+            self.assertIn("Verified feasible candidates: `0`", text)
+            self.assertIn("No verified feasible policies were found.", text)
+            self.assertIn("No verified feasible candidates.", text)
+            self.assertIn("candidate_best", text)
 
     def test_fixed_slice_grid_respects_integer_rounding(self):
         config = _small_envelope_config(

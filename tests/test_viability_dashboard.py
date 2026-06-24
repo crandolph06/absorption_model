@@ -7,7 +7,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from src.viability.config import load_config
+from src.viability.config import VariableConfig, load_config
 from src.viability.dashboard import (
     DashboardArtifactPaths,
     DynamicDashboardArtifactPaths,
@@ -16,6 +16,7 @@ from src.viability.dashboard import (
     direct_verification_caveat,
     direct_verification_label,
     dynamic_epoch_table,
+    expected_active_learn_surrogate_path,
     feasible_intervals,
     load_dynamic_dashboard_artifacts,
     load_dashboard_artifacts,
@@ -23,8 +24,13 @@ from src.viability.dashboard import (
     nearest_dynamic_misses,
     one_lever_sweep,
     policy_values_from_row,
+    policy_variable_is_fixed,
     select_dashboard_candidate,
     select_dynamic_schedule,
+    static_artifact_path_status,
+    static_artifact_paths_for_scenario,
+    static_scenario_output_dir,
+    static_scenario_slug,
 )
 
 
@@ -46,6 +52,23 @@ class ViabilityDashboardTest(unittest.TestCase):
     def setUp(self):
         self.config = load_config("configs/viability.example.yaml")
 
+    def test_policy_variable_is_fixed_detects_equal_bounds(self):
+        self.assertTrue(
+            policy_variable_is_fixed(
+                VariableConfig(type="float", low=0.40, high=0.40),
+            )
+        )
+        self.assertTrue(
+            policy_variable_is_fixed(
+                VariableConfig(type="int", low=21, high=21),
+            )
+        )
+        self.assertFalse(
+            policy_variable_is_fixed(
+                VariableConfig(type="int", low=0, high=10),
+            )
+        )
+
     def test_near_boundary_default_selects_minimum_abs_phi(self):
         candidate = select_dashboard_candidate(
             _verified_candidates(self.config),
@@ -54,6 +77,71 @@ class ViabilityDashboardTest(unittest.TestCase):
 
         self.assertEqual(candidate["candidate_id"], "candidate_near")
         self.assertAlmostEqual(float(candidate["phi"]), -0.05)
+
+    def test_best_verified_selects_lowest_phi_even_when_all_infeasible(self):
+        verified = _verified_candidates(self.config)
+        verified["feasible"] = False
+
+        candidate = select_dashboard_candidate(verified, mode="best_verified")
+
+        self.assertEqual(candidate["candidate_id"], "candidate_best")
+        self.assertAlmostEqual(float(candidate["phi"]), -1.0)
+
+    def test_static_scenario_paths_follow_run_output_layout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            slug = static_scenario_slug(rap="a", constraint="ideal", scope="unit")
+            scenario_root = static_scenario_output_dir(root, rap="a", constraint="ideal", scope="unit")
+            active_learn_dir = scenario_root / "active_learn"
+            active_learn_dir.mkdir(parents=True)
+            model_path = active_learn_dir / "iteration_002" / "surrogate_constraints_gpr.joblib"
+            model_path.parent.mkdir(parents=True)
+            model_path.write_bytes(b"model")
+            (active_learn_dir / "state.json").write_text(
+                json.dumps({"latest_model_path": str(model_path)}),
+                encoding="utf-8",
+            )
+
+            paths = static_artifact_paths_for_scenario(
+                rap="a",
+                constraint="ideal",
+                scope="unit",
+                root=root,
+            )
+
+            self.assertEqual(slug, "a_ideal_unit")
+            self.assertEqual(
+                paths.config,
+                root / "configs" / "viability" / "a_ideal_unit.yaml",
+            )
+            self.assertEqual(paths.surrogate, model_path)
+            self.assertEqual(
+                paths.evaluations,
+                scenario_root / "doe_128" / "evaluations.parquet",
+            )
+            self.assertEqual(
+                paths.verified_candidates,
+                scenario_root / "verify" / "verified_candidates.parquet",
+            )
+            status = dict(
+                (name, exists) for name, _path, exists in static_artifact_path_status(paths)
+            )
+            self.assertTrue(status["surrogate"])
+            self.assertFalse(status["evaluations"])
+
+    def test_expected_active_learn_surrogate_falls_back_to_latest_iteration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            active_learn_dir = Path(tmp)
+            first = active_learn_dir / "iteration_001" / "surrogate_constraints_gpr.joblib"
+            second = active_learn_dir / "iteration_002" / "surrogate_constraints_gpr.joblib"
+            first.parent.mkdir(parents=True)
+            second.parent.mkdir(parents=True)
+            first.write_bytes(b"first")
+            second.write_bytes(b"second")
+
+            resolved = expected_active_learn_surrogate_path(active_learn_dir)
+
+            self.assertEqual(resolved, second)
 
     def test_best_margin_and_specific_candidate_selection(self):
         verified = _verified_candidates(self.config)

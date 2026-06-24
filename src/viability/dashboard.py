@@ -8,7 +8,7 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
-from src.viability.config import ViabilityConfig, load_config
+from src.viability.config import VariableConfig, ViabilityConfig, load_config
 from src.viability.dynamic_policy import EpochPolicySchedule, dynamic_feature_names
 from src.viability.evaluator import (
     EvaluationResult,
@@ -35,6 +35,17 @@ POLICY_LABELS = {
     "max_manning_pct": "Maximum manning %",
     "flug_quota_per_phase": "FLUG quota / phase",
     "ipug_quota_per_phase": "IPUG quota / phase",
+}
+
+STATIC_RAP_OPTIONS = ("a", "b", "c")
+STATIC_CONSTRAINT_OPTIONS = ("current", "pragmatic", "optimistic", "ideal")
+STATIC_SCOPE_OPTIONS = ("unit", "enterprise")
+STATIC_DOE_DIR = "doe_128"
+STATIC_CONSTRAINT_LABELS = {
+    "current": "Current",
+    "pragmatic": "Pragmatic",
+    "optimistic": "Optimistic",
+    "ideal": "Ideal",
 }
 
 
@@ -137,6 +148,94 @@ def direct_verification_caveat(config: ViabilityConfig) -> str:
         "This bypasses the outer signed-RAP surrogate, but it still uses the "
         "configured internal sortie brain for each simulated phase."
     )
+
+
+def policy_variable_is_fixed(variable: VariableConfig) -> bool:
+    if variable.type == "int":
+        return int(variable.low) == int(variable.high)
+    return abs(float(variable.high) - float(variable.low)) <= 1e-12
+
+
+def static_scenario_slug(*, rap: str, constraint: str, scope: str) -> str:
+    rap_key = rap.lower()
+    constraint_key = constraint.lower()
+    scope_key = scope.lower()
+    if rap_key not in STATIC_RAP_OPTIONS:
+        raise ValueError(f"Unsupported RAP scenario {rap!r}; expected one of {STATIC_RAP_OPTIONS}")
+    if constraint_key not in STATIC_CONSTRAINT_OPTIONS:
+        raise ValueError(
+            f"Unsupported constraint scenario {constraint!r}; "
+            f"expected one of {STATIC_CONSTRAINT_OPTIONS}"
+        )
+    if scope_key not in STATIC_SCOPE_OPTIONS:
+        raise ValueError(f"Unsupported scope {scope!r}; expected one of {STATIC_SCOPE_OPTIONS}")
+    return f"{rap_key}_{constraint_key}_{scope_key}"
+
+
+def static_scenario_output_dir(
+    root: str | Path,
+    *,
+    rap: str,
+    constraint: str,
+    scope: str,
+) -> Path:
+    slug = static_scenario_slug(rap=rap, constraint=constraint, scope=scope)
+    return Path(root) / "outputs" / "viability" / f"rap_{slug}"
+
+
+def expected_active_learn_surrogate_path(active_learn_dir: str | Path) -> Path:
+    directory = Path(active_learn_dir)
+    state_path = directory / "state.json"
+    if state_path.exists():
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        return Path(str(state["latest_model_path"]))
+    iteration_models = sorted(directory.glob("iteration_*/surrogate_constraints_gpr.joblib"))
+    if iteration_models:
+        return iteration_models[-1]
+    baseline = directory / "baseline" / "surrogate_constraints_gpr.joblib"
+    if baseline.exists():
+        return baseline
+    return directory / "iteration_003" / "surrogate_constraints_gpr.joblib"
+
+
+def static_artifact_paths_for_scenario(
+    *,
+    rap: str,
+    constraint: str,
+    scope: str,
+    root: str | Path = ".",
+    doe_dir: str = STATIC_DOE_DIR,
+) -> DashboardArtifactPaths:
+    base = Path(root)
+    slug = static_scenario_slug(rap=rap, constraint=constraint, scope=scope)
+    scenario_root = base / "outputs" / "viability" / f"rap_{slug}"
+    active_learn_dir = scenario_root / "active_learn"
+    report_path = scenario_root / "report.md"
+    return DashboardArtifactPaths(
+        config=base / "configs" / "viability" / f"{slug}.yaml",
+        surrogate=expected_active_learn_surrogate_path(active_learn_dir),
+        evaluations=scenario_root / doe_dir / "evaluations.parquet",
+        verified_candidates=scenario_root / "verify" / "verified_candidates.parquet",
+        search_summary=scenario_root / "search" / "search_summary.json",
+        verification_summary=scenario_root / "verify" / "verification_summary.json",
+        envelope_summary=scenario_root / "envelope" / "envelope_summary.json",
+        report=report_path if report_path.exists() else None,
+    )
+
+
+def static_artifact_path_status(paths: DashboardArtifactPaths) -> list[tuple[str, Path, bool]]:
+    items: list[tuple[str, Path]] = [
+        ("config", paths.config),
+        ("surrogate", paths.surrogate),
+        ("evaluations", paths.evaluations),
+        ("verified_candidates", paths.verified_candidates),
+        ("search_summary", paths.search_summary),
+        ("verification_summary", paths.verification_summary),
+        ("envelope_summary", paths.envelope_summary),
+    ]
+    if paths.report is not None:
+        items.append(("report", paths.report))
+    return [(name, path, path.exists()) for name, path in items]
 
 
 def default_artifact_paths(root: str | Path = ".") -> DashboardArtifactPaths:
@@ -510,6 +609,11 @@ def select_dashboard_candidate(
         return ranked.sort_values(["_abs_phi", "phi", "candidate_id"]).iloc[0].drop(
             labels=["_abs_phi"]
         )
+    if mode == "best_verified":
+        sort_keys = ["phi", "design_id"]
+        if "candidate_id" in verified_candidates.columns:
+            sort_keys = ["phi", "candidate_id", "design_id"]
+        return verified_candidates.sort_values(sort_keys).iloc[0]
     if mode == "best_margin_feasible":
         feasible = _feasible_candidates(verified_candidates)
         return feasible.sort_values(["phi", "candidate_id"]).iloc[0]
@@ -524,7 +628,7 @@ def select_dashboard_candidate(
         return matches.iloc[0]
     raise ValueError(
         "mode must be one of 'near_boundary_feasible', "
-        "'best_margin_feasible', or 'candidate_id'"
+        "'best_verified', 'best_margin_feasible', or 'candidate_id'"
     )
 
 

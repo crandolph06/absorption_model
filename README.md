@@ -124,14 +124,14 @@ absorption_model/
 2. Starts upgrades (FLUG / IPUG windows and optional per-phase quotas)  
 3. **Plant step** (one of two modes):
    - **Brain (default):** sortie brain → `apply_phase_aging()` with predicted rates; graduation via `graduate_current_upgrades(deferrals)` from brain deferral outputs.
-   - **Physics:** `run_phase_simulation()` per squadron; graduation and deferrals come from the allocator (`graduate_completed_upgrades`, `apply_deferred_burden_to_squadron`). End-of-phase uses `skip_graduation=True` so brain deferrals are not applied twice.
+   - **Physics:** `run_phase_simulation()` per squadron; allocator deferrals via `apply_deferred_burden_to_squadron`; graduation via `graduate_completed_upgrades()` inside `process_end_of_phase`, then ADSC countdown, staff funnel, and retention (same end-of-phase order as brain except plant step).
 4. Staff funnel, retention, history  
 
 Enable physics plant: `CAFSimulation(..., use_physics_allocator=True, brain=None)`.
 
 **Brain path caveat:** Does **not** re-run `engine.py` each phase. RAP shortfall in history is `RAP_target − brain_predicted_rate`, not capacity balance.
 
-**Physics path:** RAP shortfall comes from observed pilot rates via `store_stats_from_physics()` (line pilots with `upgrade == NONE`; syllabus students excluded from RAP cohort means).
+**Physics path:** RAP shortfall comes from observed pilot rates via `store_stats_from_physics()` (WG cohort excludes MQT only; FLUG/IPUG remain in their qual cohorts).
 
 **Entry points:** `manning_app.py`, `src/manning_main.py` (`setup_simulation()`). Apps today use the brain path; physics is used from `optimize_constant_policy.py` and programmatic rollouts.
 
@@ -269,7 +269,7 @@ HPC sessions are limited to **4 hours**; sweep scripts use `timeout` and checkpo
 1. **Import paths:** Run apps and scripts from **repo root** so `src.*` and `brains/` resolve correctly.
 2. **Brain / code alignment:** Mismatched 12 vs 16 outputs silently breaks syllabus charts or sim deferrals. Always verify output count after pulling a new `.pkl`.
 3. **Layer 1 vs Layer 2 (brain):** Single-phase sweeps train the brain on **capacity-constrained** outcomes; the brain manning path applies predicted rates **without** re-enforcing `PAA × UTE` fleet totals. Use `use_physics_allocator=True` when conclusions must match Layer 1 rules.
-4. **Physics end-of-phase:** `skip_graduation=True` in `_run_squadron_physics_phase` — graduation already happened inside `run_phase_simulation`; do not call `graduate_current_upgrades` afterward.
+4. **Physics end-of-phase:** `process_end_of_phase` calls `graduate_completed_upgrades` (allocator-native), decrements ADSC, then staff funnel and retention — matching brain end-of-phase except aging came from the allocator.
 5. **`total_pilots` in training data** = line pilot count in manning prediction, not including staff.
 6. **`SimulationConfig`:** Fleet-wide phase length and (Layer 1) allocation noise live in `src/simulation_config.py`, not on `SquadronConfig`. Pass `sim_config=` to `run_phase_simulation()` or `CAFSimulation(...)`.
 7. **`archive/`:** Historical scripts; not part of the active pipeline unless you know you need them.
