@@ -2,6 +2,9 @@
 mv outputs/viability/rap_a_current_enterprise outputs/viability/rap_a_current_enterprise_broken_physics_$(date +%Y%m%d)
 mkdir -p outputs/viability/rap_a_current_enterprise
 
+# SLURM Commands in order
+['doe', 'holdout', 'active', 'search', 'verify', 'plot', 'report']
+
 # 1. DOE (128 designs)
 python -m src.viability.cli run-doe \
   --config configs/viability/a_current_enterprise.yaml \
@@ -22,7 +25,7 @@ python -m src.viability.cli active-learn \
   --output-dir outputs/viability/rap_a_current_enterprise/active_learn
 
 # 4. Surrogate (from active-learn state)
-SURR=$(python -c "import json; print(json.load(open('outputs/viability/rap_a_current_enterprise/active_learn/state.json'))['latest_model_path'])")
+SURR=$(python -c 'import json; print(json.load(open("outputs/viability/rap_a_current_enterprise/active_learn/state.json"))["latest_model_path"])')
 
 python -m src.viability.cli search \
   --config configs/viability/a_current_enterprise.yaml \
