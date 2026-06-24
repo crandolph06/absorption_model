@@ -12,7 +12,8 @@ def setup_simulation(round_robin: bool, annual_intake: int,
                      flug_window_start: int = 250, ipug_window_start: int = 400, 
                      max_manning_pct: int = 150, retention_rate: float = .4,
                      staff_priority_mode: PriorityMode = PriorityMode.FL_FIRST,
-                     sim_config: Optional[SimulationConfig] = None):
+                     sim_config: Optional[SimulationConfig] = None,
+                     use_physics_allocator: bool = False):
     if existing_sim:
         sim = copy.deepcopy(existing_sim)
         sim.reset()
@@ -25,8 +26,12 @@ def setup_simulation(round_robin: bool, annual_intake: int,
         sim.max_manning = max_manning_pct / 100
         sim.staff_priority = staff_priority_mode
         sim.retention_rate = retention_rate
+        sim.use_physics_allocator = use_physics_allocator
 
-        sim.brain = ai_brain
+        if use_physics_allocator:
+            sim.brain = None
+        else:
+            sim.brain = ai_brain
         if sim_config is not None:
             sim.sim_config = sim_config
 
@@ -35,10 +40,12 @@ def setup_simulation(round_robin: bool, annual_intake: int,
     
     else:
         sim = CAFSimulation(round_robin=round_robin,
-                            brain = ai_brain, flug_window_start=flug_window_start, 
+                            brain=None if use_physics_allocator else ai_brain,
+                            flug_window_start=flug_window_start, 
                             ipug_window_start=ipug_window_start, max_manning_pct=max_manning_pct, 
                             staff_priority_mode=staff_priority_mode, annual_intake=annual_intake,
-                            retention_rate=retention_rate, sim_config=sim_config)
+                            retention_rate=retention_rate, sim_config=sim_config,
+                            use_physics_allocator=use_physics_allocator)
 
     # Used 1.5 CCR for all units
     # Used 50% of exp pilots as starting IP value 

@@ -277,10 +277,19 @@ class CAFSimulation:
             target_sq.pilots.append(new_pilot)
             target_sq.update_stats()
 
+    def _decrement_adsc_for_squadron(self, sq: SquadronConfig) -> None:
+        """Mirror brain ``apply_phase_aging`` ADSC countdown for physics-backed phases."""
+        phase_months = float(self.sim_config.phase_length_months)
+        if phase_months <= 0:
+            return
+        for pilot in sq.pilots:
+            if pilot.active and pilot.adsc_remaining > 0:
+                pilot.adsc_remaining = max(0.0, float(pilot.adsc_remaining) - phase_months)
+
     def _run_squadron_physics_phase(self, sq: SquadronConfig, year: int, phase_num: int):
         """One CAF phase using ``run_phase_simulation`` instead of the sortie brain."""
-        from src.engine import graduate_completed_upgrades, run_phase_simulation
         from src.rap_state import mqt_observed_sortie_metrics
+        from src.engine import run_phase_simulation
 
         phase_days = self.sim_config.phase_length_days
         run_phase_simulation(
@@ -297,7 +306,6 @@ class CAFSimulation:
             sq.observed_mqt_monthly = mqt_metrics["sortie_mo"]
 
         current_stats = sq.store_stats_from_physics(year, phase_num, phase_days)
-        graduate_completed_upgrades(sq.pilots)
         self.process_end_of_phase(
             sq,
             year,
@@ -305,7 +313,6 @@ class CAFSimulation:
             self.retention_rate,
             current_stats,
             deferrals=(0, 0, 0, 0, 0, 0),
-            skip_graduation=True,
         )
 
     def run_phase(self, phase_num: int, year: int):
@@ -379,14 +386,18 @@ class CAFSimulation:
         return pd.DataFrame(self.history)
     
 
-    def process_end_of_phase(self, sq: SquadronConfig, year: int, phase_num: int, retention_rate, current_stats: dict, deferrals: Tuple[int, int, int, int, int, int], skip_graduation: bool = False):
-        
+    def process_end_of_phase(self, sq: SquadronConfig, year: int, phase_num: int, retention_rate, current_stats: dict, deferrals: Tuple[int, int, int, int, int, int]):
+        from src.engine import graduate_completed_upgrades
+
         staff_ips = 0
         staff_fls = 0
         separated_count = 0
         retained_count = 0
 
-        if not skip_graduation:
+        if self.use_physics_allocator:
+            graduate_completed_upgrades(sq.pilots)
+            self._decrement_adsc_for_squadron(sq)
+        else:
             sq.graduate_current_upgrades(deferrals, sorties_only=False)
 
         sq.send_to_staff(priority_mode=self.staff_priority)

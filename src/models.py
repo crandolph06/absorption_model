@@ -402,12 +402,14 @@ class SquadronConfig:
         *,
         line_only: bool = True,
         exclude_upgrades: bool = False,
+        exclude_mqt: bool = False,
     ) -> float:
         pilots = [
             p for p in self.pilots
             if p.active and p.qual == qual
             and (not line_only or p.current_assignment == Assignment.LINE)
             and (not exclude_upgrades or p.upgrade == Upgrade.NONE)
+            and (not exclude_mqt or p.upgrade != Upgrade.MQT)
         ]
         if not pilots:
             return 0.0
@@ -678,10 +680,10 @@ class SquadronConfig:
 
         self.update_stats()
 
-        wg_rate_mo = self._mean_monthly_sortie_field(Qual.WG, "sortie_rap_monthly")
+        wg_rate_mo = self._mean_monthly_sortie_field(Qual.WG, "sortie_rap_monthly", exclude_mqt=True)
         fl_rate_mo = self._mean_monthly_sortie_field(Qual.FL, "sortie_rap_monthly")
         ip_rate_mo = self._mean_monthly_sortie_field(Qual.IP, "sortie_rap_monthly")
-        wg_rate_blue = self._mean_monthly_sortie_field(Qual.WG, "sortie_blue_monthly")
+        wg_rate_blue = self._mean_monthly_sortie_field(Qual.WG, "sortie_blue_monthly", exclude_mqt=True)
         fl_rate_blue = self._mean_monthly_sortie_field(Qual.FL, "sortie_blue_monthly")
         ip_rate_blue = self._mean_monthly_sortie_field(Qual.IP, "sortie_blue_monthly")
 

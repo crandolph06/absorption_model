@@ -34,6 +34,31 @@ def _clean_syllabus_preds(raw: np.ndarray) -> np.ndarray:
     return np.where(vals < _SYLLABI_NEGLIGIBLE, 0.0, vals)
 
 
+def _osc_status(history: pd.DataFrame) -> str:
+    """FAILED if any squadron-phase hit allocator self-termination; else VIABLE."""
+    if "self_terminating_phase" not in history.columns:
+        return "VIABLE"
+    if history["self_terminating_phase"].fillna(False).astype(bool).any():
+        return "FAILED"
+    return "VIABLE"
+
+
+def _syllabus_carry_by_timeline(df: pd.DataFrame) -> pd.DataFrame:
+    """CAF-wide sortie carry from allocator history (physics path)."""
+    out = df.copy()
+    for col in ("mqt_sortie_carry", "flug_sortie_carry", "ipug_sortie_carry"):
+        if col not in out.columns:
+            out[col] = 0.0
+    out["timeline"] = out["year"].astype(str) + " P" + out["phase"].astype(str)
+    return (
+        out.groupby(["year", "phase", "timeline"], as_index=False)[
+            ["mqt_sortie_carry", "flug_sortie_carry", "ipug_sortie_carry"]
+        ]
+        .sum()
+        .sort_values(["year", "phase"])
+    )
+
+
 def _brain_features_from_history(df: pd.DataFrame, ute: float) -> pd.DataFrame:
     """Same feature math as CAFSimulation.predict_rates_fast, one row per history row."""
     out = df.copy()
@@ -114,6 +139,17 @@ priority_options = {
 # --- Sidebar Controls ---
 st.sidebar.header("Simulation Parameters")
 
+# phase_backend = st.sidebar.radio(
+#     "Phase plant",
+#     options=["Brain", "Physics"],
+#     index=1,
+#     horizontal=True,
+#     help="Brain: fast MLP sortie rates. Physics: Layer 1 allocator each phase (slower, rule-consistent).",
+# )
+# use_physics = phase_backend == "Physics"
+phase_backend = "Physics"
+use_physics = True
+
 with st.sidebar.form("sim_params"):
     years = st.slider("Years to Run", 5, 20, 20)
     intake = st.slider("Annual B-Course Intake", 10, 350, 200)
@@ -159,39 +195,56 @@ def load_ai_brain(brain_path: str, brain_mtime: float):
     return joblib.load(brain_path)
 
 
-if not os.path.exists(BRAIN_PATH):
-    st.error(
-        f"🚨 '{BRAIN_PATH}' not found! Copy the HPC artifact from "
-        "`outputs/single_phase/brains/` or run `hpc_train_brain_multi_output.py`."
+cached_brain = None
+if use_physics:
+    st.sidebar.caption("Physics plant: no sortie brain required.")
+else:
+    if not os.path.exists(BRAIN_PATH):
+        st.error(
+            f"🚨 '{BRAIN_PATH}' not found! Copy the HPC artifact from "
+            "`outputs/single_phase/brains/` or run `hpc_train_brain_multi_output.py`, "
+            "or switch **Phase plant** to Physics."
+        )
+        st.stop()
+
+    _brain_mtime = os.path.getmtime(BRAIN_PATH)
+    cached_brain = load_ai_brain(BRAIN_PATH, _brain_mtime)
+
+    _n_fit = _pipeline_n_features_in(cached_brain)
+    _n_engine = len(CAFSimulation._PREDICT_FEATURE_COLS)
+    if _n_fit is not None and _n_fit != _n_engine:
+        st.error(
+            f"The loaded brain expects {_n_fit} input features but the simulator builds {_n_engine} "
+            f"(including **paa** and **ute**). Retrain with the current `hpc_train_brain_multi_output.py` "
+            f"(same feature list as `CAFSimulation.predict_rates_fast`) and replace `{BRAIN_PATH}`."
+        )
+        st.stop()
+
+    st.sidebar.caption(
+        f"Brain: `{BRAIN_PATH}` · file mtime {_brain_mtime:.0f} "
+        f"({datetime.fromtimestamp(_brain_mtime).strftime('%Y-%m-%d %H:%M')})"
     )
-    st.stop()
-
-_brain_mtime = os.path.getmtime(BRAIN_PATH)
-cached_brain = load_ai_brain(BRAIN_PATH, _brain_mtime)
-
-_n_fit = _pipeline_n_features_in(cached_brain)
-_n_engine = len(CAFSimulation._PREDICT_FEATURE_COLS)
-if _n_fit is not None and _n_fit != _n_engine:
-    st.error(
-        f"The loaded brain expects {_n_fit} input features but the simulator builds {_n_engine} "
-        f"(including **paa** and **ute**). Retrain with the current `hpc_train_brain_multi_output.py` "
-        f"(same feature list as `CAFSimulation.predict_rates_fast`) and replace `{BRAIN_PATH}`."
-    )
-    st.stop()
-
-st.sidebar.caption(
-    f"Brain: `{BRAIN_PATH}` · file mtime {_brain_mtime:.0f} "
-    f"({datetime.fromtimestamp(_brain_mtime).strftime('%Y-%m-%d %H:%M')})"
-)
 
 # --- Run Simulation ---
 if submitted:
-    with st.spinner("Running Simulation..."):
+    spinner_label = (
+        "Running physics simulation (full CAF allocator - takes approximately 30 seconds)..."
+        if use_physics
+        else "Running simulation..."
+    )
+    with st.spinner(spinner_label):
         # 1. Setup & Run
-        sim, squadrons = setup_simulation(round_robin=round_robin, ai_brain=cached_brain,
-                                          flug_window_start=flug_start, ipug_window_start=ipug_start, annual_intake=intake,
-                                          max_manning_pct=max_manning_pct, staff_priority_mode=staff_priority_mode,
-                                          retention_rate=retention)
+        sim, squadrons = setup_simulation(
+            round_robin=round_robin,
+            ai_brain=cached_brain,
+            flug_window_start=flug_start,
+            ipug_window_start=ipug_start,
+            annual_intake=intake,
+            max_manning_pct=max_manning_pct,
+            staff_priority_mode=staff_priority_mode,
+            retention_rate=retention,
+            use_physics_allocator=use_physics,
+        )
         df = sim.run_simulation(
             years_to_run=years, squadron_configs=squadrons, ute=ute_val
             ) 
@@ -208,6 +261,7 @@ if submitted:
 
     if df is not None and not df.empty:
         df['timeline'] = df['year'].astype(str) + " P" + df['phase'].astype(str)
+        st.caption(f"Plant: **{phase_backend.lower()}**")
 
         # 3. IMMEDIATE AGGREGATION (CAF Wide)
         df_display = df.groupby(['year', 'phase', 'timeline']).agg({
@@ -232,12 +286,13 @@ if submitted:
 
         # --- Top Level Metrics (Optional) ---
         st.markdown(f"### CAF Status at Year {years}")
-        m1, m2, m3, m4, m5 = st.columns(5)
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
         m1.metric("Final Total Pilots", int(df_display['total_pilots'].iloc[-1]))
         m2.metric("Final Total Line Pilots", int(df_display['line_pilots'].iloc[-1]))
         m3.metric("Final Total Non-Line Pilots", int(df_display['staff_ips'].iloc[-1] + int(df_display['staff_fls'].iloc[-1])))
         m4.metric("Final Line Exp Ratio", f"{df_display['exp_rat'].iloc[-1]*100:.1f}%")
         m5.metric("Total Separations", int(df_display['separated'].sum()))
+        m6.metric("OSC Status", _osc_status(df))
 
         # --- Charts ---
         st.subheader("Pilot Population by Qualification")
@@ -472,62 +527,99 @@ if submitted:
     st.plotly_chart(fig_health, width='stretch')
 
     if df is not None and not df.empty:
-        # --- Chart 4: Incomplete syllabi from brain (CAF aggregate over time) ---
         st.divider()
-        st.subheader("Incomplete Syllabi (Brain Prediction)")
-        # 16-output brain: values from brain outputs 10–15
-        st.caption(
-            "Y-axis is syllabus-normalized count (not %), summed across squadrons each phase. "
-            "1.0 ≈ one full syllabus incomplete; values from brain outputs 6–11 (same as single-phase dashboard)."
-        )
-        sorties_only_syll = st.toggle(
-            "Sorties only",
-            value=True,
-            key="manning_chart4_sorties_only",
-            help="On: sorties-only remainder (default). Off: sorties + sims (total syllabus).",
-        )
-        df_syll = _syllabus_preds_by_timeline(df, cached_brain, ute_val)
-        if sorties_only_syll:
-            syll_series = [
-                ("remaining_mqt_syllabi_sorties_only_mean", "MQT"),
-                ("remaining_flug_syllabi_sorties_only_mean", "FLUG"),
-                ("remaining_ipug_syllabi_sorties_only_mean", "IPUG"),
-            ]
-            syll_mode_label = "Sorties only"
-        else:
-            syll_series = [
-                ("remaining_mqt_syllabi_mean", "MQT"),
-                ("remaining_flug_syllabi_mean", "FLUG"),
-                ("remaining_ipug_syllabi_mean", "IPUG"),
-            ]
-            syll_mode_label = "Total syllabus (sorties + sims)"
-
-        colors_upgrade = {"MQT": "#f59e0b", "FLUG": "#ec4899", "IPUG": "#6366f1"}
-        fig_syll = go.Figure()
-        for col, label in syll_series:
-            fig_syll.add_trace(
-                go.Scatter(
-                    x=df_syll["timeline"],
-                    y=df_syll[col],
-                    name=label,
-                    line=dict(color=colors_upgrade[label], width=3),
-                    mode="lines",
-                    hovertemplate=(
-                        f"<b>%{{x}}</b><br>{label}: %{{y:.2f}} syllabi<extra></extra>"
-                    ),
-                )
+        if use_physics:
+            st.subheader("Incomplete Syllabi (Physics Allocator)")
+            st.caption(
+                "Sortie carry summed across squadrons each phase — incomplete syllabus "
+                "sortie slots remaining after the allocator run."
             )
-        fig_syll.update_layout(
-            xaxis_title="Year/Phase",
-            yaxis_title=f"Incomplete syllabi ({syll_mode_label})",
-            yaxis_tickformat=".2f",
-            hovermode="x unified",
-            margin=dict(l=20, r=20, t=30, b=20),
-            height=350,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        )
-        fig_syll.update_yaxes(autorange=True, rangemode="tozero")
-        st.plotly_chart(fig_syll, width="stretch")
+            df_syll = _syllabus_carry_by_timeline(df)
+            colors_upgrade = {"MQT": "#f59e0b", "FLUG": "#ec4899", "IPUG": "#6366f1"}
+            syll_series = [
+                ("mqt_sortie_carry", "MQT"),
+                ("flug_sortie_carry", "FLUG"),
+                ("ipug_sortie_carry", "IPUG"),
+            ]
+            fig_syll = go.Figure()
+            for col, label in syll_series:
+                fig_syll.add_trace(
+                    go.Scatter(
+                        x=df_syll["timeline"],
+                        y=df_syll[col],
+                        name=label,
+                        line=dict(color=colors_upgrade[label], width=3),
+                        mode="lines",
+                        hovertemplate=(
+                            f"<b>%{{x}}</b><br>{label}: %{{y:.0f}} sortie slots<extra></extra>"
+                        ),
+                    )
+                )
+            fig_syll.update_layout(
+                xaxis_title="Year/Phase",
+                yaxis_title="Incomplete sortie slots (carry)",
+                hovermode="x unified",
+                margin=dict(l=20, r=20, t=30, b=20),
+                height=350,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+            fig_syll.update_yaxes(autorange=True, rangemode="tozero")
+            st.plotly_chart(fig_syll, width="stretch")
+        else:
+            st.subheader("Incomplete Syllabi (Brain Prediction)")
+            # 16-output brain: values from brain outputs 10–15
+            st.caption(
+                "Y-axis is syllabus-normalized count (not %), summed across squadrons each phase. "
+                "1.0 ≈ one full syllabus incomplete; values from brain outputs 6–11 (same as single-phase dashboard)."
+            )
+            sorties_only_syll = st.toggle(
+                "Sorties only",
+                value=True,
+                key="manning_chart4_sorties_only",
+                help="On: sorties-only remainder (default). Off: sorties + sims (total syllabus).",
+            )
+            df_syll = _syllabus_preds_by_timeline(df, cached_brain, ute_val)
+            if sorties_only_syll:
+                syll_series = [
+                    ("remaining_mqt_syllabi_sorties_only_mean", "MQT"),
+                    ("remaining_flug_syllabi_sorties_only_mean", "FLUG"),
+                    ("remaining_ipug_syllabi_sorties_only_mean", "IPUG"),
+                ]
+                syll_mode_label = "Sorties only"
+            else:
+                syll_series = [
+                    ("remaining_mqt_syllabi_mean", "MQT"),
+                    ("remaining_flug_syllabi_mean", "FLUG"),
+                    ("remaining_ipug_syllabi_mean", "IPUG"),
+                ]
+                syll_mode_label = "Total syllabus (sorties + sims)"
+
+            colors_upgrade = {"MQT": "#f59e0b", "FLUG": "#ec4899", "IPUG": "#6366f1"}
+            fig_syll = go.Figure()
+            for col, label in syll_series:
+                fig_syll.add_trace(
+                    go.Scatter(
+                        x=df_syll["timeline"],
+                        y=df_syll[col],
+                        name=label,
+                        line=dict(color=colors_upgrade[label], width=3),
+                        mode="lines",
+                        hovertemplate=(
+                            f"<b>%{{x}}</b><br>{label}: %{{y:.2f}} syllabi<extra></extra>"
+                        ),
+                    )
+                )
+            fig_syll.update_layout(
+                xaxis_title="Year/Phase",
+                yaxis_title=f"Incomplete syllabi ({syll_mode_label})",
+                yaxis_tickformat=".2f",
+                hovermode="x unified",
+                margin=dict(l=20, r=20, t=30, b=20),
+                height=350,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+            fig_syll.update_yaxes(autorange=True, rangemode="tozero")
+            st.plotly_chart(fig_syll, width="stretch")
 
 #     # --- Stability Frontier Section ---
 #     if run_sensitivity:
