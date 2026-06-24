@@ -27,6 +27,86 @@ _REMAINING_SORTIES = [
     "remaining_flug_syllabi_sorties_only_mean",
     "remaining_ipug_syllabi_sorties_only_mean",
 ]
+_UPGRADE_SMOOTH_WINDOW_PHASES = 5
+_LINE_MIX_STACK = [
+    ("mqt_qty", "MQT"),
+    ("wg_line", "WG (not MQT/FLUG)"),
+    ("flug_qty", "FLUG"),
+    ("fl_line", "FL (not IPUG)"),
+    ("ipug_qty", "IPUG"),
+    ("ip_qty_avg", "IP"),
+]
+_LINE_MIX_COLORS = ["#f59e0b", "#93c5fd", "#ec4899", "#fda4af", "#6366f1", "#00CC96"]
+
+
+def _phase_moving_average(
+    series: pd.Series, window: int = _UPGRADE_SMOOTH_WINDOW_PHASES
+) -> pd.Series:
+    """Centered moving average along the CAF phase timeline."""
+    if series.empty:
+        return series
+    w = min(window, len(series))
+    if w <= 1:
+        return series
+    return series.rolling(window=w, center=True, min_periods=1).mean()
+
+
+def build_df_display(df: pd.DataFrame) -> pd.DataFrame:
+    """CAF-wide aggregation per phase with per-squadron averages for line mix."""
+    work = df.copy()
+    work["timeline"] = work["year"].astype(str) + " P" + work["phase"].astype(str)
+
+    for col in ("mqt_qty", "flug_qty", "ipug_qty", "wg_qty", "fl_qty", "ip_qty"):
+        if col not in work.columns:
+            work[col] = 0
+    work["wg_line"] = (work["wg_qty"] - work["mqt_qty"] - work["flug_qty"]).clip(lower=0)
+    work["fl_line"] = (work["fl_qty"] - work["ipug_qty"]).clip(lower=0)
+
+    agg = {
+        "wg_qty": "sum",
+        "fl_qty": "sum",
+        "ip_qty": "sum",
+        "staff_ips": "sum",
+        "staff_fls": "sum",
+        "total_pilots": "sum",
+        "line_pilots": "sum",
+        "exp_rat": "mean",
+        "percent_manned": "mean",
+        "separated": "sum",
+        "retained": "sum",
+        "wg_rate_mo": "mean",
+        "fl_rate_mo": "mean",
+        "ip_rate_mo": "mean",
+        "mqt_qty": "mean",
+        "flug_qty": "mean",
+        "ipug_qty": "mean",
+        "wg_line": "mean",
+        "fl_line": "mean",
+    }
+    for col in (
+        "wg_rate_blue", "fl_rate_blue", "ip_rate_blue",
+        "wg_rate_sim", "fl_rate_sim", "ip_rate_sim",
+    ):
+        if col in work.columns:
+            agg[col] = "mean"
+
+    out = work.groupby(["year", "phase", "timeline"], as_index=False).agg(agg).reset_index()
+
+    ip_avg = work.groupby(["year", "phase", "timeline"], as_index=False).agg(
+        ip_qty_avg=("ip_qty", "mean")
+    )
+    out = out.merge(ip_avg, on=["year", "phase", "timeline"], how="left")
+
+    for col in ("wg_rate_blue", "fl_rate_blue", "ip_rate_blue"):
+        if col not in out.columns:
+            out[col] = 0.0
+    for col in ("wg_rate_sim", "fl_rate_sim", "ip_rate_sim"):
+        if col not in out.columns:
+            out[col] = 0.0
+    for col in ("mqt_qty", "flug_qty", "ipug_qty", "wg_line", "fl_line", "ip_qty_avg"):
+        if col not in out.columns:
+            out[col] = 0.0
+    return out
 
 
 def _clean_syllabus_preds(raw: np.ndarray) -> np.ndarray:
@@ -163,7 +243,7 @@ with st.sidebar.form("sim_params"):
     options=priority_options.keys(),
     horizontal=True, # <--- This makes it look like a toggle bar
     help="Determines who has the priority of going to non-line assigmnets once unit hits max capacity.",
-    index=2
+    index=0
 )
 
     st.markdown("---") # Visual separator
@@ -263,26 +343,7 @@ if submitted:
         df['timeline'] = df['year'].astype(str) + " P" + df['phase'].astype(str)
         st.caption(f"Plant: **{phase_backend.lower()}**")
 
-        # 3. IMMEDIATE AGGREGATION (CAF Wide)
-        df_display = df.groupby(['year', 'phase', 'timeline']).agg({
-            'wg_qty': 'sum',
-            'fl_qty': 'sum',
-            'ip_qty': 'sum',
-            'staff_ips': 'sum',
-            'staff_fls': 'sum',
-            'total_pilots': 'sum',
-            'line_pilots': 'sum',
-            'exp_rat': 'mean',
-            'percent_manned': 'mean',
-            'separated': 'sum',
-            'retained': 'sum',
-            'wg_rate_mo': 'mean',
-            'fl_rate_mo': 'mean',
-            'ip_rate_mo': 'mean',
-            'wg_rate_blue': 'mean' if 'wg_rate_blue' in df.columns else lambda x: 0,
-            'fl_rate_blue': 'mean' if 'fl_rate_blue' in df.columns else lambda x: 0,
-            'ip_rate_blue': 'mean' if 'ip_rate_blue' in df.columns else lambda x: 0
-        }).reset_index()
+        df_display = build_df_display(df)
 
         # --- Top Level Metrics (Optional) ---
         st.markdown(f"### CAF Status at Year {years}")
@@ -305,6 +366,31 @@ if submitted:
             color_discrete_sequence=['#636EFA', '#EF553B', '#00CC96', "#DC8F7E", "#78CAB4"]
         )
         st.plotly_chart(fig_pop, width='stretch')
+
+        st.subheader("Line Pilot Mix: Qualification & Upgrade (Per Squadron Avg)")
+        st.caption(
+            "Stacked average line pilots per squadron. Upgrade tracks (MQT, FLUG, IPUG) are "
+            "split out; remaining wingmen and flight leads are shown without those upgrades."
+        )
+        mix_cols = [c for c, _ in _LINE_MIX_STACK]
+        mix_plot = df_display[["timeline"] + mix_cols].rename(
+            columns={c: label for c, label in _LINE_MIX_STACK}
+        )
+        fig_line_mix = px.area(
+            mix_plot,
+            x="timeline",
+            y=[label for _, label in _LINE_MIX_STACK],
+            title="Line pilot composition (avg per squadron)",
+            labels={"value": "Pilots", "timeline": "Year/Phase", "variable": "Category"},
+            color_discrete_sequence=_LINE_MIX_COLORS,
+        )
+        fig_line_mix.update_traces(hovertemplate="%{fullData.name}: %{y:.2f}<extra></extra>")
+        fig_line_mix.update_layout(
+            yaxis_title="Pilots per squadron (avg)",
+            hovermode="x unified",
+            legend=dict(title="Category"),
+        )
+        st.plotly_chart(fig_line_mix, width="stretch")
 
         st.divider()
         st.subheader("CAF Experience Ratio")
@@ -437,79 +523,109 @@ if submitted:
 
         st.plotly_chart(fig_exp, width='stretch')
 
-    st.divider()
-    st.subheader("Detailed Operational Health: Sortie Rates vs. Manning")
-            
-    # Create a Dual-Axis Chart using Graph Objects
-    fig_health = go.Figure()
+        st.divider()
+        st.subheader("Detailed Operational Health: Sortie Rates vs. Manning")
 
-    # --- Left Axis: Aging Rates (Sorties/Sims per Month) ---
-    # Live Flying Rates (Solid Lines)
-    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['wg_rate_mo'], name='WG Rate', line=dict(color='#636EFA'), hovertemplate='%{y:.1f}'))
-    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['fl_rate_mo'], name='FL Rate', line=dict(color='#EF553B'), hovertemplate='%{y:.1f}'))
-    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['ip_rate_mo'], name='IP Rate', line=dict(color='#00CC96'), hovertemplate='%{y:.1f}'))
-    
-    # Blue/Sim Rates (Dotted Lines)
-    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['wg_rate_blue'], name='WG Blue Rate', line=dict(color='#636EFA', dash='dot'), hovertemplate='%{y:.1f}'))
-    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['fl_rate_blue'], name='FL Blue Rate', line=dict(color='#EF553B', dash='dot'), hovertemplate='%{y:.1f}'))
-    fig_health.add_trace(go.Scatter(x=df_display['timeline'], y=df_display['ip_rate_blue'], name='IP Blue Rate', line=dict(color='#00CC96', dash='dot'), hovertemplate='%{y:.1f}'))
-
-    fig_health.add_hline(y=9.0, line_dash="dot", line_color="red", annotation_text="Inexp.")
-    fig_health.add_hline(y=8.0, line_dash="dot", line_color="orange", annotation_text="Exp.")
-
-    # --- Right Axis: Percentages (0-100%+) ---
-    # Manning % (Thick White Dash)
-    fig_health.add_trace(go.Scatter(
-        x=df_display['timeline'], 
-        y=df_display['percent_manned'], 
-        name='Manning %', 
-        line=dict(color='white', width=3, dash='dash'),
-        yaxis='y2',
-        showlegend=False
-    ))
-    
-    # Exp Ratio (Thick Yellow Dash)
-    fig_health.add_trace(go.Scatter(
-        x=df_display['timeline'], 
-        y=df_display['exp_rat'], 
-        name='Exp Ratio', 
-        line=dict(color='yellow', width=3, dash='dash'),
-        yaxis='y2',
-        showlegend=False
-    ))
-
-    # Layout for Dual Axis
-    fig_health.update_layout(
-        title="Operational Health: Sortie Rates vs. Manning",
-        xaxis_title="Year/Phase",
-        # Left Axis Settings
-        yaxis=dict(
-            title="Monthly Events (Sorties/Sims)",
-            side='left',
-            showgrid=True 
-        ),
-        # Right Axis Settings
-        yaxis2=dict(
-            title="Percentage",
-            overlaying='y',
-            side='right',
-            range=[0, 2.0],
-            tickformat='.0%',
-            showgrid=False
-        ),
-        legend=dict(
-                orientation="h", 
-                yanchor="top", y=-0.25, 
-                xanchor="left", x=0.0
+        ops_view = st.radio(
+            "Operational health view",
+            options=("Sorties only", "Sorties + Sims"),
+            index=0,
+            horizontal=True,
+            key="manning_ops_health_view",
+            help=(
+                "Sorties only: solid = all sorties, dotted = blue sorties. "
+                "Sorties + Sims: solid = sorties + sims, dotted = blue sorties + sims."
             ),
-            
-            hovermode="x unified",
-            margin=dict(l=50, r=50, t=50, b=150) # Increased bottom margin for legends
+        )
+        include_sims = ops_view == "Sorties + Sims"
+
+        fig_health = go.Figure()
+        for sortie_col, blue_col, sim_col, qual_label, color in (
+            ("wg_rate_mo", "wg_rate_blue", "wg_rate_sim", "WG", "#636EFA"),
+            ("fl_rate_mo", "fl_rate_blue", "fl_rate_sim", "FL", "#EF553B"),
+            ("ip_rate_mo", "ip_rate_blue", "ip_rate_sim", "IP", "#00CC96"),
+        ):
+            sorties = df_display[sortie_col]
+            blue = df_display[blue_col]
+            sims = df_display[sim_col] if sim_col in df_display.columns else 0.0
+            if include_sims:
+                solid_y = sorties + sims
+                dotted_y = blue + sims
+                solid_name = f"{qual_label} Sorties + Sims"
+                dotted_name = f"{qual_label} Blue Sorties + Sims"
+            else:
+                solid_y = sorties
+                dotted_y = blue
+                solid_name = f"{qual_label} Rate"
+                dotted_name = f"{qual_label} Blue Sorties"
+
+            fig_health.add_trace(
+                go.Scatter(
+                    x=df_display["timeline"],
+                    y=solid_y,
+                    name=solid_name,
+                    line=dict(color=color),
+                    hovertemplate="%{y:.2f}<extra></extra>",
+                )
+            )
+            fig_health.add_trace(
+                go.Scatter(
+                    x=df_display["timeline"],
+                    y=dotted_y,
+                    name=dotted_name,
+                    line=dict(color=color, dash="dot"),
+                    hovertemplate="%{y:.2f}<extra></extra>",
+                )
+            )
+
+        fig_health.add_hline(y=9.0, line_dash="dot", line_color="red", annotation_text="Inexp.")
+        fig_health.add_hline(y=8.0, line_dash="dot", line_color="orange", annotation_text="Exp.")
+
+        fig_health.add_trace(
+            go.Scatter(
+                x=df_display['timeline'],
+                y=df_display['percent_manned'],
+                name='Manning %',
+                line=dict(color='white', width=3, dash='dash'),
+                yaxis='y2',
+                showlegend=False,
+            )
+        )
+        fig_health.add_trace(
+            go.Scatter(
+                x=df_display['timeline'],
+                y=df_display['exp_rat'],
+                name='Exp Ratio',
+                line=dict(color='yellow', width=3, dash='dash'),
+                yaxis='y2',
+                showlegend=False,
+            )
         )
 
-    fig_health.add_annotation(
+        y_left_title = "Monthly Sorties + Sims" if include_sims else "Monthly Sorties"
+        fig_health.update_layout(
+            title="Operational Health: Sortie Rates vs. Manning",
+            xaxis_title="Year/Phase",
+            yaxis=dict(title=y_left_title, side='left', showgrid=True),
+            yaxis2=dict(
+                title="Percentage",
+                overlaying='y',
+                side='right',
+                range=[0, 2.0],
+                tickformat='.0%',
+                showgrid=False,
+            ),
+            legend=dict(
+                orientation="h",
+                yanchor="top", y=-0.25,
+                xanchor="left", x=0.0,
+            ),
+            hovermode="x unified",
+            margin=dict(l=50, r=50, t=50, b=150),
+        )
+        fig_health.add_annotation(
             xref="paper", yref="paper",
-            x=1, y=-0.25,  # Bottom Right Position
+            x=1, y=-0.25,
             xanchor="right", yanchor="top",
             text=(
                 "<b>Right Axis Legend:</b><br>"
@@ -518,15 +634,75 @@ if submitted:
             ),
             showarrow=False,
             align="left",
-            bgcolor="rgba(0,0,0,0)", # Transparent background
+            bgcolor="rgba(0,0,0,0)",
             bordercolor="rgba(255,255,255,0.3)",
             borderwidth=1,
-            borderpad=10
+            borderpad=10,
         )
+        st.plotly_chart(fig_health, width='stretch')
 
-    st.plotly_chart(fig_health, width='stretch')
+        st.divider()
+        st.subheader("Students in Upgrade Tracks")
+        use_smooth = st.toggle(
+            "Smoothed",
+            value=True,
+            key="manning_upgrade_smooth",
+            help=(
+                "On: centered moving average over "
+                f"{_UPGRADE_SMOOTH_WINDOW_PHASES} phases (~{_UPGRADE_SMOOTH_WINDOW_PHASES / 3:.1f} years). "
+                "Off: raw end-of-phase average per squadron."
+            ),
+        )
+        st.caption(
+            "Average line pilots in MQT, FLUG, or IPUG upgrade at end of each phase "
+            "(per squadron, then averaged across the CAF)."
+            + (
+                f" Smoothed view uses a {_UPGRADE_SMOOTH_WINDOW_PHASES}-phase centered moving average."
+                if use_smooth
+                else ""
+            )
+        )
+        colors_upgrade = {"MQT": "#f59e0b", "FLUG": "#ec4899", "IPUG": "#6366f1"}
+        fig_upgrades = go.Figure()
+        for col, label in (
+            ("mqt_qty", "MQT"),
+            ("flug_qty", "FLUG"),
+            ("ipug_qty", "IPUG"),
+        ):
+            raw_y = df_display[col]
+            plot_y = _phase_moving_average(raw_y) if use_smooth else raw_y
+            fig_upgrades.add_trace(
+                go.Scatter(
+                    x=df_display["timeline"],
+                    y=plot_y,
+                    name=label,
+                    line=dict(color=colors_upgrade[label], width=3),
+                    mode="lines",
+                    customdata=raw_y,
+                    hovertemplate=(
+                        f"{label}: %{{y:.2f}} pilots/sq (avg)"
+                        + (
+                            "<br>Raw this phase: %{customdata:.2f}<extra></extra>"
+                            if use_smooth
+                            else "<extra></extra>"
+                        )
+                    ),
+                )
+            )
+        y_title = "Pilots in upgrade (per squadron, avg)"
+        if use_smooth:
+            y_title += " — smoothed"
+        fig_upgrades.update_layout(
+            xaxis_title="Year/Phase",
+            yaxis_title=y_title,
+            hovermode="x unified",
+            margin=dict(l=20, r=20, t=30, b=20),
+            height=350,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
+        fig_upgrades.update_yaxes(autorange=True, rangemode="tozero")
+        st.plotly_chart(fig_upgrades, width="stretch")
 
-    if df is not None and not df.empty:
         st.divider()
         if use_physics:
             st.subheader("Incomplete Syllabi (Physics Allocator)")
