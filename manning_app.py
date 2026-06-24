@@ -46,6 +46,45 @@ _LINE_MIX_STACK = [
 _LINE_MIX_COLORS = ["#f59e0b", "#93c5fd", "#ec4899", "#fda4af", "#6366f1", "#00CC96"]
 
 
+def _stacked_area_figure(
+    df_display: pd.DataFrame,
+    stack_spec: list[tuple[str, str, str]],
+    *,
+    title: str,
+    y_axis_title: str,
+    value_fmt: str,
+    legend_title: str | None = None,
+) -> go.Figure:
+    """Stacked area with px translucency; bottom-to-top stack, top-first hover/legend."""
+    labels_bottom_up = [label for _, label, _ in stack_spec]
+    cols = [col for col, _, _ in stack_spec]
+    colors = [color for _, _, color in stack_spec]
+    plot_df = df_display[["timeline"] + cols].rename(
+        columns={col: label for col, label, _ in stack_spec}
+    )
+    fig = px.area(
+        plot_df,
+        x="timeline",
+        y=labels_bottom_up,
+        title=title,
+        labels={"value": y_axis_title, "timeline": "Year/Phase", "variable": "Category"},
+        color_discrete_sequence=colors,
+        category_orders={"variable": list(reversed(labels_bottom_up))},
+    )
+    fig.update_traces(
+        hovertemplate=f"%{{fullData.name}}: %{{y:{value_fmt}}}<extra></extra>",
+        hoverorder="reversed",
+    )
+    legend_cfg = dict(traceorder="reversed")
+    if legend_title:
+        legend_cfg["title"] = legend_title
+    fig.update_layout(
+        hovermode="x unified",
+        legend=legend_cfg,
+    )
+    return fig
+
+
 def _phase_moving_average(
     series: pd.Series, window: int = _UPGRADE_SMOOTH_WINDOW_PHASES
 ) -> pd.Series:
@@ -382,25 +421,12 @@ if "manning_results" in st.session_state:
 
     # --- Charts ---
     st.subheader("Pilot Population by Qualification")
-    fig_pop = go.Figure()
-    for col, label, color in _POP_QUAL_STACK:
-        fig_pop.add_trace(
-            go.Scatter(
-                x=df_display["timeline"],
-                y=df_display[col],
-                name=label,
-                mode="lines",
-                line=dict(width=0.5, color=color),
-                stackgroup="one",
-                fillcolor=color,
-                hovertemplate=f"{label}: %{{y:.0f}}<extra></extra>",
-            )
-        )
-    fig_pop.update_layout(
+    fig_pop = _stacked_area_figure(
+        df_display,
+        _POP_QUAL_STACK,
         title="CAF Qualification Mix",
-        xaxis_title="Year/Phase",
-        yaxis_title="Count",
-        hovermode="x unified",
+        y_axis_title="Count",
+        value_fmt=".0f",
     )
     st.plotly_chart(fig_pop, width="stretch")
 
@@ -409,23 +435,13 @@ if "manning_results" in st.session_state:
         "Stacked average line pilots per squadron. Upgrade tracks are split out "
         "(MQT, WG (FLUG), FL (IPUG)); remaining WG and FL line pilots shown separately."
     )
-    mix_cols = [c for c, _ in _LINE_MIX_STACK]
-    mix_plot = df_display[["timeline"] + mix_cols].rename(
-        columns={c: label for c, label in _LINE_MIX_STACK}
-    )
-    fig_line_mix = px.area(
-        mix_plot,
-        x="timeline",
-        y=[label for _, label in _LINE_MIX_STACK],
+    fig_line_mix = _stacked_area_figure(
+        df_display,
+        _LINE_MIX_STACK,
         title="Line pilot composition (avg per squadron)",
-        labels={"value": "Pilots", "timeline": "Year/Phase", "variable": "Category"},
-        color_discrete_sequence=_LINE_MIX_COLORS,
-    )
-    fig_line_mix.update_traces(hovertemplate="%{fullData.name}: %{y:.2f}<extra></extra>")
-    fig_line_mix.update_layout(
-        yaxis_title="Pilots per squadron (avg)",
-        hovermode="x unified",
-        legend=dict(title="Category"),
+        y_axis_title="Pilots per squadron (avg)",
+        value_fmt=".2f",
+        legend_title="Category",
     )
     st.plotly_chart(fig_line_mix, width="stretch")
 
@@ -515,24 +531,12 @@ if "manning_results" in st.session_state:
             )
         )
 
-    for code, color in color_map.items():
-        fig_exp.add_trace(
-            go.Scatter(
-                x=[None],
-                y=[None],
-                mode="markers",
-                marker=dict(size=12, symbol="square", color=color),
-                showlegend=True,
-                name=state_labels_dict.get(code, "Unknown"),
-            )
-        )
-
     fig_exp.add_trace(
         go.Scatter(
             x=df_display["timeline"],
             y=df_display["exp_rat"],
             mode="markers",
-            marker=dict(size=0, opacity=0),
+            marker=dict(size=8, opacity=0),
             hovertemplate="%{text}<br>Exp Ratio: %{y:.1%}<extra></extra>",
             text=[state_labels_dict.get(c, "Unknown") for c in codes],
             showlegend=False,
@@ -545,8 +549,8 @@ if "manning_results" in st.session_state:
         yaxis_title="Exp Ratio",
         yaxis=dict(tickformat=".0%", range=[0, 1]),
         height=500,
-        hovermode="x unified",
-        legend=dict(title="RAP Status", yanchor="top", y=1, xanchor="left", x=1.02),
+        hovermode="closest",
+        showlegend=False,
     )
     fig_exp.add_hline(y=0.60, line_dash="dot", line_color="green", annotation_text="Healthy")
     fig_exp.add_hline(y=0.45, line_dash="dash", line_color="orange", annotation_text="Sortie Inequity")
