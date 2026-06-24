@@ -263,6 +263,52 @@ def _status_label(predicted_phi: float, conservative_phi: float) -> str:
     return "Surrogate infeasible"
 
 
+def _render_surrogate_phi_metrics(
+    predicted_phi: float,
+    conservative_phi: float,
+    status_label: str,
+    predicted_active_constraint: str,
+) -> None:
+    """Narrow phi columns so status and active-constraint labels fit."""
+    phi_col, cons_phi_col, status_col, active_col = st.columns([0.65, 0.65, 1.35, 1.35])
+    phi_col.metric("Predicted phi", f"{predicted_phi:.3g}")
+    cons_phi_col.metric("Conservative phi", f"{conservative_phi:.3g}")
+    status_col.metric("Surrogate status", status_label)
+    active_col.metric("Predicted active constraint", predicted_active_constraint)
+
+
+def _render_direct_verification_metrics(
+    phi: float,
+    feasible: bool,
+    phase_backend: str,
+    active_constraint: str,
+    *,
+    active_constraint_label: str = "Direct active constraint",
+) -> None:
+    """Narrow phi/feasible columns so backend and active-constraint labels fit."""
+    phi_col, feas_col, backend_col, active_col = st.columns([0.65, 0.65, 1.35, 1.35])
+    phi_col.metric("Direct phi", f"{phi:.3g}")
+    feas_col.metric("Direct feasible", "Yes" if feasible else "No")
+    backend_col.metric("Backend", phase_backend)
+    active_col.metric(active_constraint_label, active_constraint)
+
+
+def _render_direct_runout_metrics(trajectory: pd.DataFrame) -> None:
+    """End-of-horizon manning summary above direct verification trajectory charts."""
+    final = trajectory.iloc[-1]
+    cols = st.columns(4)
+    cols[0].metric("Total Pilots", int(final["total_pilots"]))
+    cols[1].metric("Total Line Pilots", int(final["line_pilots"]))
+    cols[2].metric(
+        "Total Non-Line Pilots",
+        int(final["staff_ips"] + final["staff_fls"]),
+    )
+    cols[3].metric(
+        "Final Experience Ratio",
+        f"{float(final['experience_ratio']) * 100:.1f}%",
+    )
+
+
 def _plot_inventory_trajectory(trajectory: pd.DataFrame, target_total: float | None):
     fig = go.Figure()
     fig.add_trace(
@@ -575,17 +621,14 @@ def _render_dynamic_dashboard():
         elif direct_result.evaluation.status != "ok":
             st.error(f"Direct rerun failed: {direct_result.evaluation.error}")
         else:
-            direct_cols = st.columns(4)
-            direct_cols[0].metric("Direct phi", f"{direct_result.evaluation.phi:.3g}")
-            direct_cols[1].metric(
-                "Direct feasible",
-                "Yes" if direct_result.evaluation.feasible else "No",
-            )
-            direct_cols[2].metric("Backend", str(direct_result.evaluation.phase_backend))
-            direct_cols[3].metric(
-                "Active constraint",
+            _render_direct_verification_metrics(
+                direct_result.evaluation.phi,
+                direct_result.evaluation.feasible,
+                str(direct_result.evaluation.phase_backend),
                 str(direct_result.evaluation.active_constraint),
+                active_constraint_label="Active constraint",
             )
+            _render_direct_runout_metrics(direct_result.trajectory)
             st.plotly_chart(
                 _plot_inventory_trajectory(
                     direct_result.trajectory,
@@ -857,12 +900,10 @@ with main_col:
     predicted_phi = float(current_score["predicted_phi"])
     conservative_phi = float(current_score["conservative_phi"])
     status_label = _status_label(predicted_phi, conservative_phi)
-    metric_cols = st.columns(4)
-    metric_cols[0].metric("Predicted phi", f"{predicted_phi:.3g}")
-    metric_cols[1].metric("Conservative phi", f"{conservative_phi:.3g}")
-    metric_cols[2].metric("Surrogate status", status_label)
-    metric_cols[3].metric(
-        "Predicted active constraint",
+    _render_surrogate_phi_metrics(
+        predicted_phi,
+        conservative_phi,
+        status_label,
         str(current_score["predicted_active_constraint"]),
     )
     st.info(
@@ -885,24 +926,17 @@ with main_col:
     elif direct_result.evaluation.status != "ok":
         st.error(f"Direct verification failed: {direct_result.evaluation.error}")
     else:
-        direct_cols = st.columns(4)
-        direct_cols[0].metric("Direct phi", f"{direct_result.evaluation.phi:.3g}")
-        direct_cols[1].metric(
-            "Direct feasible",
-            "Yes" if direct_result.evaluation.feasible else "No",
-        )
-        direct_cols[2].metric(
-            "Backend",
+        _render_direct_verification_metrics(
+            direct_result.evaluation.phi,
+            direct_result.evaluation.feasible,
             str(direct_result.evaluation.phase_backend),
-        )
-        direct_cols[3].metric(
-            "Direct active constraint",
             str(direct_result.evaluation.active_constraint),
         )
         st.caption(
             "Active value: "
             f"{direct_result.evaluation.active_constraint_value:.3g}"
         )
+        _render_direct_runout_metrics(direct_result.trajectory)
         st.plotly_chart(
             _plot_inventory_trajectory(
                 direct_result.trajectory,
