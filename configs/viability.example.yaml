@@ -52,17 +52,17 @@ requirements:
 constraint_scales:
   total_pilots: 100.0
   line_pilots: 100.0
-  wg_rap: 1.0
-  fl_rap: 1.0
+  wg_rap: 0.1
+  fl_rap: 0.1
   ip_rap: 1.0
-  utc_1_wg: 1.0
-  utc_1_fl: 1.0
-  utc_2_wg: 1.0
-  utc_2_fl: 1.0
+  utc_1_wg: 0.1
+  utc_1_fl: 0.1
+  utc_2_wg: 0.1
+  utc_2_fl: 0.1
   staff_ips: 10.0
   staff_fls: 10.0
   experience_ratio: 0.05
-  unallocated_iron: 100.0
+  unallocated_iron: 5.0
 
 policy:
   parameterization: constant
