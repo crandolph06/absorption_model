@@ -10,7 +10,7 @@
 #SBATCH --time=04:00:00
 #
 ## Optional Slurm Directives --------------------------------------
-#SBATCH --job-name=search_a_current_unit
+#SBATCH --job-name=holdout_a_current_unit
 #SBATCH --export=ALL
 #SBATCH --output=logs/viability/%x_%j.out
 #SBATCH --error=logs/viability/%x_%j.err
@@ -34,11 +34,9 @@ export PYTHONUNBUFFERED=1
 #
 mkdir -p "$PROJECT_DIR/logs/viability"
 export PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}"
-#
-SURR=$(python -c 'import json; print(json.load(open("outputs/viability/rap_a_current_enterprise/active_learn/state.json"))["latest_model_path"])')
-#
-timeout 14100s python -u -m src.viability.cli search \
-  --config configs/viability/a_current_enterprise.yaml \
-  --surrogate "$SURR" \
-  --output-dir outputs/viability/rap_a_current_enterprise/search || true
+# 
+timeout 14100s python -u -m src.viability.cli select-holdout \
+  --config configs/viability/a_current_unit.yaml \
+  --evaluations outputs/viability/rap_a_current_unit/doe_128/evaluations.parquet \
+  --output outputs/viability/rap_a_current_unit/doe_128/holdout.parquet || true
 #

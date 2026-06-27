@@ -36,11 +36,11 @@ mkdir -p "$PROJECT_DIR/logs/viability"
 export PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 #
 timeout 14100s python -u -m src.viability.cli make-report \
-  --config configs/viability/a_current_enterprise.yaml \
-  --evaluations outputs/viability/rap_a_current_enterprise/doe_128/evaluations.parquet \
-  --verified-candidates outputs/viability/rap_a_current_enterprise/verify/verified_candidates.parquet \
-  --search-summary outputs/viability/rap_a_current_enterprise/search/search_summary.json \
-  --verification-summary outputs/viability/rap_a_current_enterprise/verify/verification_summary.json \
-  --envelope-summary outputs/viability/rap_a_current_enterprise/envelope/envelope_summary.json \
-  --output outputs/viability/rap_a_current_enterprise/report.md || true
+  --config configs/viability/a_current_unit.yaml \
+  --evaluations outputs/viability/rap_a_current_unit/doe_128/evaluations.parquet \
+  --verified-candidates outputs/viability/rap_a_current_unit/verify/verified_candidates.parquet \
+  --search-summary outputs/viability/rap_a_current_unit/search/search_summary.json \
+  --verification-summary outputs/viability/rap_a_current_unit/verify/verification_summary.json \
+  --envelope-summary outputs/viability/rap_a_current_unit/envelope/envelope_summary.json \
+  --output outputs/viability/rap_a_current_unit/report.md || true
 #
