@@ -14,6 +14,9 @@ from src.viability.dashboard import (
     STATIC_CONSTRAINT_OPTIONS,
     STATIC_RAP_OPTIONS,
     STATIC_SCOPE_OPTIONS,
+    apply_constraint_gate,
+    available_constraint_columns,
+    constraint_name_from_column,
     constraint_relaxation_table,
     default_dynamic_artifact_paths,
     direct_verification_caveat,
@@ -977,19 +980,69 @@ candidate_tab, envelope_tab, direct_tab, artifact_tab = st.tabs(
 )
 
 with candidate_tab:
-    display_columns = [
-        "candidate_id",
-        "design_id",
-        "phi",
-        "feasible",
-        "active_constraint",
-        *config.policy.variables,
-    ]
-    st.dataframe(
-        artifacts.verified_candidates[display_columns].sort_values(["phi", "candidate_id"]),
-        width="stretch",
-        hide_index=True,
+    constraint_columns = available_constraint_columns(artifacts.verified_candidates)
+    gate_names = [constraint_name_from_column(column) for column in constraint_columns]
+
+    st.subheader("Constraint Gate")
+    st.caption(
+        "Select constraints that must be met (margin <= 0). Only candidates passing "
+        "all of them are shown, ranked by the worst remaining (non-gated) constraint."
     )
+    must_meet = st.multiselect(
+        "Must-meet constraints",
+        options=gate_names,
+        default=[],
+        help="Candidates failing any selected constraint are hidden.",
+    )
+
+    gate = apply_constraint_gate(
+        artifacts.verified_candidates,
+        must_meet=must_meet,
+        config=config,
+    )
+
+    metric_cols = st.columns(3)
+    metric_cols[0].metric("Pass gate", f"{gate.passed_count} / {gate.total_count}")
+    metric_cols[1].metric("Fully feasible", str(gate.fully_feasible_count))
+    metric_cols[2].metric("Infeasible after gate", str(gate.remaining_infeasible_count))
+
+    if must_meet and gate.binding_counts:
+        st.write("Binding constraint among remaining (for candidates still infeasible)")
+        binding_frame = pd.DataFrame(
+            [
+                {"binding_constraint": name, "count": count}
+                for name, count in gate.binding_counts.items()
+            ]
+        ).sort_values("count", ascending=False)
+        st.dataframe(binding_frame, width="stretch", hide_index=True)
+
+    if gate.filtered.empty:
+        st.warning("No verified candidates meet all selected must-meet constraints.")
+    else:
+        base_columns = ["candidate_id", "design_id", "phi", "feasible"]
+        if must_meet:
+            base_columns += [
+                "gated_binding_constraint",
+                "gated_binding_value",
+                "gated_binding_normalized",
+            ]
+        else:
+            base_columns.append("active_constraint")
+        display_columns = [
+            *base_columns,
+            *config.policy.variables,
+            *constraint_columns,
+        ]
+        sort_columns = (
+            ["gated_binding_normalized", "candidate_id"]
+            if must_meet
+            else ["phi", "candidate_id"]
+        )
+        st.dataframe(
+            gate.filtered[display_columns].sort_values(sort_columns),
+            width="stretch",
+            hide_index=True,
+        )
 
 with envelope_tab:
     if artifacts.envelope_summary.get("plots_skipped"):

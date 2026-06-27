@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -183,12 +183,33 @@ def static_scenario_output_dir(
     return Path(root) / "outputs" / "viability" / f"rap_{slug}"
 
 
+def _rebase_onto_local(stored_path: Path, active_learn_dir: Path) -> Path | None:
+    # state.json records an absolute path from the machine that ran the pipeline
+    # (e.g. an HPC /p/work1/... path). After downloading, that prefix is wrong, so
+    # re-attach the portion at and after "active_learn" to the local directory.
+    parts = stored_path.parts
+    if "active_learn" in parts:
+        tail = parts[parts.index("active_learn") + 1 :]
+        candidate = active_learn_dir.joinpath(*tail)
+        if candidate.exists():
+            return candidate
+    local_guess = active_learn_dir / stored_path.name
+    if local_guess.exists():
+        return local_guess
+    return None
+
+
 def expected_active_learn_surrogate_path(active_learn_dir: str | Path) -> Path:
     directory = Path(active_learn_dir)
     state_path = directory / "state.json"
     if state_path.exists():
         state = json.loads(state_path.read_text(encoding="utf-8"))
-        return Path(str(state["latest_model_path"]))
+        stored_path = Path(str(state["latest_model_path"]))
+        if stored_path.exists():
+            return stored_path
+        rebased = _rebase_onto_local(stored_path, directory)
+        if rebased is not None:
+            return rebased
     iteration_models = sorted(directory.glob("iteration_*/surrogate_constraints_gpr.joblib"))
     if iteration_models:
         return iteration_models[-1]
@@ -1049,3 +1070,132 @@ def _feasible_candidates(verified_candidates: pd.DataFrame) -> pd.DataFrame:
     if feasible.empty:
         raise ValueError("No verified feasible candidates are available")
     return feasible
+
+
+CONSTRAINT_COLUMN_PREFIX = "constraint_"
+
+
+def constraint_name_from_column(column: str) -> str:
+    if column.startswith(CONSTRAINT_COLUMN_PREFIX):
+        return column[len(CONSTRAINT_COLUMN_PREFIX) :]
+    return column
+
+
+def available_constraint_columns(verified_candidates: pd.DataFrame) -> list[str]:
+    """Return the per-constraint margin columns (``constraint_<name>``) in the table."""
+    return sorted(
+        column
+        for column in verified_candidates.columns
+        if column.startswith(CONSTRAINT_COLUMN_PREFIX)
+    )
+
+
+@dataclass(frozen=True)
+class ConstraintGateResult:
+    """Outcome of filtering candidates by a set of must-meet constraints.
+
+    ``filtered`` only contains candidates that satisfy every must-meet constraint.
+    It carries three added columns describing the worst-violated constraint *among
+    the constraints that were not gated*, so the user can see the next binding
+    requirement instead of the always-dominant gated ones:
+    ``gated_binding_constraint``, ``gated_binding_value`` (raw margin), and
+    ``gated_binding_normalized`` (margin / constraint scale).
+    """
+
+    filtered: pd.DataFrame
+    must_meet: tuple[str, ...]
+    total_count: int
+    passed_count: int
+    fully_feasible_count: int
+    remaining_infeasible_count: int
+    binding_counts: dict[str, int]
+
+
+def apply_constraint_gate(
+    verified_candidates: pd.DataFrame,
+    *,
+    must_meet: Sequence[str],
+    config: ViabilityConfig,
+    tolerance: float = 0.0,
+) -> ConstraintGateResult:
+    """Keep only candidates meeting every must-meet constraint and re-rank the rest.
+
+    A constraint uses the ``g(x) <= 0`` satisfied convention, so a candidate
+    passes the gate when every selected ``constraint_<name>`` is ``<= tolerance``.
+    Among the remaining (non-gated) constraints, the worst normalized margin
+    (``margin / constraint_scale``) is reported as the binding constraint.
+    """
+    all_columns = available_constraint_columns(verified_candidates)
+    must_meet = tuple(must_meet)
+    must_meet_columns = [f"{CONSTRAINT_COLUMN_PREFIX}{name}" for name in must_meet]
+    missing = [column for column in must_meet_columns if column not in all_columns]
+    if missing:
+        raise ValueError(
+            "Verified candidates are missing must-meet constraint columns: "
+            + ", ".join(missing)
+        )
+
+    total_count = int(len(verified_candidates))
+    if must_meet_columns:
+        gate_pass = (verified_candidates[must_meet_columns] <= tolerance).all(axis=1)
+    else:
+        gate_pass = pd.Series(True, index=verified_candidates.index)
+    filtered = verified_candidates.loc[gate_pass].copy()
+
+    remaining_columns = [
+        column for column in all_columns if column not in must_meet_columns
+    ]
+    if filtered.empty:
+        return ConstraintGateResult(
+            filtered=filtered,
+            must_meet=must_meet,
+            total_count=total_count,
+            passed_count=0,
+            fully_feasible_count=0,
+            remaining_infeasible_count=0,
+            binding_counts={},
+        )
+
+    if remaining_columns:
+        scales = {
+            column: config.constraint_scales.scale_for(
+                constraint_name_from_column(column)
+            )
+            for column in remaining_columns
+        }
+        normalized = filtered[remaining_columns].div(pd.Series(scales), axis=1)
+        binding_column = normalized.idxmax(axis=1)
+        binding_normalized = normalized.max(axis=1)
+        binding_name = binding_column.map(constraint_name_from_column)
+        binding_value = pd.Series(
+            [filtered.at[index, column] for index, column in binding_column.items()],
+            index=filtered.index,
+            dtype=float,
+        )
+        remaining_feasible = (filtered[remaining_columns] <= 0.0).all(axis=1)
+    else:
+        binding_name = pd.Series("none", index=filtered.index)
+        binding_value = pd.Series(np.nan, index=filtered.index)
+        binding_normalized = pd.Series(np.nan, index=filtered.index)
+        remaining_feasible = pd.Series(True, index=filtered.index)
+
+    filtered["gated_binding_constraint"] = binding_name
+    filtered["gated_binding_value"] = binding_value
+    filtered["gated_binding_normalized"] = binding_normalized
+    filtered["gated_feasible"] = remaining_feasible
+
+    fully_feasible_count = int(remaining_feasible.sum())
+    binding_counts = (
+        binding_name.loc[~remaining_feasible].value_counts().sort_index().to_dict()
+    )
+    binding_counts = {str(name): int(count) for name, count in binding_counts.items()}
+
+    return ConstraintGateResult(
+        filtered=filtered,
+        must_meet=must_meet,
+        total_count=total_count,
+        passed_count=int(len(filtered)),
+        fully_feasible_count=fully_feasible_count,
+        remaining_infeasible_count=int(len(filtered) - fully_feasible_count),
+        binding_counts=binding_counts,
+    )
