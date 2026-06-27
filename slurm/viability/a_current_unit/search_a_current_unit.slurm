@@ -35,7 +35,7 @@ export PYTHONUNBUFFERED=1
 mkdir -p "$PROJECT_DIR/logs/viability"
 export PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 #
-SURR=$(python -c 'import json; print(json.load(open("outputs/viability/rap_a_current_enterprise/active_learn/state.json"))["latest_model_path"])')
+SURR=$(python -c 'import json; print(json.load(open("outputs/viability/rap_a_current_unit/active_learn/state.json"))["latest_model_path"])')
 #
 timeout 14100s python -u -m src.viability.cli search \
   --config configs/viability/a_current_unit.yaml \

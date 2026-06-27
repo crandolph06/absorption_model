@@ -40,5 +40,5 @@ timeout 14100s python -u -m src.viability.cli plot-envelope \
   --surrogate "$SURR" \
   --evaluations outputs/viability/rap_a_current_unit/doe_128/evaluations.parquet \
   --verified-candidates outputs/viability/rap_a_current_unit/verify/verified_candidates.parquet \
-  --output-dir outputs/viability/rap_a_current_unit/envelope8 || true
+  --output-dir outputs/viability/rap_a_current_unit/envelope || true
 #
