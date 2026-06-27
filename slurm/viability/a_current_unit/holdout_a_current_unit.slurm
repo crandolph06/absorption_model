@@ -34,7 +34,7 @@ export PYTHONUNBUFFERED=1
 #
 mkdir -p "$PROJECT_DIR/logs/viability"
 export PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}"
-# 
+#
 timeout 14100s python -u -m src.viability.cli select-holdout \
   --config configs/viability/a_current_unit.yaml \
   --evaluations outputs/viability/rap_a_current_unit/doe_128/evaluations.parquet \

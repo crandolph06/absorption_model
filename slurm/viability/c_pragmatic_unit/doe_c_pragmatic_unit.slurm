@@ -10,7 +10,7 @@
 #SBATCH --time=04:00:00
 #
 ## Optional Slurm Directives --------------------------------------
-#SBATCH --job-name=verify_a_current_unit
+#SBATCH --job-name=doe_c_pragmatic_unit
 #SBATCH --export=ALL
 #SBATCH --output=logs/viability/%x_%j.out
 #SBATCH --error=logs/viability/%x_%j.err
@@ -35,9 +35,8 @@ export PYTHONUNBUFFERED=1
 mkdir -p "$PROJECT_DIR/logs/viability"
 export PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 #
-timeout 14100s python -u -m src.viability.cli verify-candidates \
-  --config configs/viability/a_current_unit.yaml \
-  --candidates outputs/viability/rap_a_current_unit/search/candidate_policies.csv \
-  --output-dir outputs/viability/rap_a_current_unit/verify \
+timeout 14100s python -u -m src.viability.cli run-doe \
+  --config configs/viability/c_pragmatic_unit.yaml \
+  --output-dir outputs/viability/rap_c_pragmatic_unit/doe_128 \
   --workers 8 || true
 #

@@ -5,12 +5,12 @@
 #SBATCH --partition=general
 #SBATCH --qos=background
 #SBATCH --nodes=1
-#SBATCH --ntasks=8
+#SBATCH --ntasks=1
 #SBATCH --exclusive
 #SBATCH --time=04:00:00
 #
 ## Optional Slurm Directives --------------------------------------
-#SBATCH --job-name=verify_a_current_unit
+#SBATCH --job-name=report_c_optimistic_unit
 #SBATCH --export=ALL
 #SBATCH --output=logs/viability/%x_%j.out
 #SBATCH --error=logs/viability/%x_%j.err
@@ -35,9 +35,12 @@ export PYTHONUNBUFFERED=1
 mkdir -p "$PROJECT_DIR/logs/viability"
 export PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 #
-timeout 14100s python -u -m src.viability.cli verify-candidates \
-  --config configs/viability/a_current_unit.yaml \
-  --candidates outputs/viability/rap_a_current_unit/search/candidate_policies.csv \
-  --output-dir outputs/viability/rap_a_current_unit/verify \
-  --workers 8 || true
+timeout 14100s python -u -m src.viability.cli make-report \
+  --config configs/viability/c_optimistic_unit.yaml \
+  --evaluations outputs/viability/rap_c_optimistic_unit/doe_128/evaluations.parquet \
+  --verified-candidates outputs/viability/rap_c_optimistic_unit/verify/verified_candidates.parquet \
+  --search-summary outputs/viability/rap_c_optimistic_unit/search/search_summary.json \
+  --verification-summary outputs/viability/rap_c_optimistic_unit/verify/verification_summary.json \
+  --envelope-summary outputs/viability/rap_c_optimistic_unit/envelope/envelope_summary.json \
+  --output outputs/viability/rap_c_optimistic_unit/report.md || true
 #

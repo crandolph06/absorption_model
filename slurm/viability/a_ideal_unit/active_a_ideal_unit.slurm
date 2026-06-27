@@ -5,12 +5,12 @@
 #SBATCH --partition=general
 #SBATCH --qos=background
 #SBATCH --nodes=1
-#SBATCH --ntasks=8
+#SBATCH --ntasks=1
 #SBATCH --exclusive
 #SBATCH --time=04:00:00
 #
 ## Optional Slurm Directives --------------------------------------
-#SBATCH --job-name=verify_a_current_unit
+#SBATCH --job-name=active_a_ideal_unit
 #SBATCH --export=ALL
 #SBATCH --output=logs/viability/%x_%j.out
 #SBATCH --error=logs/viability/%x_%j.err
@@ -35,9 +35,9 @@ export PYTHONUNBUFFERED=1
 mkdir -p "$PROJECT_DIR/logs/viability"
 export PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 #
-timeout 14100s python -u -m src.viability.cli verify-candidates \
-  --config configs/viability/a_current_unit.yaml \
-  --candidates outputs/viability/rap_a_current_unit/search/candidate_policies.csv \
-  --output-dir outputs/viability/rap_a_current_unit/verify \
-  --workers 8 || true
+timeout 14100s python -u -m src.viability.cli active-learn \
+  --config configs/viability/a_ideal_unit.yaml \
+  --evaluations outputs/viability/rap_a_ideal_unit/doe_128/evaluations.parquet \
+  --holdout-evaluations outputs/viability/rap_a_ideal_unit/doe_128/holdout.parquet \
+  --output-dir outputs/viability/rap_a_ideal_unit/active_learn || true
 #
