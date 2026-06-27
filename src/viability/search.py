@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, Sequence
 
 import joblib
 import numpy as np
@@ -159,12 +159,24 @@ def verify_candidates(
     checkpoint_every: int = 50,
     evaluator: EvaluateBatch = evaluate_designs_parallel,
 ) -> VerificationResult:
-    require_search_config(config)
+    search_config = require_search_config(config)
     if candidates.empty:
         raise ValueError("Candidate policy table is empty")
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     write_config_resolved(config, output_path)
+
+    submitted_count = int(len(candidates))
+    candidates, skipped_predicted_count = filter_candidates_for_verify(
+        candidates,
+        search_config.required_constraints_for_verify,
+    )
+    if candidates.empty:
+        required = ", ".join(search_config.required_constraints_for_verify)
+        raise ValueError(
+            "No candidate policies satisfy search.required_constraints_for_verify "
+            f"({required}) before direct verification"
+        )
 
     results = evaluator(
         candidates,
@@ -174,10 +186,28 @@ def verify_candidates(
         checkpoint_every=checkpoint_every,
     )
     verified = attach_candidate_predictions(results, candidates)
+    verified, dropped_after_verify_count = filter_verified_constraints(
+        verified,
+        search_config.required_constraints_for_verify,
+    )
+    if verified.empty:
+        required = ", ".join(search_config.required_constraints_for_verify)
+        raise ValueError(
+            "No verified candidate policies satisfied search.required_constraints_for_verify "
+            f"({required}) after direct evaluation"
+        )
     verified_path = write_table(verified, output_path / "verified_candidates.parquet")
     plot_paths = write_verification_plots(output_path, verified)
     summary_path = output_path / "verification_summary.json"
-    summary = verification_summary(verified, verified_path, plot_paths)
+    summary = verification_summary(
+        verified,
+        verified_path,
+        plot_paths,
+        submitted_count=submitted_count,
+        skipped_predicted_count=skipped_predicted_count,
+        dropped_after_verify_count=dropped_after_verify_count,
+        required_constraints_for_verify=search_config.required_constraints_for_verify,
+    )
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     return VerificationResult(
         output_dir=output_path.resolve(),
@@ -289,13 +319,24 @@ def select_candidates_to_verify(
 ) -> pd.DataFrame:
     if scored.empty:
         raise ValueError("Scored candidate table is empty")
+    viable_scored, _ = filter_scored_for_verify(
+        scored,
+        search_config.required_constraints_for_verify,
+    )
+    if viable_scored.empty:
+        required = ", ".join(search_config.required_constraints_for_verify)
+        raise RuntimeError(
+            "Candidate pool has no policies predicted to satisfy "
+            f"search.required_constraints_for_verify ({required}); "
+            "increase search.candidate_pool_size or relax the requirement list"
+        )
     quotas = selection_quotas(search_config.n_candidates_to_verify)
     selected_frames: list[pd.DataFrame] = []
     selected_keys: set[tuple[Any, ...]] = set()
     selected_vectors: list[np.ndarray] = []
 
     for category, count in quotas.items():
-        ordered = ordered_candidates_for_category(scored, category)
+        ordered = ordered_candidates_for_category(viable_scored, category)
         selected = _select_from_ordered(
             ordered,
             config,
@@ -311,7 +352,7 @@ def select_candidates_to_verify(
     selected_count = sum(len(frame) for frame in selected_frames)
     if selected_count < search_config.n_candidates_to_verify:
         backfill = _select_from_ordered(
-            rank_scored_candidates(scored),
+            rank_scored_candidates(viable_scored),
             config,
             count=search_config.n_candidates_to_verify - selected_count,
             min_normalized_distance=search_config.min_normalized_distance,
@@ -323,19 +364,59 @@ def select_candidates_to_verify(
             selected_frames.append(backfill)
 
     if not selected_frames:
-        selected = scored.iloc[[]].copy()
+        selected = viable_scored.iloc[[]].copy()
     else:
         selected = pd.concat(selected_frames, ignore_index=True)
     if len(selected) != search_config.n_candidates_to_verify:
         raise RuntimeError(
             "Candidate pool could not fill the requested verification batch after "
-            "dedupe and diversity filtering; increase search.candidate_pool_size "
-            "or lower search.min_normalized_distance"
+            "required-constraint filtering, dedupe, and diversity filtering; "
+            "increase search.candidate_pool_size or lower search.min_normalized_distance"
         )
     selected = selected.reset_index(drop=True)
     selected.insert(0, "candidate_id", [f"candidate_{index:04d}" for index in range(len(selected))])
     selected.insert(1, "selection_rank", np.arange(1, len(selected) + 1, dtype=int))
     return selected
+
+
+def filter_scored_for_verify(
+    scored: pd.DataFrame,
+    required_constraints: Sequence[str],
+) -> tuple[pd.DataFrame, int]:
+    """Keep scored rows predicted to satisfy every required constraint (margin <= 0)."""
+    if not required_constraints:
+        return scored.copy(), 0
+    mask = _predicted_constraint_mask(scored, required_constraints)
+    filtered = scored.loc[mask].copy()
+    return filtered.reset_index(drop=True), int(len(scored) - len(filtered))
+
+
+def filter_candidates_for_verify(
+    candidates: pd.DataFrame,
+    required_constraints: Sequence[str],
+) -> tuple[pd.DataFrame, int]:
+    """Drop candidates that fail the surrogate pre-check before direct verification."""
+    if not required_constraints:
+        return candidates.copy(), 0
+    if _has_predicted_constraint_columns(candidates, required_constraints):
+        mask = _predicted_constraint_mask(candidates, required_constraints)
+        filtered = candidates.loc[mask].copy()
+        return filtered.reset_index(drop=True), int(len(candidates) - len(filtered))
+    return candidates.copy(), 0
+
+
+def filter_verified_constraints(
+    verified: pd.DataFrame,
+    required_constraints: Sequence[str],
+    *,
+    tolerance: float = 0.0,
+) -> tuple[pd.DataFrame, int]:
+    """Keep only direct-evaluation rows that satisfy required constraints."""
+    if not required_constraints:
+        return verified.copy(), 0
+    mask = _verified_constraint_mask(verified, required_constraints, tolerance=tolerance)
+    filtered = verified.loc[mask].copy()
+    return filtered.reset_index(drop=True), int(len(verified) - len(filtered))
 
 
 def selection_quotas(n_candidates: int) -> dict[str, int]:
@@ -417,6 +498,11 @@ def verification_summary(
     verified: pd.DataFrame,
     verified_path: Path,
     plot_paths: dict[str, Path],
+    *,
+    submitted_count: int | None = None,
+    skipped_predicted_count: int = 0,
+    dropped_after_verify_count: int = 0,
+    required_constraints_for_verify: Sequence[str] = (),
 ) -> dict[str, Any]:
     _require_verification_columns(verified)
     verified_feasible = verified["feasible"].astype(bool).to_numpy()
@@ -429,6 +515,10 @@ def verification_summary(
     summary = {
         "verified_path": str(Path(verified_path).resolve()),
         "verified_count": int(len(verified)),
+        "submitted_candidate_count": int(submitted_count if submitted_count is not None else len(verified)),
+        "skipped_predicted_infeasible_count": int(skipped_predicted_count),
+        "dropped_after_verify_count": int(dropped_after_verify_count),
+        "required_constraints_for_verify": list(required_constraints_for_verify),
         "verified_feasible_count": int(np.sum(verified_feasible)),
         "predicted_feasible_count": int(np.sum(predicted_feasible)),
         "conservative_predicted_feasible_count": int(np.sum(conservative_feasible)),
@@ -657,6 +747,10 @@ def _search_summary(
     scored_path: Path,
     plot_paths: dict[str, Path],
 ) -> dict[str, Any]:
+    viable_scored, predicted_infeasible_count = filter_scored_for_verify(
+        scored,
+        search_config.required_constraints_for_verify,
+    )
     source_counts = selected["selection_source"].value_counts().sort_index()
     return {
         "surrogate_path": str(Path(surrogate_path).resolve()),
@@ -667,7 +761,10 @@ def _search_summary(
         "conservative_sigma": float(search_config.conservative_sigma),
         "min_normalized_distance": float(search_config.min_normalized_distance),
         "candidate_report_rows": int(search_config.candidate_report_rows),
+        "required_constraints_for_verify": list(search_config.required_constraints_for_verify),
         "scored_count": int(len(scored)),
+        "predicted_required_constraint_count": int(len(viable_scored)),
+        "predicted_required_constraint_infeasible_count": int(predicted_infeasible_count),
         "selected_count": int(len(selected)),
         "predicted_feasible_count": int(scored["predicted_feasible"].sum()),
         "conservative_predicted_feasible_count": int(
@@ -708,3 +805,52 @@ def _configure_matplotlib_cache(output_path: Path) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     os.environ["MPLCONFIGDIR"] = str(cache_dir)
     os.environ["XDG_CACHE_HOME"] = str(cache_dir)
+
+
+def _predicted_constraint_column(constraint_name: str) -> str:
+    return f"mu_constraint_{constraint_name}"
+
+
+def _verified_constraint_column(constraint_name: str) -> str:
+    return f"constraint_{constraint_name}"
+
+
+def _has_predicted_constraint_columns(
+    frame: pd.DataFrame,
+    required_constraints: Sequence[str],
+) -> bool:
+    return all(_predicted_constraint_column(name) in frame.columns for name in required_constraints)
+
+
+def _predicted_constraint_mask(
+    frame: pd.DataFrame,
+    required_constraints: Sequence[str],
+) -> pd.Series:
+    mask = pd.Series(True, index=frame.index)
+    for name in required_constraints:
+        column = _predicted_constraint_column(name)
+        if column not in frame.columns:
+            raise ValueError(
+                "Candidate table is missing surrogate prediction column "
+                f"{column!r} required by search.required_constraints_for_verify"
+            )
+        mask &= frame[column].astype(float) <= 0.0
+    return mask
+
+
+def _verified_constraint_mask(
+    frame: pd.DataFrame,
+    required_constraints: Sequence[str],
+    *,
+    tolerance: float,
+) -> pd.Series:
+    mask = pd.Series(True, index=frame.index)
+    for name in required_constraints:
+        column = _verified_constraint_column(name)
+        if column not in frame.columns:
+            raise ValueError(
+                "Verified candidate table is missing direct-evaluation column "
+                f"{column!r} required by search.required_constraints_for_verify"
+            )
+        mask &= frame[column].astype(float) <= tolerance
+    return mask

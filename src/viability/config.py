@@ -101,6 +101,7 @@ _SEARCH_FIELDS = (
     "conservative_sigma",
     "min_normalized_distance",
     "candidate_report_rows",
+    "required_constraints_for_verify",
 )
 _ENVELOPE_FIELDS = (
     "anchor",
@@ -334,6 +335,7 @@ class SearchConfig:
     conservative_sigma: float
     min_normalized_distance: float
     candidate_report_rows: int
+    required_constraints_for_verify: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.candidate_method != "sobol":
@@ -350,6 +352,11 @@ class SearchConfig:
             raise ValueError("search.min_normalized_distance must be non-negative")
         if self.candidate_report_rows <= 0:
             raise ValueError("search.candidate_report_rows must be positive")
+        for name in self.required_constraints_for_verify:
+            if not name:
+                raise ValueError(
+                    "search.required_constraints_for_verify entries must be non-empty"
+                )
 
 
 @dataclass(frozen=True)
@@ -531,12 +538,21 @@ class ViabilityConfig:
         search = None
         if "search" in data:
             search_data = _require_mapping(data, "search")
-            search = SearchConfig(
-                **{
-                    key: _require_key(search_data, "search", key)
-                    for key in _SEARCH_FIELDS
-                }
-            )
+            search_values = {
+                key: _require_key(search_data, "search", key)
+                for key in _SEARCH_FIELDS
+                if key != "required_constraints_for_verify"
+            }
+            if "required_constraints_for_verify" in search_data:
+                required_raw = search_data["required_constraints_for_verify"]
+                if not isinstance(required_raw, list):
+                    raise ValueError("search.required_constraints_for_verify must be a list")
+                search_values["required_constraints_for_verify"] = tuple(required_raw)
+            elif requirements.allowed_unallocated_iron is not None:
+                search_values["required_constraints_for_verify"] = ("unallocated_iron",)
+            else:
+                search_values["required_constraints_for_verify"] = ()
+            search = SearchConfig(**search_values)
 
         envelope = None
         if "envelope" in data:
@@ -634,6 +650,7 @@ class ViabilityConfig:
 
         self._validate_envelope_slices()
         self._validate_enabled_constraint_scales()
+        self._validate_required_constraints_for_verify()
 
     def _validate_envelope_slices(self) -> None:
         if self.envelope is None:
@@ -644,7 +661,18 @@ class ViabilityConfig:
             if missing:
                 raise ValueError(f"envelope.slices references unknown policy variables: {missing}")
 
-    def _validate_enabled_constraint_scales(self) -> None:
+    def _validate_required_constraints_for_verify(self) -> None:
+        if self.search is None:
+            return
+        enabled = {name for name, _scale_key in self._enabled_constraints()}
+        for name in self.search.required_constraints_for_verify:
+            if name not in enabled:
+                raise ValueError(
+                    "search.required_constraints_for_verify includes "
+                    f"{name!r}, but that requirement is not enabled"
+                )
+
+    def _enabled_constraints(self) -> list[tuple[str, str]]:
         req = self.requirements
         enabled: list[tuple[str, str]] = []
         if req.target_total_pilots is not None:
@@ -674,7 +702,10 @@ class ViabilityConfig:
             enabled.append(("experience_ratio", "experience_ratio"))
         if req.allowed_unallocated_iron is not None:
             enabled.append(("unallocated_iron", "unallocated_iron"))
+        return enabled
 
+    def _validate_enabled_constraint_scales(self) -> None:
+        enabled = self._enabled_constraints()
         if not enabled:
             raise ValueError("At least one requirement constraint must be enabled (non-null)")
 
