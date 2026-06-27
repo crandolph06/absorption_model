@@ -9,7 +9,7 @@
 #     --holdout-evaluations outputs/viability/rap_c_ideal_unit/doe_128/holdout.parquet \
 #     --output-dir outputs/viability/rap_c_ideal_unit/active_learn
 
-# RAP Scenario - RAP A (attempt to meet RAP requirements for all pilots) [UTC-wise allocation False]
+# RAP Scenario - RAP C (meet UTC-1 and UTC-2 WG/FL requirements; 1 12-ship UTC, 1 6-ship UTC) [UTC-wise allocation True]
 # Constraint Scenario - Ideal (Largest changes in PAA, UTE, Retention available) # TODO if PAA and UTE maxed out, increase and rerun
 # Risk Scenario - Accept risk in the unit (allow relief valve of upgrade gates shifting left) 
 

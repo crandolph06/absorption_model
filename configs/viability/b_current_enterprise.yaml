@@ -9,7 +9,7 @@
 #     --holdout-evaluations outputs/viability/rap_b_current_enterprise/doe_128/holdout.parquet \
 #     --output-dir outputs/viability/rap_b_current_enterprise/active_learn
 
-# RAP Scenario - RAP A (attempt to meet RAP requirements for all pilots) [UTC-wise allocation False]
+# RAP Scenario - RAP B (meet UTC-1 WG/FL requirements; 1 12-ship UTC) [UTC-wise allocation True]
 # Constraint Scenario - Current (no changes allowed to PAA, UTE, Retention)
 # Risk Scenario - Accept enterprise risk (book upgrade gates fixed at 250/400; avoid tactical gate relief)
 
