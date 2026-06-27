@@ -144,7 +144,7 @@ search:
   candidate_method: sobol
   candidate_start_index: 51200
   candidate_pool_size: 65536
-  n_candidates_to_verify: 50
+  n_candidates_to_verify: 100
   conservative_sigma: 1.0
   min_normalized_distance: 0.02
   candidate_report_rows: 1000
