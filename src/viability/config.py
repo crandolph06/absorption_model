@@ -545,7 +545,7 @@ class ViabilityConfig:
             }
             if "required_constraints_for_verify" in search_data:
                 required_raw = search_data["required_constraints_for_verify"]
-                if not isinstance(required_raw, list):
+                if not isinstance(required_raw, (list, tuple)):
                     raise ValueError("search.required_constraints_for_verify must be a list")
                 search_values["required_constraints_for_verify"] = tuple(required_raw)
             elif requirements.allowed_unallocated_iron is not None:

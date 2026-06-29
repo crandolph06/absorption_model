@@ -35,6 +35,26 @@ POLICY_LABELS = {
     "max_manning_pct": "Maximum manning %",
     "flug_quota_per_phase": "FLUG quota / phase",
     "ipug_quota_per_phase": "IPUG quota / phase",
+    "flug_window_start": "FLUG entry (sorties)",
+    "ipug_window_start": "IPUG entry (sorties)",
+    "upgrade_sortie_fraction": "Upgrade sortie fraction",
+}
+
+POLICY_FILTER_OPERATOR_ANY = "any"
+POLICY_FILTER_OPERATOR_GT = "gt"
+POLICY_FILTER_OPERATOR_LT = "lt"
+POLICY_FILTER_OPERATOR_BETWEEN = "between"
+POLICY_FILTER_OPERATORS = (
+    POLICY_FILTER_OPERATOR_ANY,
+    POLICY_FILTER_OPERATOR_GT,
+    POLICY_FILTER_OPERATOR_LT,
+    POLICY_FILTER_OPERATOR_BETWEEN,
+)
+POLICY_FILTER_OPERATOR_LABELS = {
+    POLICY_FILTER_OPERATOR_ANY: "Any",
+    POLICY_FILTER_OPERATOR_GT: ">",
+    POLICY_FILTER_OPERATOR_LT: "<",
+    POLICY_FILTER_OPERATOR_BETWEEN: "Between",
 }
 
 STATIC_RAP_OPTIONS = ("a", "b", "c")
@@ -351,7 +371,7 @@ def load_dashboard_artifacts(paths: DashboardArtifactPaths) -> DashboardArtifact
     search_summary = _read_json_object(paths.search_summary)
     verification_summary = _read_json_object(paths.verification_summary)
     envelope_summary = _read_json_object(paths.envelope_summary)
-    _validate_envelope_paths(envelope_summary)
+    _validate_envelope_paths(envelope_summary, Path(paths.envelope_summary).parent)
     if paths.report is not None and not paths.report.exists():
         raise FileNotFoundError(f"Report artifact does not exist: {paths.report}")
     return DashboardArtifacts(
@@ -1022,7 +1042,10 @@ def run_direct_dynamic_schedule(
         )
 
 
-def envelope_plot_paths(envelope_summary: Mapping[str, Any]) -> list[tuple[str, Path, Path]]:
+def envelope_plot_paths(
+    envelope_summary: Mapping[str, Any],
+    base_dir: str | Path | None = None,
+) -> list[tuple[str, Path, Path]]:
     slices = envelope_summary.get("slices")
     if not isinstance(slices, list):
         raise ValueError("envelope_summary must include a list of slices")
@@ -1030,10 +1053,33 @@ def envelope_plot_paths(envelope_summary: Mapping[str, Any]) -> list[tuple[str, 
     for slice_summary in slices:
         x_name = str(slice_summary["x"])
         y_name = str(slice_summary["y"])
-        fixed = Path(str(slice_summary["fixed_plot_path"]))
-        projected = Path(str(slice_summary["projected_plot_path"]))
+        fixed = _resolve_artifact_path(slice_summary["fixed_plot_path"], base_dir)
+        projected = _resolve_artifact_path(slice_summary["projected_plot_path"], base_dir)
         paths.append((f"{x_name} vs {y_name}", fixed, projected))
     return paths
+
+
+def _resolve_artifact_path(
+    stored_path: str | Path,
+    base_dir: str | Path | None,
+) -> Path:
+    """Re-anchor a stored artifact path to ``base_dir``.
+
+    Envelope summaries record absolute paths from the machine that produced them
+    (e.g. an HPC scratch path). The plot files always live alongside the summary
+    JSON, so when ``base_dir`` is provided we prefer ``base_dir/<filename>`` if it
+    exists locally, falling back to the stored path otherwise.
+    """
+    original = Path(str(stored_path))
+    if base_dir is None:
+        return original
+    base = Path(base_dir)
+    if base.is_file():
+        base = base.parent
+    relocated = base / original.name
+    if relocated.exists():
+        return relocated
+    return original
 
 
 def _read_json_object(path: str | Path) -> dict[str, Any]:
@@ -1046,9 +1092,12 @@ def _read_json_object(path: str | Path) -> dict[str, Any]:
     return data
 
 
-def _validate_envelope_paths(envelope_summary: Mapping[str, Any]) -> None:
+def _validate_envelope_paths(
+    envelope_summary: Mapping[str, Any],
+    base_dir: str | Path | None = None,
+) -> None:
     missing_paths = []
-    for _label, fixed, projected in envelope_plot_paths(envelope_summary):
+    for _label, fixed, projected in envelope_plot_paths(envelope_summary, base_dir):
         for path in (fixed, projected):
             if not path.exists():
                 missing_paths.append(str(path))
@@ -1199,3 +1248,59 @@ def apply_constraint_gate(
         remaining_infeasible_count=int(len(filtered) - fully_feasible_count),
         binding_counts=binding_counts,
     )
+
+
+@dataclass(frozen=True)
+class PolicyVariableFilter:
+    variable: str
+    operator: str
+    bound: float
+    bound_high: float | None = None
+
+
+def filterable_policy_variables(
+    policy_variables: Mapping[str, VariableConfig],
+) -> list[str]:
+    """Return policy variable names with numeric (int/float) types."""
+    return [
+        name
+        for name, variable in policy_variables.items()
+        if variable.type in {"int", "float"}
+    ]
+
+
+def apply_policy_variable_filters(
+    candidates: pd.DataFrame,
+    filters: Sequence[PolicyVariableFilter],
+) -> pd.DataFrame:
+    """Keep rows matching every active policy-variable filter."""
+    if not filters:
+        return candidates.copy()
+    if candidates.empty:
+        return candidates.copy()
+
+    mask = pd.Series(True, index=candidates.index)
+    for spec in filters:
+        if spec.operator == POLICY_FILTER_OPERATOR_ANY:
+            continue
+        if spec.variable not in candidates.columns:
+            raise ValueError(
+                f"Verified candidates are missing policy column {spec.variable!r} "
+                "required by an active filter"
+            )
+        values = candidates[spec.variable].astype(float)
+        if spec.operator == POLICY_FILTER_OPERATOR_GT:
+            mask &= values > float(spec.bound)
+        elif spec.operator == POLICY_FILTER_OPERATOR_LT:
+            mask &= values < float(spec.bound)
+        elif spec.operator == POLICY_FILTER_OPERATOR_BETWEEN:
+            if spec.bound_high is None:
+                raise ValueError(
+                    f"Policy filter for {spec.variable!r} uses 'between' but bound_high is missing"
+                )
+            low = min(float(spec.bound), float(spec.bound_high))
+            high = max(float(spec.bound), float(spec.bound_high))
+            mask &= (values >= low) & (values <= high)
+        else:
+            raise ValueError(f"Unsupported policy filter operator {spec.operator!r}")
+    return candidates.loc[mask].copy()
