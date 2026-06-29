@@ -9,12 +9,18 @@ import streamlit as st
 from src.viability.dashboard import (
     DashboardArtifactPaths,
     DynamicDashboardArtifactPaths,
+    POLICY_FILTER_OPERATOR_ANY,
+    POLICY_FILTER_OPERATOR_BETWEEN,
+    POLICY_FILTER_OPERATOR_LABELS,
+    POLICY_FILTER_OPERATORS,
     POLICY_LABELS,
+    PolicyVariableFilter,
     STATIC_CONSTRAINT_LABELS,
     STATIC_CONSTRAINT_OPTIONS,
     STATIC_RAP_OPTIONS,
     STATIC_SCOPE_OPTIONS,
     apply_constraint_gate,
+    apply_policy_variable_filters,
     available_constraint_columns,
     constraint_name_from_column,
     constraint_relaxation_table,
@@ -24,6 +30,7 @@ from src.viability.dashboard import (
     dynamic_epoch_table,
     envelope_plot_paths,
     expected_active_learn_surrogate_path,
+    filterable_policy_variables,
     load_dynamic_dashboard_artifacts,
     load_dashboard_artifacts,
     local_feasible_sweep,
@@ -256,6 +263,105 @@ def _interval_figure(name: str, value: float, variable, intervals) -> go.Figure:
         paper_bgcolor="white",
     )
     return fig
+
+
+def _policy_filter_number_step(name: str, variable) -> float | int:
+    if variable.type == "int":
+        return 1
+    if name == "retention_rate":
+        return 0.001
+    if name == "max_manning_pct":
+        return 1.0
+    return 0.1
+
+
+def _policy_filter_value_input(
+    key: str,
+    *,
+    name: str,
+    variable,
+    default: float,
+    label: str,
+):
+    low = float(variable.low)
+    high = float(variable.high)
+    if variable.type == "int":
+        return st.number_input(
+            label,
+            min_value=int(low),
+            max_value=int(high),
+            value=int(round(default)),
+            step=1,
+            key=key,
+        )
+    step = float(_policy_filter_number_step(name, variable))
+    return st.number_input(
+        label,
+        min_value=low,
+        max_value=high,
+        value=float(default),
+        step=step,
+        format="%.3f" if name == "retention_rate" else None,
+        key=key,
+    )
+
+
+def _collect_policy_variable_filters(config) -> list[PolicyVariableFilter]:
+    filters: list[PolicyVariableFilter] = []
+    for name in filterable_policy_variables(config.policy.variables):
+        variable = config.policy.variables[name]
+        cols = st.columns([2, 1, 2, 2])
+        cols[0].caption(POLICY_LABELS.get(name, name))
+        operator = cols[1].selectbox(
+            "Filter",
+            options=POLICY_FILTER_OPERATORS,
+            format_func=lambda value: POLICY_FILTER_OPERATOR_LABELS[value],
+            key=f"policy_filter_op_{name}",
+            label_visibility="collapsed",
+        )
+        if operator == POLICY_FILTER_OPERATOR_ANY:
+            continue
+
+        default_low = float(variable.low)
+        default_high = float(variable.high)
+        if operator == POLICY_FILTER_OPERATOR_BETWEEN:
+            with cols[2]:
+                bound = _policy_filter_value_input(
+                    f"policy_filter_low_{name}",
+                    name=name,
+                    variable=variable,
+                    default=default_low,
+                    label="Low",
+                )
+            with cols[3]:
+                bound_high = _policy_filter_value_input(
+                    f"policy_filter_high_{name}",
+                    name=name,
+                    variable=variable,
+                    default=default_high,
+                    label="High",
+                )
+        else:
+            midpoint = (default_low + default_high) / 2.0
+            with cols[2]:
+                bound = _policy_filter_value_input(
+                    f"policy_filter_bound_{name}",
+                    name=name,
+                    variable=variable,
+                    default=midpoint,
+                    label="Value",
+                )
+            bound_high = None
+
+        filters.append(
+            PolicyVariableFilter(
+                variable=name,
+                operator=operator,
+                bound=float(bound),
+                bound_high=None if bound_high is None else float(bound_high),
+            )
+        )
+    return filters
 
 
 def _status_label(predicted_phi: float, conservative_phi: float) -> str:
@@ -982,6 +1088,20 @@ candidate_tab, envelope_tab, direct_tab, artifact_tab = st.tabs(
 with candidate_tab:
     constraint_columns = available_constraint_columns(artifacts.verified_candidates)
     gate_names = [constraint_name_from_column(column) for column in constraint_columns]
+    total_candidate_count = int(len(artifacts.verified_candidates))
+
+    with st.expander("Policy filters", expanded=False):
+        st.caption(
+            "Filter verified candidates by policy variable values. "
+            "All active filters must match."
+        )
+        policy_filters = _collect_policy_variable_filters(config)
+
+    policy_filtered = apply_policy_variable_filters(
+        artifacts.verified_candidates,
+        policy_filters,
+    )
+    policy_filtered_count = int(len(policy_filtered))
 
     st.subheader("Constraint Gate")
     st.caption(
@@ -996,15 +1116,19 @@ with candidate_tab:
     )
 
     gate = apply_constraint_gate(
-        artifacts.verified_candidates,
+        policy_filtered,
         must_meet=must_meet,
         config=config,
     )
 
-    metric_cols = st.columns(3)
-    metric_cols[0].metric("Pass gate", f"{gate.passed_count} / {gate.total_count}")
-    metric_cols[1].metric("Fully feasible", str(gate.fully_feasible_count))
-    metric_cols[2].metric("Infeasible after gate", str(gate.remaining_infeasible_count))
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("Total verified", str(total_candidate_count))
+    metric_cols[1].metric(
+        "After policy filters",
+        f"{policy_filtered_count} / {total_candidate_count}",
+    )
+    metric_cols[2].metric("Pass gate", f"{gate.passed_count} / {gate.total_count}")
+    metric_cols[3].metric("Fully feasible", str(gate.fully_feasible_count))
 
     if must_meet and gate.binding_counts:
         st.write("Binding constraint among remaining (for candidates still infeasible)")
@@ -1015,8 +1139,14 @@ with candidate_tab:
             ]
         ).sort_values("count", ascending=False)
         st.dataframe(binding_frame, width="stretch", hide_index=True)
+    elif policy_filters and policy_filtered_count < total_candidate_count:
+        st.caption(
+            f"{total_candidate_count - policy_filtered_count} candidate(s) hidden by policy filters."
+        )
 
-    if gate.filtered.empty:
+    if policy_filtered.empty:
+        st.warning("No verified candidates match the active policy filters.")
+    elif gate.filtered.empty:
         st.warning("No verified candidates meet all selected must-meet constraints.")
     else:
         base_columns = ["candidate_id", "design_id", "phi", "feasible"]
@@ -1052,7 +1182,10 @@ with envelope_tab:
                 "Envelope plots were skipped because no verified feasible candidates were available.",
             )
         )
-    plot_items = envelope_plot_paths(artifacts.envelope_summary)
+    plot_items = envelope_plot_paths(
+        artifacts.envelope_summary,
+        Path(artifacts.paths.envelope_summary).parent,
+    )
     if not plot_items and not artifacts.envelope_summary.get("plots_skipped"):
         st.write("No envelope slices were generated.")
     for label, fixed_path, projected_path in plot_items:
