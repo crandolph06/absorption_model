@@ -11,7 +11,9 @@ from src.viability.config import VariableConfig, load_config
 from src.viability.dashboard import (
     DashboardArtifactPaths,
     DynamicDashboardArtifactPaths,
+    PolicyVariableFilter,
     aggregate_history_trajectory,
+    apply_policy_variable_filters,
     constraint_relaxation_table,
     direct_verification_caveat,
     direct_verification_label,
@@ -778,6 +780,68 @@ def _write_dynamic_artifacts(
         ipug_diagnostic_dir=ipug_dir,
         paper_artifacts_dir=paper_dir,
     )
+
+
+class PolicyVariableFilterTest(unittest.TestCase):
+    def setUp(self):
+        self.config = load_config("configs/viability.example.yaml")
+        self.frame = _verified_candidates(self.config)
+
+    def test_apply_policy_variable_filters_supports_gt_lt_and_between(self):
+        gt = apply_policy_variable_filters(
+            self.frame,
+            [
+                PolicyVariableFilter(
+                    variable="annual_intake",
+                    operator="gt",
+                    bound=300.0,
+                )
+            ],
+        )
+        self.assertEqual(set(gt["candidate_id"]), {"candidate_best", "candidate_near"})
+
+        lt = apply_policy_variable_filters(
+            self.frame,
+            [
+                PolicyVariableFilter(
+                    variable="annual_intake",
+                    operator="lt",
+                    bound=300.0,
+                )
+            ],
+        )
+        self.assertEqual(set(lt["candidate_id"]), {"candidate_bad"})
+
+        between = apply_policy_variable_filters(
+            self.frame,
+            [
+                PolicyVariableFilter(
+                    variable="annual_intake",
+                    operator="between",
+                    bound=300.0,
+                    bound_high=320.0,
+                )
+            ],
+        )
+        self.assertEqual(set(between["candidate_id"]), {"candidate_near"})
+
+    def test_apply_policy_variable_filters_combine_with_logical_and(self):
+        filtered = apply_policy_variable_filters(
+            self.frame,
+            [
+                PolicyVariableFilter(
+                    variable="annual_intake",
+                    operator="gt",
+                    bound=300.0,
+                ),
+                PolicyVariableFilter(
+                    variable="retention_rate",
+                    operator="lt",
+                    bound=0.5,
+                ),
+            ],
+        )
+        self.assertEqual(filtered["candidate_id"].tolist(), ["candidate_near"])
 
 
 if __name__ == "__main__":
