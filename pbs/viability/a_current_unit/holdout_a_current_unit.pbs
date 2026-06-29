@@ -1,0 +1,38 @@
+#!/bin/bash
+#
+## Required PBS Directives --------------------------------------
+#PBS -A OUSAF55282GVD
+#PBS -q standard
+#PBS -l walltime=72:00:00
+#PBS -l select=1:ncpus=92:mpiprocs=1
+#PBS -l place=exclhost
+#
+## Optional PBS Directives --------------------------------------
+#PBS -N holdout_a_current_unit
+#PBS -j oe
+#PBS -o logs/viability/holdout_a_current_unit.out
+#PBS -e logs/viability/holdout_a_current_unit.err
+#
+## Execution Block ----------------------------------------------
+JOBID=$PBS_JOBID
+
+PROJECT_DIR="$HOME/absorption_model"
+cd "${PBS_O_WORKDIR:-$PROJECT_DIR}" || cd "$PROJECT_DIR" || exit 1
+
+source "$HOME/miniconda3/etc/profile.d/conda.sh"
+conda activate absorption
+
+echo "Checking Environment..."
+which python
+python --version
+
+export PYTHONUNBUFFERED=1
+
+mkdir -p "$PROJECT_DIR/logs/viability"
+export PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+
+python -u -m src.viability.cli select-holdout \
+  --config configs/viability/a_current_unit.yaml \
+  --evaluations outputs/viability/rap_a_current_unit/doe_128/evaluations.parquet \
+  --output outputs/viability/rap_a_current_unit/doe_128/holdout.parquet
+

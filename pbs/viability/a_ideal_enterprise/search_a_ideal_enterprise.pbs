@@ -1,0 +1,40 @@
+#!/bin/bash
+#
+## Required PBS Directives --------------------------------------
+#PBS -A OUSAF55282GVD
+#PBS -q standard
+#PBS -l walltime=72:00:00
+#PBS -l select=1:ncpus=92:mpiprocs=1
+#PBS -l place=exclhost
+#
+## Optional PBS Directives --------------------------------------
+#PBS -N search_a_ideal_enterprise
+#PBS -j oe
+#PBS -o logs/viability/search_a_ideal_enterprise.out
+#PBS -e logs/viability/search_a_ideal_enterprise.err
+#
+## Execution Block ----------------------------------------------
+JOBID=$PBS_JOBID
+
+PROJECT_DIR="$HOME/absorption_model"
+cd "${PBS_O_WORKDIR:-$PROJECT_DIR}" || cd "$PROJECT_DIR" || exit 1
+
+source "$HOME/miniconda3/etc/profile.d/conda.sh"
+conda activate absorption
+
+echo "Checking Environment..."
+which python
+python --version
+
+export PYTHONUNBUFFERED=1
+
+mkdir -p "$PROJECT_DIR/logs/viability"
+export PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+
+SURR=$(python -c 'import json; print(json.load(open("outputs/viability/rap_a_ideal_enterprise/active_learn/state.json"))["latest_model_path"])')
+
+python -u -m src.viability.cli search \
+  --config configs/viability/a_ideal_enterprise.yaml \
+  --surrogate "$SURR" \
+  --output-dir outputs/viability/rap_a_ideal_enterprise/search
+

@@ -1,0 +1,42 @@
+#!/bin/bash
+#
+## Required PBS Directives --------------------------------------
+#PBS -A OUSAF55282GVD
+#PBS -q standard
+#PBS -l walltime=72:00:00
+#PBS -l select=1:ncpus=92:mpiprocs=1
+#PBS -l place=exclhost
+#
+## Optional PBS Directives --------------------------------------
+#PBS -N plot_b_ideal_unit
+#PBS -j oe
+#PBS -o logs/viability/plot_b_ideal_unit.out
+#PBS -e logs/viability/plot_b_ideal_unit.err
+#
+## Execution Block ----------------------------------------------
+JOBID=$PBS_JOBID
+
+PROJECT_DIR="$HOME/absorption_model"
+cd "${PBS_O_WORKDIR:-$PROJECT_DIR}" || cd "$PROJECT_DIR" || exit 1
+
+source "$HOME/miniconda3/etc/profile.d/conda.sh"
+conda activate absorption
+
+echo "Checking Environment..."
+which python
+python --version
+
+export PYTHONUNBUFFERED=1
+
+mkdir -p "$PROJECT_DIR/logs/viability"
+export PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+
+SURR=$(python -c 'import json; print(json.load(open("outputs/viability/rap_b_ideal_unit/active_learn/state.json"))["latest_model_path"])')
+
+python -u -m src.viability.cli plot-envelope \
+  --config configs/viability/b_ideal_unit.yaml \
+  --surrogate "$SURR" \
+  --evaluations outputs/viability/rap_b_ideal_unit/doe_128/evaluations.parquet \
+  --verified-candidates outputs/viability/rap_b_ideal_unit/verify/verified_candidates.parquet \
+  --output-dir outputs/viability/rap_b_ideal_unit/envelope
+

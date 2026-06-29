@@ -1,0 +1,42 @@
+#!/bin/bash
+#
+## Required PBS Directives --------------------------------------
+#PBS -A OUSAF55282GVD
+#PBS -q standard
+#PBS -l walltime=72:00:00
+#PBS -l select=1:ncpus=92:mpiprocs=1
+#PBS -l place=exclhost
+#
+## Optional PBS Directives --------------------------------------
+#PBS -N report_a_optimistic_enterprise
+#PBS -j oe
+#PBS -o logs/viability/report_a_optimistic_enterprise.out
+#PBS -e logs/viability/report_a_optimistic_enterprise.err
+#
+## Execution Block ----------------------------------------------
+JOBID=$PBS_JOBID
+
+PROJECT_DIR="$HOME/absorption_model"
+cd "${PBS_O_WORKDIR:-$PROJECT_DIR}" || cd "$PROJECT_DIR" || exit 1
+
+source "$HOME/miniconda3/etc/profile.d/conda.sh"
+conda activate absorption
+
+echo "Checking Environment..."
+which python
+python --version
+
+export PYTHONUNBUFFERED=1
+
+mkdir -p "$PROJECT_DIR/logs/viability"
+export PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+
+python -u -m src.viability.cli make-report \
+  --config configs/viability/a_optimistic_enterprise.yaml \
+  --evaluations outputs/viability/rap_a_optimistic_enterprise/doe_128/evaluations.parquet \
+  --verified-candidates outputs/viability/rap_a_optimistic_enterprise/verify/verified_candidates.parquet \
+  --search-summary outputs/viability/rap_a_optimistic_enterprise/search/search_summary.json \
+  --verification-summary outputs/viability/rap_a_optimistic_enterprise/verify/verification_summary.json \
+  --envelope-summary outputs/viability/rap_a_optimistic_enterprise/envelope/envelope_summary.json \
+  --output outputs/viability/rap_a_optimistic_enterprise/report.md
+
