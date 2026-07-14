@@ -29,22 +29,20 @@ _REMAINING_SORTIES = [
 ]
 _UPGRADE_SMOOTH_WINDOW_PHASES = 5
 _POP_QUAL_STACK = [
-    ("wg_qty", "WG Qty", "#636EFA"),
-    ("fl_qty", "FL Qty", "#EF553B"),
+    ("staff_ips", "Staff IPs", "#636EFA"),
+    ("staff_fls", "Staff FLs", "#EF553B"),
     ("ip_qty", "IP Qty", "#00CC96"),
-    ("staff_fls", "Staff FLs", "#DC8F7E"),
-    ("staff_ips", "Staff IPs", "#78CAB4"),
+    ("fl_qty", "FL Qty", "#DC8F7E"),
+    ("wg_qty", "WG Qty", "#78CAB4"),
 ]
 _LINE_MIX_STACK = [
-    ("mqt_qty", "MQT"),
-    ("wg_line", "WG"),
-    ("flug_qty", "WG (FLUG)"),
-    ("fl_line", "FL"),
-    ("ipug_qty", "FL (IPUG)"),
-    ("ip_qty_avg", "IP"),
+    ("mqt_qty", "MQT", "#f59e0b"),
+    ("wg_line", "WG", "#93c5fd"),
+    ("flug_qty", "WG (FLUG)", "#ec4899"),
+    ("fl_line", "FL", "#fda4af"),
+    ("ipug_qty", "FL (IPUG)", "#6366f1"),
+    ("ip_qty_avg", "IP", "#00CC96"),
 ]
-_LINE_MIX_COLORS = ["#f59e0b", "#93c5fd", "#ec4899", "#fda4af", "#6366f1", "#00CC96"]
-
 
 def _stacked_area_figure(
     df_display: pd.DataFrame,
@@ -55,7 +53,7 @@ def _stacked_area_figure(
     value_fmt: str,
     legend_title: str | None = None,
 ) -> go.Figure:
-    """Stacked area with px translucency; bottom-to-top stack, top-first hover/legend."""
+    """Stacked area with px translucency; bottom-to-top stack, top-first legend."""
     labels_bottom_up = [label for _, label, _ in stack_spec]
     cols = [col for col, _, _ in stack_spec]
     colors = [color for _, _, color in stack_spec]
@@ -73,7 +71,6 @@ def _stacked_area_figure(
     )
     fig.update_traces(
         hovertemplate=f"%{{fullData.name}}: %{{y:{value_fmt}}}<extra></extra>",
-        hoverorder="reversed",
     )
     legend_cfg = dict(traceorder="reversed")
     if legend_title:
@@ -531,12 +528,24 @@ if "manning_results" in st.session_state:
             )
         )
 
+    for code, color in color_map.items():
+        fig_exp.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                marker=dict(size=12, symbol="square", color=color),
+                showlegend=True,
+                name=state_labels_dict.get(code, "Unknown"),
+            )
+        )
+
     fig_exp.add_trace(
         go.Scatter(
             x=df_display["timeline"],
             y=df_display["exp_rat"],
             mode="markers",
-            marker=dict(size=8, opacity=0),
+            marker=dict(size=0, opacity=0),
             hovertemplate="%{text}<br>Exp Ratio: %{y:.1%}<extra></extra>",
             text=[state_labels_dict.get(c, "Unknown") for c in codes],
             showlegend=False,
@@ -549,8 +558,8 @@ if "manning_results" in st.session_state:
         yaxis_title="Exp Ratio",
         yaxis=dict(tickformat=".0%", range=[0, 1]),
         height=500,
-        hovermode="closest",
-        showlegend=False,
+        hovermode="x unified",
+        legend=dict(title="RAP Status", yanchor="top", y=1, xanchor="left", x=1.02),
     )
     fig_exp.add_hline(y=0.60, line_dash="dot", line_color="green", annotation_text="Healthy")
     fig_exp.add_hline(y=0.45, line_dash="dash", line_color="orange", annotation_text="Sortie Inequity")
