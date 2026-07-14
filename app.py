@@ -678,12 +678,20 @@ with col_main:
     st.write("---")
     st.subheader("🧱 Sortie Composition")
     comp_utc = _utc_chart_filter("comp_utc", utc_wise)
-    col_comp_1, col_comp_2 = st.columns([2, 1])
+    col_comp_1, col_comp_2, col_comp_3 = st.columns([2, 1, 1])
     with col_comp_1:
         x_var_comp = st.selectbox("X-Axis Variable", x_options, index=3, key="comp_x") # Default exp_ratio
     with col_comp_2:
-        st.write("") 
+        st.write("")
         show_trends = st.toggle("Show Total Trendlines", value=False)
+    with col_comp_3:
+        st.write("")
+        red_blue_breakout = st.toggle(
+            "Red/Blue Breakout",
+            value=True,
+            key="comp_red_blue_breakout",
+            help="On: stacked Blue + Red per role. Off: single bar = Blue + Red combined.",
+        )
 
     x_vals_comp = sweep_ranges[x_var_comp]
     comp_sweep_min = float(np.min(x_vals_comp))
@@ -724,13 +732,45 @@ with col_main:
 
     fig_comp = go.Figure()
     colors = {'wg': ('#3b82f6', '#93c5fd'), 'fl': ('#8b5cf6', '#c4b5fd'), 'ip': ('#10b981', '#6ee7b7')}
-    
+
     for role in ['wg', 'fl', 'ip']:
-        fig_comp.add_trace(go.Bar(x=df_comp[x_var_comp], y=df_comp[f'{role}_blue_monthly'], name=f"{role.upper()} Blue", marker_color=colors[role][0], offsetgroup=role, hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'))
-        fig_comp.add_trace(go.Bar(x=df_comp[x_var_comp], y=df_comp[f'{role}_red_monthly'], name=f"{role.upper()} Red", marker_color=colors[role][1], offsetgroup=role, base=df_comp[f'{role}_blue_monthly'], hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'))
+        if red_blue_breakout:
+            fig_comp.add_trace(go.Bar(
+                x=df_comp[x_var_comp],
+                y=df_comp[f'{role}_blue_monthly'],
+                name=f"{role.upper()} Blue",
+                marker_color=colors[role][0],
+                offsetgroup=role,
+                hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>',
+            ))
+            fig_comp.add_trace(go.Bar(
+                x=df_comp[x_var_comp],
+                y=df_comp[f'{role}_red_monthly'],
+                name=f"{role.upper()} Red",
+                marker_color=colors[role][1],
+                offsetgroup=role,
+                base=df_comp[f'{role}_blue_monthly'],
+                hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>',
+            ))
+        else:
+            fig_comp.add_trace(go.Bar(
+                x=df_comp[x_var_comp],
+                y=df_comp[f'{role}_monthly'],
+                name=role.upper(),
+                marker_color=colors[role][0],
+                offsetgroup=role,
+                hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>',
+            ))
         if show_trends:
-            fig_comp.add_trace(go.Scatter(x=df_comp[x_var_comp], y=df_comp[f'{role}_monthly'], name=f"{role.upper()} Total Trend", line=dict(color=colors[role][0], width=2), mode='lines', hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>'))
-            
+            fig_comp.add_trace(go.Scatter(
+                x=df_comp[x_var_comp],
+                y=df_comp[f'{role}_monthly'],
+                name=f"{role.upper()} Total Trend",
+                line=dict(color=colors[role][0], width=2),
+                mode='lines',
+                hovertemplate='<b>%{x}</b><br>Sorties: %{y:.1f}<extra></extra>',
+            ))
+
     fig_comp.add_hline(y=9.0, line_dash="dot", line_color="#b91c1c", annotation_text="9.0 Inexp.")
     fig_comp.add_hline(y=8.0, line_dash="dot", line_color="#fca5a5", annotation_text="8.0 Exp.")
     fig_comp.update_layout(

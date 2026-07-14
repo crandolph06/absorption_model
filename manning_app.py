@@ -166,6 +166,26 @@ def _osc_status(history: pd.DataFrame) -> str:
     return "VIABLE"
 
 
+def _first_failure_timeline(history: pd.DataFrame) -> str | None:
+    """Earliest year/phase with self-termination or unallocated iron (physics path)."""
+    work = history.copy()
+    if "timeline" not in work.columns:
+        if not {"year", "phase"}.issubset(work.columns):
+            return None
+        work["timeline"] = work["year"].astype(str) + " P" + work["phase"].astype(str)
+
+    failed = pd.Series(False, index=work.index)
+    if "self_terminating_phase" in work.columns:
+        failed |= work["self_terminating_phase"].fillna(False).astype(bool)
+    if "unallocated_iron" in work.columns:
+        failed |= work["unallocated_iron"].fillna(0).astype(float) > 0
+    if not failed.any():
+        return None
+
+    hit = work.loc[failed, ["year", "phase", "timeline"]].sort_values(["year", "phase"])
+    return str(hit["timeline"].iloc[0])
+
+
 def _syllabus_carry_by_timeline(df: pd.DataFrame) -> pd.DataFrame:
     """CAF-wide sortie carry from allocator history (physics path)."""
     out = df.copy()
@@ -564,6 +584,28 @@ if "manning_results" in st.session_state:
     fig_exp.add_hline(y=0.60, line_dash="dot", line_color="green", annotation_text="Healthy")
     fig_exp.add_hline(y=0.45, line_dash="dash", line_color="orange", annotation_text="Sortie Inequity")
     fig_exp.add_hline(y=0.40, line_dash="dot", line_color="red", annotation_text="Broken")
+    first_fail = _first_failure_timeline(df)
+    if first_fail is not None and first_fail in set(x_data):
+        # add_vline annotations fail on categorical (string) x; use shape + annotation.
+        fail_color = "#9ca3af"  # medium grey — readable on light and dark themes
+        fig_exp.add_shape(
+            type="line",
+            x0=first_fail,
+            x1=first_fail,
+            y0=0,
+            y1=1,
+            yref="y",
+            line=dict(color=fail_color, width=2, dash="dash"),
+        )
+        fig_exp.add_annotation(
+            x=first_fail,
+            y=1,
+            yref="y",
+            text="First unallocated iron",
+            showarrow=False,
+            yanchor="bottom",
+            font=dict(size=11, color=fail_color),
+        )
     st.plotly_chart(fig_exp, width="stretch")
 
     st.divider()
