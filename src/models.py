@@ -264,6 +264,7 @@ class Pilot:
 
     def add_sortie(self, avg_sortie_dur: float, side: str = "Blue", *, single_ship: bool = False):
         self.sortie_phase += 1
+        self.sorties_flown += 1
         if single_ship:
             self.sortie_single_ship += 1
         if side == "Blue":

@@ -296,7 +296,7 @@ class CAFSimulation:
             sq,
             sq.pilots,
             debug_verbose=False,
-            pre_seed_upgrades=False,
+            # Layer 2 already enrolled via ``new_phase_upgrades`` (and B-course MQT).
             sim_config=self.sim_config,
             auto_graduate=False,
         )

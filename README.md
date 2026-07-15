@@ -108,7 +108,8 @@ absorption_model/
 | Function | Role |
 |----------|------|
 | `create_pilots()` | Build WG / FL / IP roster from config |
-| `run_phase_simulation()` | Full phase: upgrades → syllabus → CT → sim RAP (`sim_config` optional) |
+| `enroll_upgrade_students()` | Tag MQT/FLUG/IPUG from `cfg.*_students` (call before phase run) |
+| `run_phase_simulation()` | Full phase on enrolled roster: syllabus → CT → sim RAP (`sim_config` optional) |
 | `assign_sortie()` / `assign_sim()` | Pick lowest-utilization pilot (total events, then type-specific tie-break) |
 | `rap_assess()` | Per-cohort sortie RAP vs targets (`rap_state.py`) |
 

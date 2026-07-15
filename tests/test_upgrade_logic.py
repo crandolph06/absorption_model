@@ -18,13 +18,22 @@ from src.engine import (
     assign_sim,
     assign_sortie,
     create_pilots,
+    enroll_upgrade_students,
     phase_upgrade_metrics,
     process_syllabus_event,
     run_phase_simulation,
     select_upgrade_students,
     total_phase_capacity,
 )
-from src.models import MAX_MONTHLY_EVENTS, PHASE_DAYS_PER_NOTIONAL_MONTH, Pilot, Qual, SquadronConfig, Upgrade
+from src.models import (
+    Assignment,
+    MAX_MONTHLY_EVENTS,
+    PHASE_DAYS_PER_NOTIONAL_MONTH,
+    Pilot,
+    Qual,
+    SquadronConfig,
+    Upgrade,
+)
 from src.simulation_config import SimulationConfig
 from src.syllabi import (
     ContinuationBucket,
@@ -65,19 +74,20 @@ def _make_roster(
     return cfg, pilots
 
 
-def _run_phase(cfg, pilots, *, phase_days: int = 30, pre_seed: bool = True):
+def _run_phase(cfg, pilots, *, phase_days: int = 30, enroll: bool = False):
     # Legacy split (syllabus first, CT uses leftover): tests predate default fraction=1.0.
     sim = SimulationConfig(
         phase_length_days=phase_days,
         allocation_noise=0.0,
         upgrade_sortie_fraction=None,
     )
+    if enroll:
+        enroll_upgrade_students(cfg, pilots)
     with contextlib.redirect_stdout(io.StringIO()):
         return run_phase_simulation(
             cfg,
             pilots,
             sim_config=sim,
-            pre_seed_upgrades=pre_seed,
             mqt_syllabus=TEST_MQT_SYLLABUS,
             flug_syllabus=TEST_FLUG_SYLLABUS,
             ipug_syllabus=TEST_IPUG_SYLLABUS,
@@ -205,7 +215,7 @@ class TestCarryoverRetry(unittest.TestCase):
 
         cfg.ute = 3.0
         cfg.paa = 9
-        _run_phase(cfg, pilots, phase_days=30, pre_seed=True)
+        _run_phase(cfg, pilots, phase_days=30, enroll=False)
 
         self.assertEqual(len(_mqt_students(pilots)), 0)
         self.assertEqual(cfg.deferred_sortie_burden, 0)
@@ -220,10 +230,25 @@ class TestCarryoverRetry(unittest.TestCase):
 
         cfg.ute = 3.0
         cfg.paa = 9
-        _run_phase(cfg, pilots, phase_days=30, pre_seed=True)
+        _run_phase(cfg, pilots, phase_days=30, enroll=False)
 
         self.assertEqual(student.sortie_phase, 1.0)  # DCA only in phase 2 (not 3 from re-run)
         self.assertEqual(student.upgrade, Upgrade.NONE)
+
+
+class TestEnrollUpgradeStudents(unittest.TestCase):
+    def test_enroll_tags_from_cfg_counts(self):
+        cfg, pilots = _make_roster(wg=5, fl=2, ip=1, mqt=0)
+        cfg.mqt_students = 2
+        cfg.flug_students = 1
+        cfg.ipug_students = 1
+        mqt, flug, ipug = enroll_upgrade_students(cfg, pilots)
+        self.assertEqual(len(mqt), 2)
+        self.assertEqual(len(flug), 1)
+        self.assertEqual(len(ipug), 1)
+        self.assertEqual(sum(1 for p in pilots if p.upgrade == Upgrade.MQT), 2)
+        self.assertEqual(sum(1 for p in pilots if p.upgrade == Upgrade.FLUG), 1)
+        self.assertEqual(sum(1 for p in pilots if p.upgrade == Upgrade.IPUG), 1)
 
 
 class TestSelectUpgradeStudents(unittest.TestCase):
@@ -356,7 +381,7 @@ class TestContinuationTraining(unittest.TestCase):
             ute=10.0, paa=5, id=1, total_pilots=8, ip_qty=0, experience_ratio=0.0,
         )
         pilots = create_pilots(cfg)
-        _run_phase(cfg, pilots, phase_days=30, pre_seed=True)
+        _run_phase(cfg, pilots, phase_days=30, enroll=False)
 
         wg_pilots = [p for p in pilots if p.qual == Qual.WG]
         for p in wg_pilots:
@@ -376,6 +401,61 @@ class TestContinuationTraining(unittest.TestCase):
         _run_phase(cfg, pilots)
 
         self.assertEqual(_total_sorties(pilots), gross)
+
+    def test_leftover_always_applies_single_ship_cap(self):
+        """Leftover equity never bypasses the single-ship monthly cap."""
+        cfg = SquadronConfig(
+            ute=10.0,
+            paa=8,
+            id=1,
+            total_pilots=20,
+            ip_qty=1,
+            experience_ratio=1 / 20,
+            mqt_students=0,
+            flug_students=0,
+            ipug_students=0,
+        )
+        pilots = create_pilots(cfg)
+        _run_phase(cfg, pilots, phase_days=30, enroll=False)
+
+        months = 30.0 / PHASE_DAYS_PER_NOTIONAL_MONTH
+        for p in pilots:
+            if p.upgrade == Upgrade.MQT:
+                continue
+            self.assertLessEqual(
+                p.sortie_single_ship,
+                months * 1.0 + 1e-9,
+                msg="leftover must not exceed single-ship monthly cap",
+            )
+        # Scarce supervisors → FL shortfall → single-ship WG → leftover iron.
+        self.assertGreater(cfg.unallocated_iron, 0)
+        self.assertTrue(cfg.self_terminating_phase)
+
+    def test_ct_excludes_staff_from_sortie_iron(self):
+        """Staff FLs/IPs must not receive CT, syllabus support, or sim RAP."""
+        cfg, pilots = _make_roster(wg=6, fl=2, ip=2, mqt=0, ute=10.0, paa=12)
+        staffed = 0
+        for p in pilots:
+            if p.qual in (Qual.FL, Qual.IP) and staffed < 2:
+                p.current_assignment = Assignment.STAFF
+                staffed += 1
+        self.assertEqual(staffed, 2)
+
+        _run_phase(cfg, pilots, phase_days=30, enroll=False)
+
+        for p in pilots:
+            if p.current_assignment == Assignment.STAFF:
+                self.assertEqual(p.sortie_phase, 0.0, msg="staff must not fly CT/support")
+                self.assertEqual(p.sim_phase, 0.0, msg="staff must not receive sim RAP")
+                self.assertFalse(rules.can_fill_seat(p, Qual.FL))
+                self.assertFalse(rules.can_fill_seat(p, Qual.IP))
+                self.assertFalse(rules.can_fill_seat(p, Qual.WG))
+        line_sup = [
+            p for p in pilots
+            if p.current_assignment == Assignment.LINE and p.qual in (Qual.FL, Qual.IP)
+        ]
+        self.assertTrue(line_sup)
+        self.assertGreater(sum(p.sortie_phase for p in line_sup), 0.0)
 
 
 class TestSimRapAllocation(unittest.TestCase):
@@ -504,7 +584,7 @@ class TestPipelineSelfTermination(unittest.TestCase):
             ute=10.0, paa=5, id=1, total_pilots=8, ip_qty=0, experience_ratio=0.0,
         )
         pilots = create_pilots(cfg)
-        _run_phase(cfg, pilots, phase_days=30, pre_seed=True)
+        _run_phase(cfg, pilots, phase_days=30, enroll=False)
 
         self.assertGreater(cfg.unallocated_iron, 0)
         self.assertTrue(cfg.self_terminating_phase)
@@ -528,7 +608,7 @@ class TestPipelineSelfTermination(unittest.TestCase):
                 tagged += 1
                 if tagged >= 6:
                     break
-        _run_phase(cfg, pilots, phase_days=30, pre_seed=False)
+        _run_phase(cfg, pilots, phase_days=30, enroll=False)
 
         if cfg.pipeline_deferred_due_to_ip:
             self.assertTrue(cfg.deferral_due_to_ip)
@@ -574,7 +654,6 @@ class TestUpgradeSortieFraction(unittest.TestCase):
                 cfg,
                 pilots,
                 sim_config=sim,
-                pre_seed_upgrades=True,
                 auto_graduate=False,
             )
 

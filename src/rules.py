@@ -1,9 +1,11 @@
-from src.models import Pilot, Qual, Upgrade
+from src.models import Assignment, Pilot, Qual, Upgrade
 
 
 def can_start_upgrade(pilot: Pilot, upgrade_type: Upgrade) -> bool:
     # Pilots already in an upgrade cannot start another
     if pilot.upgrade is not Upgrade.NONE:
+        return False
+    if not pilot.active or pilot.current_assignment is not Assignment.LINE:
         return False
 
     if upgrade_type in (Upgrade.MQT, Upgrade.FLUG):
@@ -17,8 +19,13 @@ def can_start_upgrade(pilot: Pilot, upgrade_type: Upgrade) -> bool:
 
 def can_fill_seat(pilot: Pilot, min_qual: Qual) -> bool:
     """
-    Master rule: Can this pilot sit in this seat for this specific syllabus event?
+    Master rule: Can this pilot sit in this seat for this specific syllabus/CT event?
+
+    Only active line pilots fly. Staff / training billets never take seats or CT.
     """
+    if not pilot.active or pilot.current_assignment is not Assignment.LINE:
+        return False
+
     # Backup -- no MQT flying anything other than MQT upgrade sorties.
     if pilot.upgrade is Upgrade.MQT:
         return False

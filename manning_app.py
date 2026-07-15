@@ -94,8 +94,40 @@ def _phase_moving_average(
     return series.rolling(window=w, center=True, min_periods=1).mean()
 
 
+def _caf_pooled_qual_rate(
+    work: pd.DataFrame,
+    *,
+    rate_col: str,
+    count_col: str,
+) -> pd.Series:
+    """
+    CAF-wide mean rate for one qual: average over all pilots of that qual.
+
+    Squadron history rows store per-squadron means. Pooling as
+    ``sum(squadron_mean * squadron_count) / sum(squadron_count)`` equals the
+    mean over every pilot of that qual in the CAF for the phase.
+    """
+    if rate_col not in work.columns or count_col not in work.columns:
+        return pd.Series(0.0, index=work.index[:0], dtype=float)
+
+    counts = work[count_col].astype(float).clip(lower=0.0)
+    rates = work[rate_col].astype(float)
+    numerator = (rates * counts).groupby(
+        [work["year"], work["phase"], work["timeline"]], sort=False
+    ).sum()
+    denominator = counts.groupby(
+        [work["year"], work["phase"], work["timeline"]], sort=False
+    ).sum()
+    pooled = numerator / denominator.replace(0.0, np.nan)
+    return pooled.fillna(0.0)
+
+
 def build_df_display(df: pd.DataFrame) -> pd.DataFrame:
-    """CAF-wide aggregation per phase with per-squadron averages for line mix."""
+    """CAF-wide aggregation per phase.
+
+    Qual sortie/sim rates are averages across **all** CAF line pilots of that
+    qual (WG / FL / IP), not an average of squadron averages.
+    """
     work = df.copy()
     work["timeline"] = work["year"].astype(str) + " P" + work["phase"].astype(str)
 
@@ -104,7 +136,10 @@ def build_df_display(df: pd.DataFrame) -> pd.DataFrame:
             work[col] = 0
     work["wg_line"] = (work["wg_qty"] - work["mqt_qty"] - work["flug_qty"]).clip(lower=0)
     work["fl_line"] = (work["fl_qty"] - work["ipug_qty"]).clip(lower=0)
+    # Non-MQT WGs match the cohort used for wg_rate_* in store_stats_from_physics.
+    work["wg_rate_count"] = (work["wg_qty"] - work["mqt_qty"]).clip(lower=0)
 
+    group_keys = ["year", "phase", "timeline"]
     agg = {
         "wg_qty": "sum",
         "fl_qty": "sum",
@@ -117,36 +152,46 @@ def build_df_display(df: pd.DataFrame) -> pd.DataFrame:
         "percent_manned": "mean",
         "separated": "sum",
         "retained": "sum",
-        "wg_rate_mo": "mean",
-        "fl_rate_mo": "mean",
-        "ip_rate_mo": "mean",
         "mqt_qty": "mean",
         "flug_qty": "mean",
         "ipug_qty": "mean",
         "wg_line": "mean",
         "fl_line": "mean",
     }
-    for col in (
-        "wg_rate_blue", "fl_rate_blue", "ip_rate_blue",
-        "wg_rate_sim", "fl_rate_sim", "ip_rate_sim",
+    out = work.groupby(group_keys, as_index=False).agg(agg)
+
+    for rate_col, count_col in (
+        ("wg_rate_mo", "wg_rate_count"),
+        ("fl_rate_mo", "fl_qty"),
+        ("ip_rate_mo", "ip_qty"),
+        ("wg_rate_blue", "wg_rate_count"),
+        ("fl_rate_blue", "fl_qty"),
+        ("ip_rate_blue", "ip_qty"),
+        ("wg_rate_sim", "wg_rate_count"),
+        ("fl_rate_sim", "fl_qty"),
+        ("ip_rate_sim", "ip_qty"),
     ):
-        if col in work.columns:
-            agg[col] = "mean"
+        pooled = _caf_pooled_qual_rate(work, rate_col=rate_col, count_col=count_col)
+        if pooled.empty:
+            out[rate_col] = 0.0
+            continue
+        pooled_df = pooled.rename(rate_col).reset_index()
+        out = out.drop(columns=[rate_col], errors="ignore").merge(
+            pooled_df, on=group_keys, how="left"
+        )
+        out[rate_col] = out[rate_col].fillna(0.0)
 
-    out = work.groupby(["year", "phase", "timeline"], as_index=False).agg(agg).reset_index()
-
-    ip_avg = work.groupby(["year", "phase", "timeline"], as_index=False).agg(
+    ip_avg = work.groupby(group_keys, as_index=False).agg(
         ip_qty_avg=("ip_qty", "mean")
     )
-    out = out.merge(ip_avg, on=["year", "phase", "timeline"], how="left")
+    out = out.merge(ip_avg, on=group_keys, how="left")
 
-    for col in ("wg_rate_blue", "fl_rate_blue", "ip_rate_blue"):
-        if col not in out.columns:
-            out[col] = 0.0
-    for col in ("wg_rate_sim", "fl_rate_sim", "ip_rate_sim"):
-        if col not in out.columns:
-            out[col] = 0.0
-    for col in ("mqt_qty", "flug_qty", "ipug_qty", "wg_line", "fl_line", "ip_qty_avg"):
+    for col in (
+        "wg_rate_mo", "fl_rate_mo", "ip_rate_mo",
+        "wg_rate_blue", "fl_rate_blue", "ip_rate_blue",
+        "wg_rate_sim", "fl_rate_sim", "ip_rate_sim",
+        "mqt_qty", "flug_qty", "ipug_qty", "wg_line", "fl_line", "ip_qty_avg",
+    ):
         if col not in out.columns:
             out[col] = 0.0
     return out
@@ -157,32 +202,57 @@ def _clean_syllabus_preds(raw: np.ndarray) -> np.ndarray:
     return np.where(vals < _SYLLABI_NEGLIGIBLE, 0.0, vals)
 
 
-def _osc_status(history: pd.DataFrame) -> str:
-    """FAILED if any squadron-phase hit allocator self-termination; else VIABLE."""
-    if "self_terminating_phase" not in history.columns:
+def _phase_frac_with_unallocated_iron(history: pd.DataFrame) -> pd.DataFrame:
+    """Per year/phase: fraction of squadrons with unallocated iron > 0."""
+    work = history.copy()
+    if not {"year", "phase"}.issubset(work.columns):
+        return pd.DataFrame(columns=["year", "phase", "timeline", "frac_iron"])
+    if "unallocated_iron" not in work.columns:
+        return pd.DataFrame(columns=["year", "phase", "timeline", "frac_iron"])
+    if "timeline" not in work.columns:
+        work["timeline"] = work["year"].astype(str) + " P" + work["phase"].astype(str)
+
+    work["has_iron"] = work["unallocated_iron"].fillna(0).astype(float) > 0
+    by_phase = (
+        work.groupby(["year", "phase", "timeline"], sort=False)
+        .agg(n_sq=("has_iron", "size"), n_iron=("has_iron", "sum"))
+        .reset_index()
+    )
+    by_phase["frac_iron"] = by_phase["n_iron"] / by_phase["n_sq"].replace(0, pd.NA)
+    return by_phase
+
+
+def _osc_status(
+    history: pd.DataFrame,
+    *,
+    min_frac_with_iron: float = 0.5,
+) -> str:
+    """FAILED if any phase has more than ``min_frac_with_iron`` units with leftover iron."""
+    by_phase = _phase_frac_with_unallocated_iron(history)
+    if by_phase.empty or "frac_iron" not in by_phase.columns:
         return "VIABLE"
-    if history["self_terminating_phase"].fillna(False).astype(bool).any():
+    if (by_phase["frac_iron"] > min_frac_with_iron).any():
         return "FAILED"
     return "VIABLE"
 
 
-def _first_failure_timeline(history: pd.DataFrame) -> str | None:
-    """Earliest year/phase with self-termination or unallocated iron (physics path)."""
-    work = history.copy()
-    if "timeline" not in work.columns:
-        if not {"year", "phase"}.issubset(work.columns):
-            return None
-        work["timeline"] = work["year"].astype(str) + " P" + work["phase"].astype(str)
-
-    failed = pd.Series(False, index=work.index)
-    if "self_terminating_phase" in work.columns:
-        failed |= work["self_terminating_phase"].fillna(False).astype(bool)
-    if "unallocated_iron" in work.columns:
-        failed |= work["unallocated_iron"].fillna(0).astype(float) > 0
-    if not failed.any():
+def _first_failure_timeline(
+    history: pd.DataFrame,
+    *,
+    min_frac_with_iron: float = 0.5,
+) -> str | None:
+    """
+    Earliest year/phase where more than ``min_frac_with_iron`` of squadrons
+    still have unallocated iron (physics path). Same rule as OSC Status.
+    """
+    by_phase = _phase_frac_with_unallocated_iron(history)
+    if by_phase.empty:
         return None
-
-    hit = work.loc[failed, ["year", "phase", "timeline"]].sort_values(["year", "phase"])
+    hit = by_phase[by_phase["frac_iron"] > min_frac_with_iron].sort_values(
+        ["year", "phase"]
+    )
+    if hit.empty:
+        return None
     return str(hit["timeline"].iloc[0])
 
 
@@ -601,10 +671,14 @@ if "manning_results" in st.session_state:
             x=first_fail,
             y=1,
             yref="y",
-            text="First unallocated iron",
+            text="Majority unallocated iron",
             showarrow=False,
             yanchor="bottom",
             font=dict(size=11, color=fail_color),
+        )
+        st.caption(
+            f"First phase with **>50% of squadrons** still holding unallocated iron: "
+            f"**{first_fail}** (same rule as OSC Status)."
         )
     st.plotly_chart(fig_exp, width="stretch")
 
@@ -619,10 +693,15 @@ if "manning_results" in st.session_state:
         key="manning_ops_health_view",
         help=(
             "Sorties only: solid = all sorties, dotted = blue sorties. "
-            "Sorties + Sims: solid = sorties + sims, dotted = blue sorties + sims."
+            "Sorties + Sims: solid = sorties + sims, dotted = blue sorties + sims. "
+            "The monthly event capacity cap (20) applies to sorties + sims combined."
         ),
     )
     include_sims = ops_view == "Sorties + Sims"
+    st.caption(
+        "FL / IP / WG rates average **all CAF active line pilots of that qual** "
+        "(headcount-weighted across squadrons)."
+    )
 
     fig_health = go.Figure()
     for sortie_col, blue_col, sim_col, qual_label, color in (
@@ -665,6 +744,13 @@ if "manning_results" in st.session_state:
 
     fig_health.add_hline(y=9.0, line_dash="dot", line_color="red", annotation_text="Inexp.")
     fig_health.add_hline(y=8.0, line_dash="dot", line_color="orange", annotation_text="Exp.")
+    if include_sims:
+        fig_health.add_hline(
+            y=20.0,
+            line_dash="dash",
+            line_color="#9ca3af",
+            annotation_text="Event cap (20)",
+        )
     fig_health.add_trace(
         go.Scatter(
             x=df_display["timeline"],

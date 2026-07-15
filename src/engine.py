@@ -222,13 +222,31 @@ def assess_pipeline_self_termination(
     }
 
 
+def _ct_line_candidates(pilots: List[Pilot]) -> List[Pilot]:
+    """Active line pilots eligible for continuation / leftover iron (excludes staff)."""
+    return [
+        p for p in pilots
+        if p.active
+        and p.current_assignment == Assignment.LINE
+        and p.upgrade != Upgrade.MQT
+    ]
+
+
+def _line_sim_rap_candidates(pilots: List[Pilot]) -> List[Pilot]:
+    """Active line pilots only — staff do not receive sim RAP."""
+    return [
+        p for p in pilots
+        if p.active and p.current_assignment == Assignment.LINE
+    ]
+
+
 def _can_assign_more_ct_sorties(
     pilots: List[Pilot],
     phase_length_days: float,
     single_ship_monthly_cap: float,
 ) -> bool:
     """Whether another CT sortie could still be assigned under cap and seat rules."""
-    ct_candidates = [p for p in pilots if p.upgrade != Upgrade.MQT]
+    ct_candidates = _ct_line_candidates(pilots)
 
     supervisors = [
         p for p in ct_candidates
@@ -274,6 +292,22 @@ def select_upgrade_students(pilots: List[Pilot], upgrade_type: Upgrade, count: i
         p.upgrade = upgrade_type
         
     return selected
+
+
+def enroll_upgrade_students(
+    cfg: SquadronConfig,
+    pilots: List[Pilot],
+) -> tuple[List[Pilot], List[Pilot], List[Pilot]]:
+    """Tag MQT/FLUG/IPUG students from ``cfg.*_students`` counts.
+
+    Call this *before* ``run_phase_simulation`` when enrollment is quota-driven
+    (single-phase sweeps / dashboard). Long-term CAF physics enrolls via
+    ``SquadronConfig.new_phase_upgrades`` (and B-course MQT) instead.
+    """
+    mqt = select_upgrade_students(pilots, Upgrade.MQT, cfg.mqt_students)
+    flug = select_upgrade_students(pilots, Upgrade.FLUG, cfg.flug_students)
+    ipug = select_upgrade_students(pilots, Upgrade.IPUG, cfg.ipug_students)
+    return mqt, flug, ipug
 
 # ----------------------
 # Allocation Helpers
@@ -361,12 +395,17 @@ def _type_specific_event_count(p: Pilot, event_type: EventType, side: str = "Blu
     return p.sortie_blue_phase
 
 
-_QUAL_RANK = {Qual.WG: 0, Qual.FL: 1, Qual.IP: 2}
+_QUAL_RANK = {"WG": 0, "FL": 1, "IP": 2}
+
+
+def _qual_value(qual) -> str:
+    """Normalize Qual (or reload-stale enum twin) to its string value."""
+    return qual.value if hasattr(qual, "value") else str(qual)
 
 
 def _qual_rank(p: Pilot) -> int:
     """Tie-breaker: prefer WG over FL over IP when event loads are equal."""
-    return _QUAL_RANK[p.qual]
+    return _QUAL_RANK.get(_qual_value(p.qual), 99)
 
 
 def _allocation_sort_key(
@@ -381,15 +420,15 @@ def _allocation_sort_key(
 
 
 def _deterministic_blue_sortie_key(p: Pilot) -> tuple:
-    return (p.sortie_phase + p.sim_phase, p.sortie_blue_phase, _QUAL_RANK[p.qual])
+    return (p.sortie_phase + p.sim_phase, p.sortie_blue_phase, _qual_rank(p))
 
 
 def _deterministic_red_sortie_key(p: Pilot) -> tuple:
-    return (p.sortie_phase + p.sim_phase, p.sortie_red_phase, _QUAL_RANK[p.qual])
+    return (p.sortie_phase + p.sim_phase, p.sortie_red_phase, _qual_rank(p))
 
 
 def _deterministic_sim_key(p: Pilot) -> tuple:
-    return (p.sortie_phase + p.sim_phase, p.sim_phase, _QUAL_RANK[p.qual])
+    return (p.sortie_phase + p.sim_phase, p.sim_phase, _qual_rank(p))
 
 
 def _phase_event_limit(phase_length_days: float) -> float | None:
@@ -878,15 +917,15 @@ def run_upgrade_program(
 # Continuation Training (CT)
 # ----------------------
 _CT_ROUND_ROBIN_ORDER = {
-    ("Blue", Qual.FL): 0,
-    ("Red", Qual.FL): 1,
-    ("Blue", Qual.WG): 2,
-    ("Red", Qual.WG): 3,
+    ("Blue", "FL"): 0,
+    ("Red", "FL"): 1,
+    ("Blue", "WG"): 2,
+    ("Red", "WG"): 3,
 }
 
 
 def _ct_bucket_round_robin_key(bucket: ContinuationBucket) -> int:
-    return _CT_ROUND_ROBIN_ORDER.get((bucket.side, bucket.min_qual), 99)
+    return _CT_ROUND_ROBIN_ORDER.get((bucket.side, _qual_value(bucket.min_qual)), 99)
 
 
 def _allocate_ct_buckets_round_robin(
@@ -1024,8 +1063,8 @@ def allocate_continuation_training(
     if remaining_capacity <= 0:
         return
 
-    # Identify CT candidates (anyone NOT in an active upgrade)
-    ct_candidates = [p for p in pilots if p.upgrade != Upgrade.MQT]
+    # Line CT only — staff FLs/IPs must not soak FL-seat iron (ops rates are line-only).
+    ct_candidates = _ct_line_candidates(pilots)
 
     if not ct_candidates:
         return
@@ -1112,14 +1151,16 @@ def allocate_leftover_sorties(
     total_capacity: int,
     phase_length_days: float,
     noise: float = 0.0,
+    single_ship_monthly_cap: float = 1.0,
 ) -> int:
     """
     Equity pass on remaining sortie iron after syllabus and CT.
 
-    No RAP filter — lowest-load line pilots receive extras until iron or
-    per-pilot event capacity is exhausted.
+    Always applies the single-ship monthly cap (independent of UTC-wise mode).
+    Lowest-load line pilots receive extras until iron, event capacity, or the
+    single-ship cap is exhausted. Staff are excluded (same as CT).
     """
-    ct_candidates = [p for p in pilots if p.upgrade != Upgrade.MQT]
+    ct_candidates = _ct_line_candidates(pilots)
     if not ct_candidates:
         return 0
 
@@ -1128,13 +1169,27 @@ def allocate_leftover_sorties(
     while _sorties_used(pilots) < total_capacity:
         side = next(sides)
         if assign_sortie_policy(
-            cfg, ct_candidates, phase_length_days, side, noise, mode="equity",
+            cfg,
+            ct_candidates,
+            phase_length_days,
+            side,
+            noise,
+            single_ship=True,
+            single_ship_monthly_cap=single_ship_monthly_cap,
+            mode="equity",
         ):
             assigned += 1
             continue
         other = "Red" if side == "Blue" else "Blue"
         if assign_sortie_policy(
-            cfg, ct_candidates, phase_length_days, other, noise, mode="equity",
+            cfg,
+            ct_candidates,
+            phase_length_days,
+            other,
+            noise,
+            single_ship=True,
+            single_ship_monthly_cap=single_ship_monthly_cap,
+            mode="equity",
         ):
             assigned += 1
             continue
@@ -1164,10 +1219,11 @@ def allocate_sim_rap(
     used_sims = int(round(sum(p.sim_phase for p in pilots)))
 
     max_phase_events = _phase_event_limit(phase_length_days)
+    line_pilots = _line_sim_rap_candidates(pilots)
     pilot_groups = (
-        [_utc_sim_pool(pilots, utc, phase_length_days) for utc in UTC_ALLOCATION_ORDER]
+        [_utc_sim_pool(line_pilots, utc, phase_length_days) for utc in UTC_ALLOCATION_ORDER]
         if utc_wise_allocation
-        else [pilots]
+        else [line_pilots]
     )
 
     if noise == 0.0 and max_phase_events is not None:
@@ -1236,7 +1292,6 @@ def run_phase_simulation(
     cfg: SquadronConfig,
     pilots: List[Pilot],
     debug_verbose: bool = False,
-    pre_seed_upgrades: bool = False,
     sim_config: Optional[SimulationConfig] = None,
     mqt_syllabus: Optional[List[SyllabusEvent]] = None,
     flug_syllabus: Optional[List[SyllabusEvent]] = None,
@@ -1244,6 +1299,12 @@ def run_phase_simulation(
     continuation_profile: Optional[ContinuationProfile] = None,
     auto_graduate: bool = True,
 ):
+    """Run one phase of sortie/sim allocation for an already-enrolled roster.
+
+    Students must already be tagged (``Pilot.upgrade``) before this call — via
+    ``enroll_upgrade_students``, ``new_phase_upgrades``, B-course intake, or
+    manual seeding. This function does not select new upgrade students.
+    """
     sim = sim_config or SimulationConfig()
     phase_length_days = float(sim.phase_length_days)
     phase_months = sim.phase_length_months
@@ -1263,23 +1324,18 @@ def run_phase_simulation(
     for p in pilots:
         p.reset_phase_counters()
 
-    if not pre_seed_upgrades:
-        syllabus_mqt = select_upgrade_students(pilots, Upgrade.MQT, cfg.mqt_students)
-        syllabus_flug = select_upgrade_students(pilots, Upgrade.FLUG, cfg.flug_students)
-        syllabus_ipug = select_upgrade_students(pilots, Upgrade.IPUG, cfg.ipug_students)
-    else:
-        syllabus_mqt = [
-            p for p in pilots
-            if p.upgrade == Upgrade.MQT and id(p) not in carryover_ids
-        ]
-        syllabus_flug = [
-            p for p in pilots
-            if p.upgrade == Upgrade.FLUG and id(p) not in carryover_ids
-        ]
-        syllabus_ipug = [
-            p for p in pilots
-            if p.upgrade == Upgrade.IPUG and id(p) not in carryover_ids
-        ]
+    syllabus_mqt = [
+        p for p in pilots
+        if p.upgrade == Upgrade.MQT and id(p) not in carryover_ids
+    ]
+    syllabus_flug = [
+        p for p in pilots
+        if p.upgrade == Upgrade.FLUG and id(p) not in carryover_ids
+    ]
+    syllabus_ipug = [
+        p for p in pilots
+        if p.upgrade == Upgrade.IPUG and id(p) not in carryover_ids
+    ]
 
     # Rank UTC slots on line pilots only (``upgrade == NONE``), after students are tagged.
     if utc_wise:
@@ -1324,12 +1380,18 @@ def run_phase_simulation(
     if debug_verbose:
         _print_allocation_debug(pilots, "CT")
 
-    if utc_wise:
-        allocate_leftover_sorties(
-            pilots, cfg, total_iron, phase_length_days, noise,
-        )
-        if debug_verbose:
-            _print_allocation_debug(pilots, "Leftover")
+    # Always soak remaining iron after CT under the single-ship monthly cap
+    # (UTC-wise must not change that physics).
+    allocate_leftover_sorties(
+        pilots,
+        cfg,
+        total_iron,
+        phase_length_days,
+        noise,
+        single_ship_monthly_cap=sim.single_ship_monthly_cap,
+    )
+    if debug_verbose:
+        _print_allocation_debug(pilots, "Leftover")
 
     # 6. Sim RAP (discrete allocation; syllabus sims already credited above)
     allocate_sim_rap(pilots, cfg, phase_length_days, noise, utc_wise_allocation=utc_wise)

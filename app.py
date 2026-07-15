@@ -10,7 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.engine import create_pilots, phase_upgrade_metrics, run_phase_simulation
+from src.engine import create_pilots, enroll_upgrade_students, phase_upgrade_metrics, run_phase_simulation
 from src.models import (
     NUM_FLS_UTC_1,
     NUM_FLS_UTC_2,
@@ -356,6 +356,7 @@ def _simulate_one_row(
     )
     try:
         pilots = create_pilots(cfg)
+        enroll_upgrade_students(cfg, pilots)
         with contextlib.redirect_stdout(io.StringIO()):
             final_pilots = run_phase_simulation(
                 cfg, pilots, sim_config=sim_config, auto_graduate=False,

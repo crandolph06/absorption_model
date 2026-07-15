@@ -21,7 +21,7 @@ from sklearn.gaussian_process.kernels import ConstantKernel, Matern, WhiteKernel
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
 
-from src.engine import create_pilots, phase_upgrade_metrics, run_phase_simulation
+from src.engine import create_pilots, enroll_upgrade_students, phase_upgrade_metrics, run_phase_simulation
 from src.models import SquadronConfig
 from src.rap_state import (
     mqt_observed_sim_metrics,
@@ -396,6 +396,7 @@ def evaluate_one(row: pd.Series, sim_config: SimulationConfig) -> dict[str, floa
         id=99,
     )
     pilots = create_pilots(cfg)
+    enroll_upgrade_students(cfg, pilots)
     final_pilots = run_phase_simulation(cfg, pilots, sim_config=sim_config)
     rap, blue_rap, _red = rap_assess(final_pilots)
     sim_metrics = sim_rap_metrics(final_pilots)

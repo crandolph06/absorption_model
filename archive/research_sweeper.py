@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
-from src.engine import run_phase_simulation, create_pilots
+from src.engine import run_phase_simulation, create_pilots, enroll_upgrade_students
 from src.models import SquadronConfig, Qual, Upgrade
 from src.simulation_config import DEFAULT_PHASE_LENGTH_DAYS, SimulationConfig
 from src.rap_state import rap_assess, rap_state_code, rap_state_label, mqt_observed_sortie_metrics
@@ -55,6 +55,7 @@ def run_research_sweep(average_iterations=True):
                                     for i in range(ITERATIONS_PER_CONFIG):
                                         try:
                                             pilots = create_pilots(cfg)
+                                            enroll_upgrade_students(cfg, pilots)
                                             final_pilots = run_phase_simulation(cfg, pilots, sim_config=SIM_CONFIG)
                                             rap_dict, blue_rap_dict, red_dict = rap_assess(final_pilots)
                                             mqt_sorties = mqt_observed_sortie_metrics(final_pilots)

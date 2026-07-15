@@ -3,7 +3,7 @@ import numpy as np
 import os
 import itertools
 from concurrent.futures import ProcessPoolExecutor
-from src.engine import run_phase_simulation, create_pilots, phase_upgrade_metrics
+from src.engine import run_phase_simulation, create_pilots, enroll_upgrade_students, phase_upgrade_metrics
 from src.models import SquadronConfig
 from src.simulation_config import DEFAULT_PHASE_LENGTH_DAYS, SimulationConfig
 from src.rap_state import (
@@ -86,6 +86,7 @@ def process_single_config(args):
         try:
             # We MUST create pilots to give the engine containers for sorties
             pilots = create_pilots(cfg)
+            enroll_upgrade_students(cfg, pilots)
             final_pilots = run_phase_simulation(cfg, pilots, sim_config=SIM_CONFIG)
             
             rap, blue_rap, red = rap_assess(final_pilots)
